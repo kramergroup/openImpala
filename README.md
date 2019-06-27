@@ -1,6 +1,6 @@
-# Image Based Battery Modelling
+# OpenImpala
 
-A Git repository to store all files relating to my PhD, the development of a finite differences image based battery modelling framework.
+OPEN source IMage based PArallelisable Linear Algebra solver
 
 ## Dockerized compile environment
 
