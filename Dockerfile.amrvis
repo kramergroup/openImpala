@@ -1,0 +1,61 @@
+# FROM fedora as build
+
+# RUN dnf install -y gcc git make python gcc-c++ gcc-gfortran hostname motif-devel m4 libXpm
+# RUN mkdir -p /src
+
+# ## Obtain source files
+# WORKDIR /src
+
+# RUN git clone https://github.com/AMReX-Codes/amrex.git
+# RUN git clone https://github.com/AMReX-Codes/Amrvis
+# RUN git clone https://ccse.lbl.gov/pub/Downloads/volpack.git
+
+# RUN cd /src/volpack && \
+#     make
+
+# RUN cd /src/amrex && git checkout 260b531 
+
+# RUN cd /src/Amrvis && \
+#     git checkout ab2829ebee8f && \
+#     make DIM=1 && \
+#     make DIM=2 && \
+#     make DIM=3
+
+
+
+FROM ubuntu as build
+
+RUN apt-get update && \
+    apt-get install -y build-essential python git gfortran libmotif-dev m4 libxpm-dev libxext-dev libvolpack1-dev
+
+RUN mkdir -p /src
+
+## Obtain source files
+WORKDIR /src
+
+RUN git clone https://github.com/AMReX-Codes/amrex.git
+RUN git clone https://github.com/AMReX-Codes/Amrvis
+RUN git clone https://ccse.lbl.gov/pub/Downloads/volpack.git
+
+RUN cd /src/volpack && \
+    make
+
+RUN cd /src/amrex && git checkout 260b531 
+
+RUN cd /src/Amrvis && \
+    git checkout ab2829ebee8f && \
+    make DIM=1 && \
+    make DIM=2 && \
+    make DIM=3
+
+FROM ubuntu 
+
+RUN apt-get update && \
+    apt-get install -y libmotif-common libgfortran4 libxpm4 libxm4 libxext6 libvolpack1 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/Amrvis/*.gnu.ex /bin/
+
+WORKDIR /data
+
+CMD /bin/amrvis3d.gnu.ex
