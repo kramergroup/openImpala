@@ -1,10 +1,10 @@
-# Image Based Battery Modelling - Docker builds
+# OpenImpala - Docker builds
 
 This branch holds dockerized amrex build environments for the master branch.
 
 ## Amrex Build Environment 
 
-The default container (`Dockefile`) provides a build environment for Amrex. It pulls
+The default container (`Dockerfile`) provides a build environment for Amrex. It pulls
 the latests Amrex source from their [git repository](https://github.com/AMReX-Codes/amrex), builds the Amrex library with embedded boundary support, but without MPI support, and constructs a minimal container with the compiled libraries. Only the header files are available in the runtime environment.
 
 | Folder             | Description         |
