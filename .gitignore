@@ -1,0 +1,7 @@
+tmp_build_dir
+build
+.DS_Store
+.vscode
+plt*
+phi*
+Backtrace*
