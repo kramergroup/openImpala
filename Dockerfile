@@ -15,9 +15,8 @@ RUN git clone https://github.com/AMReX-Codes/amrex.git && \
     make && \
     make install
 
-RUN curl -O https://computation.llnl.gov/projects/hypre-scalable-linear-solvers-multigrid-methods/download/hypre-2.11.2.tar.gz && \
-    tar xvzf hypre-2.11.2.tar.gz && \
-    cd hypre-2.11.2/src && \
+RUN git clone https://github.com/hypre-space/hypre.git && \
+    cd hypre/src && \
     ./configure && \
     make && \
     make install
@@ -34,9 +33,9 @@ RUN dnf install -y gcc git libtiff libtiff-devel make python gcc-c++ gcc-gfortra
 RUN mkdir -p /src
 
 COPY --from=amrex-build /src/amrex/tmp_install_dir/include /usr/include/amrex
-COPY --from=amrex-build /src/amrex/tmp_install_dir/lib/* /usr/lib64
-COPY --from=amrex-build /src/hypre-2.11.2/src/hypre/include /usr/include/hypre
-COPY --from=amrex-build /src/hypre-2.11.2/src/hypre/lib/* /usr/lib64
+COPY --from=amrex-build /src/amrex/tmp_install_dir/lib/* /usr/lib64/
+COPY --from=amrex-build /src/hypre/src/hypre/include /usr/include/hypre
+COPY --from=amrex-build /src/hypre/src/hypre/lib/* /usr/lib64
 
 ENV PATH="/usr/lib64/openmpi/bin:${PATH}"
 
