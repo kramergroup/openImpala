@@ -1,39 +1,40 @@
 #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"
 #include "TortuosityHypreFill_F.H"
+#include "VolumeFraction.H"
 #include <AMReX_MultiFab.H>
 #include <AMReX_PlotFileUtil.H>
 
 /**
- * 
+ *
  * Constructor
- * 
+ *
  */
-TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom, 
-                                 const amrex::BoxArray& ba, 
-                                 const amrex::DistributionMapping& dm, 
-                                 amrex::iMultiFab& mf, 
-                                 const int phase, 
+TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
+                                 const amrex::BoxArray& ba,
+                                 const amrex::DistributionMapping& dm,
+                                 amrex::iMultiFab& mf,
+                                 const int phase,
                                  const Direction dir,
-                                 const SolverType st) : m_geom(geom), m_ba(ba), m_dm(dm), 
-                                                        m_mf_phase(mf), m_phase(phase), 
-                                                        m_dir(dir), m_solvertype(st), 
+                                 const SolverType st) : m_geom(geom), m_ba(ba), m_dm(dm),
+                                                        m_mf_phase(mf), m_phase(phase),
+                                                        m_dir(dir), m_solvertype(st),
                                                         m_mf_phi(ba,dm,2,0),
                                                         m_first_call(true)
-{ 
+{
     preconditionPhaseFab();
     setupGrids();
     setupStencil();
-    setupMatrixEquation();   
+    setupMatrixEquation();
 }
 
 
 /**
- * 
+ *
  * Setup Grids
- * 
+ *
  */
-void TortuosityHypre::setupGrids() 
+void TortuosityHypre::setupGrids()
 {
 
   // 1 - Initialise the grid owned by this MPI rank
@@ -46,9 +47,9 @@ void TortuosityHypre::setupGrids()
     const amrex::Box bx = mfi.validbox();
     auto lo = TortuosityHypre::loV(bx);
     auto hi = TortuosityHypre::hiV(bx);
-    
+
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
-    
+
   }
 
   // 3 - Finish setup
@@ -57,15 +58,15 @@ void TortuosityHypre::setupGrids()
 
 
 /**
- * 
+ *
  * Setup stencil
- * 
+ *
  */
 void TortuosityHypre::setupStencil()
 {
   int size         = 7;
-  int offsets[][3] = {{0,0,0}, 
-                      {-1,0,0}, {1,0,0}, 
+  int offsets[][3] = {{0,0,0},
+                      {-1,0,0}, {1,0,0},
                       {0,-1,0}, {0,1,0},
                       {0,0,-1}, {0,0,1}};
 
@@ -79,7 +80,7 @@ void TortuosityHypre::setupStencil()
 
 }
 
-void TortuosityHypre::preconditionPhaseFab() 
+void TortuosityHypre::preconditionPhaseFab()
 {
 
   AMREX_ASSERT_WITH_MESSAGE(m_mf_phase.nGrow() > 0, "Phase fab should have ghost cells");
@@ -89,8 +90,8 @@ void TortuosityHypre::preconditionPhaseFab()
   for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi)
   {
       amrex::IArrayBox& fab = m_mf_phase[mfi];
-      const amrex::Box& fab_box = mfi.validbox(); 
-      
+      const amrex::Box& fab_box = mfi.validbox();
+
       tortuosity_remspot(BL_TO_FORTRAN_FAB(fab),
                          BL_TO_FORTRAN_BOX(fab_box),
                          BL_TO_FORTRAN_BOX(domain_box));
@@ -98,9 +99,9 @@ void TortuosityHypre::preconditionPhaseFab()
 }
 
 /**
- * 
+ *
  * Setup Matrix
- * 
+ *
  */
 void TortuosityHypre::setupMatrixEquation()
 {
@@ -126,11 +127,11 @@ void TortuosityHypre::setupMatrixEquation()
     // Determine if box is touching domain edge
     int lo[AMREX_SPACEDIM];
     int hi[AMREX_SPACEDIM];
-    for (int i=0; i<AMREX_SPACEDIM; ++i) 
+    for (int i=0; i<AMREX_SPACEDIM; ++i)
     {
       lo[i] = bx.loVect()[i];
       hi[i] = bx.hiVect()[i];
-    } 
+    }
 
     // Fill 7 point stencil through full domain
     int stencil_indices[7] = {0,1,2,3,4,5,6};
@@ -156,14 +157,14 @@ void TortuosityHypre::setupMatrixEquation()
 
 bool TortuosityHypre::solve()
 {
-  
+
   /* Create Solver */
   HYPRE_StructSolver solver;
   HYPRE_Int ierr;
   HYPRE_Int num_iterations;
   amrex::Real res;
 
-  switch (m_solvertype) 
+  switch (m_solvertype)
   {
     case Jacobi:
       HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &solver);
@@ -198,7 +199,7 @@ bool TortuosityHypre::solve()
       HYPRE_StructGMRESGetFinalRelativeResidualNorm(solver, &res);
       break;
   }
-    
+
   amrex::Print() << std::endl << num_iterations
                   << " Iterations, Relative Residual "
                   << res << std::endl;
@@ -233,7 +234,108 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       m_first_call = false;
       solve();
     }
-    return 0.0;
+
+    amrex::Real fluxlo = 0.0;
+    amrex::Real fluxhi = 0.0;
+    amrex::Real phisumlo = 0.0;
+    amrex::Real phisumhi = 0.0;
+    int num_phase_cells_0 = 0;
+    int num_phase_cells_1 = 0;
+    int num_phase_cells_2 = 0;
+    int num_phase_cells_3 = 0;
+
+    // Iterate over all boxes and count cells with value=m_phase
+    for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
+    {
+      const amrex::Box& box = mfi.validbox();
+      const amrex::IArrayBox& phase_fab = m_mf_phase[mfi];
+      const amrex::FArrayBox& phi_fab = m_mf_phi[mfi];
+
+      // Obtain Array4 from FArrayBox.  We can also do
+      //     Array4<Real> const& a = mf.array(mfi);
+      amrex::Array4<int const> const& phase_fab_4 = phase_fab.array();
+      amrex::Array4<amrex::Real const> const& phi_fab_4 = phi_fab.array();
+
+      size_t idx;
+      // Iterate over all cells in Box and threshold
+      const auto lo = lbound(box);
+      const auto hi = ubound(box);
+
+      // Sum all concentration values for each slice in x direction
+      const auto domain_min_x = m_geom.Domain().loVect()[0];
+      if ( lo.x == domain_min_x) {
+            for (int y = lo.y; y <= hi.y; ++y) {
+              for (int z = lo.z; z <= hi.z; ++z) {
+                if ( phase_fab_4(lo.x,y,z) == m_phase && phase_fab_4(lo.x+1,y,z) == m_phase ) {
+                  phisumlo += phi_fab_4(lo.x+1,y,z) - phi_fab_4(lo.x,y,z);
+                  num_phase_cells_0 += 1;
+              }
+            }
+        }
+      }
+
+      const auto domain_max_x = m_geom.Domain().hiVect()[0];;
+      if ( hi.x == domain_max_x) {
+            for (int y = lo.y; y <= hi.y; ++y) {
+              for (int z = lo.z; z <= hi.z; ++z) {
+                if ( phase_fab_4(hi.x,y,z) == m_phase && phase_fab_4(hi.x-1,y,z) == m_phase ) {
+                  phisumhi += phi_fab_4(hi.x,y,z) - phi_fab_4(hi.x-1,y,z);
+                  num_phase_cells_1 += 1;
+              }
+            }
+        }
+      }
+
+    }
+
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(phisumlo, amrex::ParallelContext::CommunicatorSub());
+      }
+
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(phisumhi, amrex::ParallelContext::CommunicatorSub());
+      }
+
+    // Total problem length in the x direction
+    auto length_x = m_geom.ProbLength(0);
+    auto length_y = m_geom.ProbLength(1);
+    auto length_z = m_geom.ProbLength(2);
+
+    // Cell size x direction
+    amrex::Real dx = m_geom.CellSize(0);
+    amrex::Real dy = m_geom.CellSize(1);
+    amrex::Real dz = m_geom.CellSize(2);
+
+    // Number of cells in the x direction
+    auto num_cell_x = m_geom.ProbHi(0)-m_geom.ProbLo(0)+1;
+
+    // Compute flux between adjacent slices
+    fluxlo = phisumlo / dx * (dy*dz);
+    fluxhi = phisumhi / dx * (dy*dz);
+
+    // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
+    amrex::Real flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
+
+    // Compute Volume Fractions
+    VolumeFraction vf(m_mf_phase, m_phase);
+    amrex::Real rel_diffusivity = (fluxlo+fluxhi)/2.0/flux_max;
+
+    amrex::Real tau = vf.value() / rel_diffusivity;
+
+    // Print volume fraction value
+    amrex::Print() << std::endl << " Volume Fraction: "
+                    << amrex::Real(vf.value()) << std::endl;
+
+    // Print all of fluxvect values
+    amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
+                    << rel_diffusivity << std::endl;
+
+    amrex::Print() << " Difference between top and bottom fluxes: " << abs(fluxlo - fluxhi) <<  std::endl;
+
+    return tau;
+
+
 }
 
 void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
@@ -251,7 +353,7 @@ void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
         xfab = &rfab;
         xfab->resize(reg);
     }
-    
+
     auto reglo = TortuosityHypre::loV(reg);
     auto reghi = TortuosityHypre::hiV(reg);
     HYPRE_StructVectorGetBoxValues(m_x, reglo.data(), reghi.data(), xfab->dataPtr());
@@ -265,28 +367,28 @@ void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
 
 void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp)
 {
-    
+
     for (amrex::MFIter mfi(phi); mfi.isValid(); ++mfi)
     {
         amrex::FArrayBox& fab = phi[mfi];
         const amrex::IArrayBox& phase_fab = m_mf_phase[mfi];
 
-        const amrex::Box& fab_box = mfi.validbox(); 
-        
+        const amrex::Box& fab_box = mfi.validbox();
+
         tortuosity_filct(BL_TO_FORTRAN_FAB(fab),
                          BL_TO_FORTRAN_FAB(phase_fab),
                          BL_TO_FORTRAN_BOX(fab_box),
                          &m_phase);
-    
+
     }
 }
 
 //**************** HELPER FUNCTIONS *********************************
 
 /**
- * 
+ *
  * Generate lower bounds array in HYPRE format for box
- * 
+ *
  */
 amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::loV (const amrex::Box& b) {
   const auto& v = b.loVect();
@@ -294,12 +396,12 @@ amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::loV (const amrex::Box& b
                        static_cast<HYPRE_Int>(v[1]),
                        static_cast<HYPRE_Int>(v[2]))};
 }
-    
+
 
 /**
- * 
+ *
  * Generate upper bounds array in HYPRE format for box
- * 
+ *
  */
 amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex::Box& b) {
   const auto& v = b.hiVect();

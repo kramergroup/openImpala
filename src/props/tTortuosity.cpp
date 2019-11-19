@@ -22,7 +22,7 @@
 
 #include <sstream>
 
-#define SAMPLE_TIFF_FILENAME "data/SampleData_3Phase.tif"
+#define SAMPLE_TIFF_FILENAME "../../data/SampleData_3Phase.tif"
 #define BOX_SIZE 32
 #define EPS 1e-10
 
@@ -69,7 +69,7 @@ int main (int argc, char* argv[])
     // Threshold image data
     reader.threshold(1,mf_phase);
 
-    // We have used a fab with one ghost cell to allow for stencil-type operations 
+    // We have used a fab with one ghost cell to allow for stencil-type operations
     // over the fab. This requires to distribute the ghost cells
     mf_phase.FillBoundary(geom.periodicity());
   }
@@ -79,7 +79,7 @@ int main (int argc, char* argv[])
 
   amrex::Real tau_value = tortuosity.value();
   amrex::Print() << "Tortuosity value: " << tau_value << std::endl;
-  
+
   } // Ensure amrex related destructors have been called before tearing down the whole thing
     // by putting everything in curly brackets.
   amrex::Finalize();
