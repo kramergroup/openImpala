@@ -7,7 +7,7 @@ LDFLAGS  := -L/usr/lib64 -lstdc++ -lm -lamrex -ltiff -lgfortran -lHYPRE
 INCLUDE  := -I/usr/include/amrex -I/usr/include/hypre
 
 
-# Directories 
+# Directories
 INC_DIR  := build/include
 APP_DIR  := build/apps
 TST_DIR  := build/tests
@@ -58,7 +58,7 @@ $(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(addprefix build/props/,VolumeF
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
-$(TST_DIR)/tTortuosity: tTortuosity.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o) build/io/TiffReader.o
+$(TST_DIR)/tTortuosity: tTortuosity.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
