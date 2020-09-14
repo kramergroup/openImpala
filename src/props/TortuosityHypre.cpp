@@ -245,6 +245,8 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     int num_phase_cells_3 = 0;
 
     // Iterate over all boxes and count cells with value=m_phase
+    if ( m_dir==0)
+    {
     for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     {
       const amrex::Box& box = mfi.validbox();
@@ -260,6 +262,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       // Iterate over all cells in Box and threshold
       const auto lo = lbound(box);
       const auto hi = ubound(box);
+
 
       // Sum all concentration values for each slice in x direction
       const auto domain_min_x = m_geom.Domain().loVect()[0];
@@ -287,6 +290,102 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       }
 
     }
+  }
+
+
+  else if ( m_dir==1)
+  {
+  for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
+  {
+    const amrex::Box& box = mfi.validbox();
+    const amrex::IArrayBox& phase_fab = m_mf_phase[mfi];
+    const amrex::FArrayBox& phi_fab = m_mf_phi[mfi];
+
+    // Obtain Array4 from FArrayBox.  We can also do
+    //     Array4<Real> const& a = mf.array(mfi);
+    amrex::Array4<int const> const& phase_fab_4 = phase_fab.array();
+    amrex::Array4<amrex::Real const> const& phi_fab_4 = phi_fab.array();
+
+    size_t idx;
+    // Iterate over all cells in Box and threshold
+    const auto lo = lbound(box);
+    const auto hi = ubound(box);
+
+
+    // Sum all concentration values for each slice in y direction
+    const auto domain_min_y = m_geom.Domain().loVect()[1];
+    if ( lo.y == domain_min_y) {
+          for (int x = lo.x; x <= hi.x; ++x) {
+            for (int z = lo.z; z <= hi.z; ++z) {
+              if ( phase_fab_4(x,lo.y,z) == m_phase && phase_fab_4(x,lo.y+1,z) == m_phase ) {
+                phisumlo += phi_fab_4(x,lo.y+1,z) - phi_fab_4(x,lo.y,z);
+                num_phase_cells_0 += 1;
+            }
+          }
+      }
+    }
+
+    const auto domain_max_y = m_geom.Domain().hiVect()[1];;
+    if ( hi.y == domain_max_y) {
+          for (int x = lo.x; x <= hi.x; ++x) {
+            for (int z = lo.z; z <= hi.z; ++z) {
+              if ( phase_fab_4(x,hi.y,z) == m_phase && phase_fab_4(x,hi.y-1,z) == m_phase ) {
+                phisumhi += phi_fab_4(x,hi.y,z) - phi_fab_4(x,hi.y-1,z);
+                num_phase_cells_1 += 1;
+            }
+          }
+      }
+    }
+
+  }
+}
+
+else if ( m_dir==2)
+{
+for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
+{
+  const amrex::Box& box = mfi.validbox();
+  const amrex::IArrayBox& phase_fab = m_mf_phase[mfi];
+  const amrex::FArrayBox& phi_fab = m_mf_phi[mfi];
+
+  // Obtain Array4 from FArrayBox.  We can also do
+  //     Array4<Real> const& a = mf.array(mfi);
+  amrex::Array4<int const> const& phase_fab_4 = phase_fab.array();
+  amrex::Array4<amrex::Real const> const& phi_fab_4 = phi_fab.array();
+
+  size_t idx;
+  // Iterate over all cells in Box and threshold
+  const auto lo = lbound(box);
+  const auto hi = ubound(box);
+
+
+  // Sum all concentration values for each slice in x direction
+  const auto domain_min_z = m_geom.Domain().loVect()[2];
+  if ( lo.z == domain_min_z) {
+        for (int x = lo.x; x <= hi.x; ++x) {
+          for (int y = lo.y; y <= hi.y; ++y) {
+            if ( phase_fab_4(x,y,lo.z) == m_phase && phase_fab_4(x,y,lo.z+1) == m_phase ) {
+              phisumlo += phi_fab_4(x,y,lo.z+1) - phi_fab_4(x,y,lo.z);
+              num_phase_cells_0 += 1;
+          }
+        }
+    }
+  }
+
+  const auto domain_max_z = m_geom.Domain().hiVect()[2];;
+  if ( hi.z == domain_max_z) {
+        for (int x = lo.x; x <= hi.x; ++x) {
+          for (int y = lo.y; y <= hi.y; ++y) {
+            if ( phase_fab_4(x,y,hi.z) == m_phase && phase_fab_4(x,y,hi.z-1) == m_phase ) {
+              phisumhi += phi_fab_4(x,y,hi.z) - phi_fab_4(x,y,hi.z-1);
+              num_phase_cells_1 += 1;
+          }
+        }
+    }
+  }
+
+}
+}
 
     // Reduce parallel processes
     if (!refresh) {

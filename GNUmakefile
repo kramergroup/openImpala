@@ -1,7 +1,7 @@
 # Compilers and library flags
 CXX      := mpic++
 F90      := mpif90
-CXXFLAGS := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g
+CXXFLAGS := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++11
 F90FLAGS := -g -O3
 LDFLAGS  := -L/usr/lib64 -lstdc++ -lm -lamrex -ltiff -lgfortran -lHYPRE
 INCLUDE  := -I/usr/include/amrex -I/usr/include/hypre
@@ -33,7 +33,7 @@ all: tests main
 
 main: builddirs
 
-tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity
+tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity
 
 # General compile targets
 define make-object-goal
@@ -51,6 +51,14 @@ $(APP_DIR)/porosity: build $(OBJ_DIR)/main.o
 
 # Executable tests
 $(TST_DIR)/tTiffReader: tTiffReader.cpp build/io/TiffReader.o
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(TST_DIR)/tTiffStackReader: tTiffStackReader.cpp build/io/TiffStackReader.o
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(TST_DIR)/tDatReader: tDatReader.cpp build/io/DatReader.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 

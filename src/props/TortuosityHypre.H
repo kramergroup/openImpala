@@ -185,7 +185,7 @@ class TortuosityHypre : public Tortuosity
      *
      */
     amrex::Real  m_eps = 1e-5;
-    unsigned int m_maxiter = 1e4;
+    unsigned int m_maxiter = 5e4;
 
     /** Value buffer */
     amrex::Real m_value;

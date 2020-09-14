@@ -32,6 +32,9 @@ int main (int argc, char* argv[])
 {
   amrex::Initialize(argc, argv);
   {
+  // What time is it now?  We'll use this to compute total run time.
+  amrex::Real strt_time = amrex::second();
+
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
   amrex::Print() << AMREX_SPACEDIM << "D test" << std::endl;
@@ -79,6 +82,15 @@ int main (int argc, char* argv[])
 
   amrex::Real tau_value = tortuosity.value();
   amrex::Print() << "Tortuosity value: " << tau_value << std::endl;
+
+  // Call the timer again and compute the maximum difference between the start time and stop time
+  //   over all processors
+  amrex::Real stop_time = amrex::second() - strt_time;
+  const int IOProc = amrex::ParallelDescriptor::IOProcessorNumber();
+  amrex::ParallelDescriptor::ReduceRealMax(stop_time,IOProc);
+
+  // Tell the I/O Processor to write out the "run time"
+  amrex::Print() << "Run time = " << stop_time << std::endl;
 
   } // Ensure amrex related destructors have been called before tearing down the whole thing
     // by putting everything in curly brackets.
