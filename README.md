@@ -79,7 +79,7 @@ cd build/apps
 OpenImpala will now ask the filename for the calculation to be run on, as an example, try:
 
 ```bash
-SampleData_3Phase.tif
+SampleData_2Phase.tif
 ```
 
 It  will now calculate steady state diffusion in each direction and print the results, as well as volume fraction.
@@ -98,4 +98,46 @@ Compare the 'Total Run time' values between the two calculations, to check MPI i
 OpenImpala is built on the AMReX software framework. Output plot files can be visualised using a number of open-source visualisation packages e.g. Paraview, Visit, yt or AMRVis. 
 
 For further information on how to view the visualisation data visit: https://amrex-codes.github.io/amrex/docs_html/Visualization.html
+
+## Batch
+
+To submit a non-interactive job for use with the HPC batch queuing system, use DiffusionBatch.cpp
+
+Edit the file and change the DATA_PATH property, declared in the header, to the datafile to be studied, e.g.:
+
+```bash
+#define DATA_PATH "../../data/SampleData_2Phase.tif"
+```
+
+Goes to:
+
+```bash
+#define DATA_PATH "../../data/SampleData_3Phase.tif"
+```
+
+Recompile the OpenImpala executables, and check the new executable functions correctly:
+
+```bash
+make
+cd build/apps
+./DiffusionBatch
+```
+
+The code should run with no required input from the user.
+
+You can now use OpenImpala in an HPC batch job, an example file: 
+
+```bash
+module load singularity/3.2.1
+
+export OMP_NUM_THREADS=1
+
+cd /openimpala/build/apps/
+
+mpirun -np 20 singularity exec openimpala-singularity_latest.sif ./DiffusionBatch
+```
+
+N.B. the OpenImpala singularity image needs to located in the same directory as the executable.
+
+
 
