@@ -38,9 +38,9 @@ It is recommended to build OpenImpala using the provided Singularity image. With
 make
 ```
 
-This will create a new folder, 
-/build 
-, which will be populated with the .o files and executables of OpenImpala.
+This will create a new folder, /build , which will be populated with the .o files and executables of OpenImpala. 
+
+WARNING! There is a known bug when using the command ```make clean``` where it deletes files beyond the OpenImpala directory. This functionality currently does not work and should not be used.
 
 ### Testing Functionality
 
@@ -48,7 +48,26 @@ Once the make command is finished navigate to the test directory to check the fu
 
 ```bash
 cd /build/tests
+./tTiffReader
 ```
+
+which will open a sample Tiff file and assert the dimensions are as expected, printing the output.
+
+```bash
+./tVolumeFraction
+```
+
+which will open a sample 2 phase segmented tiff file and calculate the volume fraction of each phase.
+
+```bash
+./tTortuosity
+```
+
+which will open a sample 2 phase segmented tiff file and calculate the effective diffusion and tortuosity in the x direction.
+
+## Diffusion
+
+The main programme of 
 
 
 ## Visualisation
