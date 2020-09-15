@@ -47,7 +47,7 @@ WARNING! There is a known bug when using the command ```make clean``` where it d
 Once the make command is finished navigate to the test directory to check the functionality of the created executables:
 
 ```bash
-cd /build/tests
+cd build/tests
 ./tTiffReader
 ```
 
@@ -67,7 +67,30 @@ which will open a sample 2 phase segmented tiff file and calculate the effective
 
 ## Diffusion
 
-The main programme of 
+The main programme of OpenImpala calculates concentration gradients across a steady state diffusive problem for a 2 phase segmented dataset, in the 3 cartesian directions.
+
+In order to use it, first ensure your dataset is stored within the /data repository, or use the correct filepath to navigate to your dataset, then, navigate to the apps directory:
+
+```bash
+cd build/apps
+./Diffusion
+```
+
+OpenImpala will now ask the filename for the calculation to be run on, as an example, try:
+
+```bash
+SampleData_3Phase.tif
+```
+
+It  will now calculate steady state diffusion in each direction and print the results, as well as volume fraction.
+
+In order to run the same calculation but using more processors, try:
+
+```bash
+mpirun -np 2 ./Diffusion
+```
+
+Compare the 'Total Run time' values between the two calculations, to check MPI is running correctly.
 
 
 ## Visualisation
