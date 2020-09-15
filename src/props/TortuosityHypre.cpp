@@ -1,7 +1,6 @@
 #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"
 #include "TortuosityHypreFill_F.H"
-#include "VolumeFraction.H"
 #include <AMReX_MultiFab.H>
 #include <AMReX_PlotFileUtil.H>
 
@@ -14,10 +13,11 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                  const amrex::BoxArray& ba,
                                  const amrex::DistributionMapping& dm,
                                  amrex::iMultiFab& mf,
+                                 const amrex::Real& vf,
                                  const int phase,
                                  const Direction dir,
                                  const SolverType st) : m_geom(geom), m_ba(ba), m_dm(dm),
-                                                        m_mf_phase(mf), m_phase(phase),
+                                                        m_mf_phase(mf), m_phase(phase), m_vf(vf),
                                                         m_dir(dir), m_solvertype(st),
                                                         m_mf_phi(ba,dm,2,0),
                                                         m_first_call(true)
@@ -417,20 +417,16 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     amrex::Real flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
 
     // Compute Volume Fractions
-    VolumeFraction vf(m_mf_phase, m_phase);
+
     amrex::Real rel_diffusivity = (fluxlo+fluxhi)/2.0/flux_max;
 
-    amrex::Real tau = vf.value() / rel_diffusivity;
-
-    // Print volume fraction value
-    amrex::Print() << std::endl << " Volume Fraction: "
-                    << amrex::Real(vf.value()) << std::endl;
+    amrex::Real tau = m_vf / rel_diffusivity;
 
     // Print all of fluxvect values
     amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
-                    << rel_diffusivity << std::endl;
+                    << rel_diffusivity << std::endl ;
 
-    amrex::Print() << " Difference between top and bottom fluxes: " << abs(fluxlo - fluxhi) <<  std::endl;
+    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxlo - fluxhi) <<  std::endl;
 
     return tau;
 

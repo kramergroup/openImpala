@@ -46,6 +46,7 @@ class TortuosityHypre : public Tortuosity
                     const amrex::BoxArray& ba,
                     const amrex::DistributionMapping& dm,
                     amrex::iMultiFab& mf,
+                    const amrex::Real& vf,
                     const int phase,
                     const Direction dir,
                     const SolverType = GMRES);
@@ -169,6 +170,8 @@ class TortuosityHypre : public Tortuosity
     /** Multifab holding the solution */
     amrex::MultiFab m_mf_phi;
 
+    /** Reference to the volume fraction value */
+    const amrex::Real& m_vf;
 
 
     /** Index of the phase of interest */

@@ -13,12 +13,12 @@
 
 #include <AMReX_PlotFileUtil.H>
 
-/** Test TiffReader class
+/** Test TiffStackReader class
  *
- * This test test the TiffReader class. It requires the SAMPLE_TIFF_FILENAME file
- * as test data.
+ * This test test the TifStackReader class. It requires the SAMPLE_TIFF_FILENAME file
+ * folder as test data.
  *
- * The test will open the sample tiff file, read its data, and then asset the
+ * The test will open the sample tiff file set, read its data, and then asset the
  * following conditions:
  *
  *  1) Image width, height, and depth

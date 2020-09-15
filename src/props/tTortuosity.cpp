@@ -1,17 +1,19 @@
-/** Test VolumeFractions class
+/** Test Tortuosity class
  *
- * This test tests the VolumeFraction class. It requires the SAMPLE_TIFF_FILENAME file
+ * This test tests the Tortuosity class. It requires the SAMPLE_TIFF_FILENAME file
  * as test data.
  *
  * The test will open the sample tiff file, read its data, and then asset the
  * following conditions:
  *
- *  1) volume fractions of the two phases
+ *  1) volume fractions of the phase of intereste
+ *  2) tortuosity of sample data in x direction
  *
  */
 
 #include "../io/TiffReader.H"
 #include "TortuosityHypre.H"
+#include "VolumeFraction.H"
 
 #include <AMReX.H>
 #include <AMReX_Array.H>
@@ -77,11 +79,31 @@ int main (int argc, char* argv[])
     mf_phase.FillBoundary(geom.periodicity());
   }
 
+  VolumeFraction vf(mf_phase, 0);
+
+  // Print volume fraction value
+  amrex::Print() << std::endl << " Volume Fraction: "
+                  << amrex::Real(vf.value()) << std::endl;
+
+  // Print diffusion direction
+  if (DIRECTION==0) {
+  amrex::Print() << std::endl << " Direction: X" << std::endl;
+  }
+  else if (DIRECTION==1) {
+  amrex::Print() << std::endl << " Direction: Y" << std::endl;
+  }
+  else if (DIRECTION==2) {
+  amrex::Print() << std::endl << " Direction: Z" << std::endl;
+  }
+  else {
+  amrex::Print() << std::endl << " Direction ERROR" << std::endl;
+  }
+
   // Compute tortuosity
-  TortuosityHypre tortuosity(geom,ba,dm,mf_phase,0,DIRECTION,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosity(geom,ba,dm,mf_phase,vf.value(),0,DIRECTION,TortuosityHypre::SolverType::FlexGMRES);
 
   amrex::Real tau_value = tortuosity.value();
-  amrex::Print() << "Tortuosity value: " << tau_value << std::endl;
+  amrex::Print() << " Tortuosity value: " << tau_value << std::endl;
 
   // Call the timer again and compute the maximum difference between the start time and stop time
   //   over all processors
@@ -90,7 +112,7 @@ int main (int argc, char* argv[])
   amrex::ParallelDescriptor::ReduceRealMax(stop_time,IOProc);
 
   // Tell the I/O Processor to write out the "run time"
-  amrex::Print() << "Run time = " << stop_time << std::endl;
+  amrex::Print() << " Run time = " << stop_time << std::endl;
 
   } // Ensure amrex related destructors have been called before tearing down the whole thing
     // by putting everything in curly brackets.

@@ -18,9 +18,9 @@ class TiffStackReader
 {
   public:
 
-    /** Creates a new TiffReader and reads data from filename
+    /** Creates a new TiffStackReader and reads data from filename
      *
-     *  This default constructor reads the TIFF file and stores its data
+     *  This default constructor reads the TIFF stack files and stores its data
      *  in private member variables.
      *
      *  @param filename name of the TIFF file containing the data

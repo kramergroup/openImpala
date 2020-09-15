@@ -9,6 +9,7 @@ CathodeWrite::CathodeWrite(amrex::Real vf) : m_vf(vf)
 
 }
 
+// Write DandeLiion parameter file
 void CathodeWrite::DandeLiionWrite()
 {
 
@@ -36,6 +37,7 @@ void CathodeWrite::DandeLiionWrite()
 
 }
 
+// Write PyBamm parameter file
 void CathodeWrite::PyBammWrite()
 {
 
