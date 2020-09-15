@@ -31,7 +31,7 @@ vpath %.F90 $(SRC_DIR)
 # Targets
 all: tests main
 
-main: builddirs $(APP_DIR)/Diffusion
+main: builddirs $(APP_DIR)/Diffusion $(APP_DIR)/DiffusionBatch
 
 tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity
 
@@ -46,6 +46,10 @@ endef
 
 # Main program
 $(APP_DIR)/Diffusion: Diffusion.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(APP_DIR)/DiffusionBatch: DiffusionBatch.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 

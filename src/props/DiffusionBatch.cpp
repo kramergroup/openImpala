@@ -3,7 +3,7 @@
  * This programme calculates diffusion and tortuosity in the 3 cartesian directions,
  * as well volume fraction for a 2 phase segmented dataset.
  *
- * The program will open the tiff file from user input, read its data, and then calculate the
+ * The program will open the tiff file from this file, read its data, and then calculate the
  * following properties:
  *
  *  1) volume fractions of the phase of interest
@@ -29,7 +29,7 @@
 #include <string>
 
 // Point DATA_PATH to the location of the segmented datasets
-#define DATA_PATH "../../data/"
+#define DATA_PATH "../../data/SampleData_2Phase.tif"
 // BOX_SIZE can have a considerable influence on the calculation speed of the programme
 // further work is required to work out the optimum value, if not, leave the value as 32
 #define BOX_SIZE 32
@@ -54,22 +54,14 @@ int main (int argc, char* argv[])
   amrex::DistributionMapping dm;
   amrex::iMultiFab mf_phase;
 
-  std::string filename;
-  std::string path = DATA_PATH;
-
-  std::cout << "which file do you want to process?" << std::endl;
-  std::cin >> filename;
-
-  path += filename;
-
   {
     // Reading the tiff file
     // The TiffReader potentially holds significant data in memory (the full voxel set).
     // The code is not parallelised, potentially creating a large memory burden per node.
     // It's best to let the reader go out of scope as soon as it is not needed anymore
     // to free up memory before further computations.
-    amrex::Print() << "tTiffReader - Reading file " << path << std::endl;
-    TiffReader reader(path);
+    amrex::Print() << "tTiffReader - Reading file " << DATA_PATH << std::endl;
+    TiffReader reader(DATA_PATH);
 
     const amrex::Box bx = reader.box();
     amrex::Real fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
