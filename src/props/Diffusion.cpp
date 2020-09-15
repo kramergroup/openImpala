@@ -25,9 +25,11 @@
 #include <AMReX_iMultiFab.H>
 
 #include <sstream>
+#include <iostream>
+#include <string>
 
-// Point TIFF_FILENAME to the location of the tiff file of interest
-#define TIFF_FILENAME "../../data/SampleData_3Phase.tif"
+// Point DATA_PATH to the location of the segmented datasets
+#define DATA_PATH "../../data/"
 // BOX_SIZE can have a considerable influence on the calculation speed of the programme
 // further work is required to work out the optimum value, if not, leave the value as 32
 #define BOX_SIZE 32
@@ -52,14 +54,22 @@ int main (int argc, char* argv[])
   amrex::DistributionMapping dm;
   amrex::iMultiFab mf_phase;
 
+  std::string filename;
+  std::string path = DATA_PATH;
+
+  std::cout << "which file do you want to process?" << std::endl;
+  std::cin >> filename;
+
+  path += filename;
+
   {
     // Reading the tiff file
     // The TiffReader potentially holds significant data in memory (the full voxel set).
     // The code is not parallelised, potentially creating a large memory burden per node.
     // It's best to let the reader go out of scope as soon as it is not needed anymore
     // to free up memory before further computations.
-    amrex::Print() << "tTiffReader - Reading file " << TIFF_FILENAME << std::endl;
-    TiffReader reader(SAMPLE_TIFF_FILENAME);
+    amrex::Print() << "tTiffReader - Reading file " << path << std::endl;
+    TiffReader reader(path);
 
     const amrex::Box bx = reader.box();
     amrex::Real fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
