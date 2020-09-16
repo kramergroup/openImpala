@@ -1,6 +1,6 @@
 # OpenImpala
 
-OPEN source IMage based PArallelisable Linear Algebra solver
+### OPEN source IMage based PArallelisable Linear Algebra solver
 
 A common challenge from image-based modelling is the size of 3D tomography datasets, which can be of the order of several billion voxels. OpenImpala a data-driven, fully parallelisable, image-based modelling framework. 
 
