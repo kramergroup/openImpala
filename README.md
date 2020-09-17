@@ -155,5 +155,10 @@ mpirun -np 20 singularity exec openimpala-singularity_latest.sif ./DiffusionBatc
 
 N.B. the OpenImpala singularity image needs to located in the same directory as the executable.
 
+## License
 
+OpenImpala Copyright (c) 2020, University of Southampton
+All rights reserved.
+
+License for OpenImpala can be found at LICENSE.
 
