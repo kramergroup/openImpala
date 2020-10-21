@@ -50,8 +50,6 @@ make
 
 This will create a new folder, /build , which will be populated with the .o files and executables of OpenImpala. 
 
-WARNING! There is a known bug when using the command ```make clean``` where it deletes files beyond the OpenImpala directory. This functionality currently does not work and should not be used.
-
 ### Testing Functionality
 
 Once the make command is finished navigate to the test directory to check the functionality of the created executables:
