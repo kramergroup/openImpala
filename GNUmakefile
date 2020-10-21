@@ -11,6 +11,8 @@ INCLUDE  := -I/usr/include/amrex -I/usr/include/hypre
 INC_DIR  := build/include
 APP_DIR  := build/apps
 TST_DIR  := build/tests
+OBJ_DIR  := build/props
+IO_DIR   := build/io
 
 MODULES   := io props
 SRC_DIR   := $(addprefix src/,$(MODULES))
@@ -94,7 +96,7 @@ release: all
 # Clean
 clean:
 	-@rm -rvf $(OBJ_DIR)/*
-	-@rm -rvf $(APP_DIR)/*
+	-@rm -rvf $(IO_DIR)/*
 	-@rm -rvf $(INC_DIR)/*
 
 $(foreach bdir,$(BUILD_DIR),$(eval $(call make-object-goal,$(bdir))))
