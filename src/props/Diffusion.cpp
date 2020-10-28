@@ -21,6 +21,7 @@
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
+#include <AMReX_ParmParse.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
 
@@ -30,12 +31,6 @@
 
 // Point DATA_PATH to the location of the segmented datasets
 #define DATA_PATH "../../data/"
-// BOX_SIZE can have a considerable influence on the calculation speed of the programme
-// further work is required to work out the optimum value, if not, leave the value as 32
-#define BOX_SIZE 32
-#define EPS 1e-10
-
-#define DIRECTION Direction::X
 
 int main (int argc, char* argv[])
 {
@@ -45,8 +40,23 @@ int main (int argc, char* argv[])
   amrex::Real strt_time = amrex::second();
 
   // Parameters
+  amrex::ParmParse pp;
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
   amrex::Print() << AMREX_SPACEDIM << "D test" << std::endl;
+
+  std::string FILENAME;
+  pp.get("FILENAME", FILENAME);  // query string
+
+  amrex::Real DIRECTION = Direction::X;
+  pp.query("DIRECTION", DIRECTION);  // query string
+
+  // BOX_SIZE can have a considerable influence on the calculation speed of the programme
+  // further work is required to work out the optimum value, if not, leave the value as 32
+  amrex::Real BOX_SIZE = 32;
+  pp.query("BOX_SIZE", BOX_SIZE);
+
+  amrex::Real EPS= 1e-10;
+  pp.query("EPS", EPS);
 
   // Define physical geometry, index space, and multifab
   amrex::Geometry geom;
@@ -54,22 +64,14 @@ int main (int argc, char* argv[])
   amrex::DistributionMapping dm;
   amrex::iMultiFab mf_phase;
 
-  std::string filename;
-  std::string path = DATA_PATH;
-
-  std::cout << "which file do you want to process?" << std::endl;
-  std::cin >> filename;
-
-  path += filename;
-
   {
     // Reading the tiff file
     // The TiffReader potentially holds significant data in memory (the full voxel set).
     // The code is not parallelised, potentially creating a large memory burden per node.
     // It's best to let the reader go out of scope as soon as it is not needed anymore
     // to free up memory before further computations.
-    amrex::Print() << "tTiffReader - Reading file " << path << std::endl;
-    TiffReader reader(path);
+    amrex::Print() << "tTiffReader - Reading file " << DATA_PATH + FILENAME << std::endl;
+    TiffReader reader(DATA_PATH + FILENAME);
 
     const amrex::Box bx = reader.box();
     amrex::Real fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
@@ -100,6 +102,41 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Volume Fraction: "
                   << amrex::Real(vf.value()) << std::endl;
 
+  if (DIRECTION==0)
+  {
+  amrex::Print() << std::endl << " Direction: X" << std::endl;
+
+  // Compute tortuosity in x direction
+  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES);
+
+  amrex::Real tau_value_x = tortuosityx.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
+}
+
+  else if (DIRECTION==1)
+  {
+  amrex::Print() << std::endl << " Direction: Y" << std::endl;
+
+  // Compute tortuosity in y direction
+  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES);
+
+  amrex::Real tau_value_y = tortuosityy.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;
+}
+
+  else if (DIRECTION==2)
+  {
+  amrex::Print() << std::endl << " Direction: Z" << std::endl;
+
+  // Compute tortuosity in z direction
+  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES);
+
+  amrex::Real tau_value_z = tortuosityz.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;
+}
+
+  else
+  {
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
   // Compute tortuosity in x direction
@@ -123,6 +160,7 @@ int main (int argc, char* argv[])
 
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;
+}
 
   // Call the timer again and compute the maximum difference between the start time and stop time
   //   over all processors
