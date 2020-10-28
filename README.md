@@ -81,25 +81,20 @@ In order to use it, first ensure your dataset is stored within the /data reposit
 
 ```bash
 cd build/apps
-./Diffusion
+./Diffusion inputs
 ```
 
-OpenImpala will now ask the filename for the calculation to be run on, as an example, try:
-
-```bash
-SampleData_2Phase.tif
-```
-
-It  will now calculate steady state diffusion in each direction and print the results, as well as volume fraction.
+It  will now calculate steady state diffusion in the X direction and print the results, as well as volume fraction.
 
 In order to run the same calculation but using more processors, try:
 
 ```bash
-mpirun -np 2 ./Diffusion
+mpirun -np 2 ./Diffusion inputs
 ```
 
 Compare the 'Total Run time' values between the two calculations, to check MPI is running correctly.
 
+Now trying modifying the inputs file to see if you can calculate in the Y direction.
 
 ## Visualisation
 
@@ -115,28 +110,6 @@ As an example of the visualisation, here is a concentration gradient for steady 
 
 ## Batch
 
-To submit a non-interactive job for use with the HPC batch queuing system, use DiffusionBatch.cpp
-
-Edit the file and change the DATA_PATH property, declared in the header, to the datafile to be studied, e.g.:
-
-```bash
-#define DATA_PATH "../../data/SampleData_2Phase.tif"
-```
-
-Goes to:
-
-```bash
-#define DATA_PATH "../../data/SampleData_3Phase.tif"
-```
-
-Recompile the OpenImpala executables, and check the new executable functions correctly:
-
-```bash
-make
-cd build/apps
-./DiffusionBatch
-```
-
 The code should run with no required input from the user.
 
 You can now use OpenImpala in an HPC batch job, an example file: 
@@ -148,7 +121,7 @@ export OMP_NUM_THREADS=1
 
 cd /openimpala/build/apps/
 
-mpirun -np 20 singularity exec openimpala-singularity_latest.sif ./DiffusionBatch
+mpirun -np 20 singularity exec openimpala-singularity_latest.sif ./Diffusion inputs
 ```
 
 N.B. the OpenImpala singularity image needs to located in the same directory as the executable.
