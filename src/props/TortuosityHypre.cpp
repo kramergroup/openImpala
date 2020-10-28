@@ -396,25 +396,39 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
       amrex::ParallelAllReduce::Sum(phisumhi, amrex::ParallelContext::CommunicatorSub());
       }
 
-    // Total problem length in the x direction
+    // Total problem length each direction
     auto length_x = m_geom.ProbLength(0);
     auto length_y = m_geom.ProbLength(1);
     auto length_z = m_geom.ProbLength(2);
 
-    // Cell size x direction
+    // Cell size in each direction
     amrex::Real dx = m_geom.CellSize(0);
     amrex::Real dy = m_geom.CellSize(1);
     amrex::Real dz = m_geom.CellSize(2);
 
-    // Number of cells in the x direction
-    auto num_cell_x = m_geom.ProbHi(0)-m_geom.ProbLo(0)+1;
+    // Number of cells in each direction
+    auto num_cell_x = length_x/dx;
+    auto num_cell_y = length_y/dy;
+    auto num_cell_z = length_z/dz;
 
     // Compute flux between adjacent slices
     fluxlo = phisumlo / dx * (dy*dz);
     fluxhi = phisumhi / dx * (dy*dz);
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
-    amrex::Real flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
+    amrex::Real flux_max=0.0;
+
+    if ( m_dir==0) {
+      flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
+    }
+
+    else if ( m_dir==1) {
+      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_y*num_cell_y));
+    }
+
+    else if ( m_dir==2) {
+      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_z*num_cell_z));
+    }
 
     // Compute Volume Fractions
 
@@ -426,7 +440,7 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
                     << rel_diffusivity << std::endl ;
 
-    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxlo - fluxhi) <<  std::endl;
+    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxlo - fluxhi) << std::endl;
 
     return tau;
 
