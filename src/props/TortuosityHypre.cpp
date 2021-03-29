@@ -2,7 +2,6 @@
 #include "Tortuosity_filcc_F.H"
 #include "TortuosityHypreFill_F.H"
 #include <stdlib.h>
-#include <ctime>
 #include <AMReX_MultiFab.H>
 #include <AMReX_PlotFileUtil.H>
 
@@ -226,13 +225,8 @@ bool TortuosityHypre::solve()
 
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
-  // Get the current time to append to the filename
-  const int MAXLEN = 80;
-  char plot_time[MAXLEN];
-  time_t t = time(0);
-  strftime(plot_time, MAXLEN, "%Y/%m/%d", localtime(&t));
   // Write plot file
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string(amrex::Concatenate("/openimpalaresults/diffusionplot",std::string(plot_time))), m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/diffusionplot"), m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
 
   return true;
 }
