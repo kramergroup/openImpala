@@ -22,3 +22,20 @@ tiffreader:
   script: 
      - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTiffReader
   
+# Test OpenImpala DatReader class
+datreader:
+  stage: test
+  script: 
+     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tDatReader
+     
+# Test OpenImpala VolumeFraction class
+volumefraction:
+  stage: test
+  script: 
+     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tVolumeFraction
+     
+# Test OpenImpala Tortuosity class
+tortuosity:
+  stage: test
+  script: 
+     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTortuosity
