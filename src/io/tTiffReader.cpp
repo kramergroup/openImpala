@@ -94,6 +94,6 @@ int main (int argc, char* argv[])
     }
   }
 
-  amrex::WriteSingleLevelPlotfile("plt", mfv, {"phi"}, geom, 0.0, 0);
+  amrex::WriteSingleLevelPlotfile("~/openimpalaresults/plt", mfv, {"phi"}, geom, 0.0, 0);
 
 }
