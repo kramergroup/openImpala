@@ -11,7 +11,7 @@
  *
  */
 
-#include "../io/TiffReader.H"
+#include "/openImpala/src/io/TiffReader.H"
 #include "TortuosityHypre.H"
 #include "VolumeFraction.H"
 
@@ -24,7 +24,7 @@
 
 #include <sstream>
 
-#define SAMPLE_TIFF_FILENAME "../../data/SampleData_3Phase.tif"
+#define SAMPLE_TIFF_FILENAME "/openImpala/data/SampleData_3Phase.tif"
 #define BOX_SIZE 32
 #define EPS 1e-10
 
