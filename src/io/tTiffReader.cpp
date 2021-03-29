@@ -97,6 +97,6 @@ int main (int argc, char* argv[])
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
   // Write plot file
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffreadertest"), mfv, {"concentration"}, geom, 0.0, 0);
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffreadertest"), mfv, {"phase"}, geom, 0.0, 0);
 
 }
