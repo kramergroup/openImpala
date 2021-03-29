@@ -25,8 +25,8 @@
  *
  */
 
-#define SAMPLE_TIFF_FILENAME "../../data/SampleData_2Phase.tif"
-#define SAMPLE_THRESHOLD_FILENAME "../../data/SampleData_Threshold"
+#define SAMPLE_TIFF_FILENAME "/openImpala/data/SampleData_2Phase.tif"
+#define SAMPLE_THRESHOLD_FILENAME "/openImpala/data/SampleData_Threshold"
 #define BOX_SIZE 32
 
 int main (int argc, char* argv[])
