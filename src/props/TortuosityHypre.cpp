@@ -1,6 +1,7 @@
 #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"
 #include "TortuosityHypreFill_F.H"
+#include <stdlib.h>
 #include <AMReX_MultiFab.H>
 #include <AMReX_PlotFileUtil.H>
 
@@ -222,7 +223,10 @@ bool TortuosityHypre::solve()
   getSolution(m_mf_phi,0);
   getCellTypes(m_mf_phi,1);
 
-  amrex::WriteSingleLevelPlotfile("phi", m_mf_phi, {"phi","celltypes"}, m_geom, 0.0, 0);
+  // Get the users home directory to write plot file to right place
+  const char* homeDir = getenv("HOME");
+  // Write plot file
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string(amrex::Concatenate("/openimpalaresults/diffusionplot",strt_time)), m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
 
   return true;
 }
