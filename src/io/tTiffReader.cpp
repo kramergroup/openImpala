@@ -94,7 +94,7 @@ int main (int argc, char* argv[])
       fab2(bit(),0) = fab1(bit(),0);
     }
   }
-  const char* homeDir = getenv("HOME");
+  const char homeDir = getenv("HOME");
   amrex::WriteSingleLevelPlotfile(homeDir + "/openimpalaresults/plt", mfv, {"phi"}, geom, 0.0, 0);
 
 }
