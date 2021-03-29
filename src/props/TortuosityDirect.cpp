@@ -1,6 +1,7 @@
 #include "TortuosityDirect.H"
 #include "Tortuosity_poisson_3d_F.H"
 #include "Tortuosity_filcc_F.H"
+#include <stdlib.h>
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_BC_TYPES.H>
@@ -118,8 +119,10 @@ bool TortuosityDirect::solve()
             }
         }
     }
-
-    amrex::WriteSingleLevelPlotfile("potential", mf_phi_new, {"phi","celltype"}, m_geom, 0.0, 0);
+    // Get the users home directory to write plot file to right place
+    const char* homeDir = getenv("HOME");
+    // Write plot file
+    amrex::WriteSingleLevelPlotfile(homeDir + std::string(amrex::Concatenate("/openimpalaresults/diffusionplot",strt_time)), mf_phi_new, {"concentration","phase"}, m_geom, 0.0, 0);
 
     // calculate fluxes again to make sure we have full consistency
     global_fluxes(fxin,fxout);
