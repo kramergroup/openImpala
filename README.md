@@ -126,6 +126,10 @@ mpirun -np 20 singularity exec openimpala-singularity_latest.sif ./Diffusion inp
 
 N.B. the OpenImpala singularity image needs to located in the same directory as the executable.
 
+## Continuous Integration
+
+This repo is pull mirrored to a GitLab repository, https://gitlab.com/JLeHoux/openImpala, which runs a suite of unit tests to check functionality. The test suite can be found in .gitlab-ci.yml
+
 ## License
 
 OpenImpala Copyright (c) 2020, University of Southampton
