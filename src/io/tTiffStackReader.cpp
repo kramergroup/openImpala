@@ -1,6 +1,7 @@
 #include "TiffStackReader.H"
 #include <iostream>
 #include <vector>
+#include <stdlib.h>
 #include <AMReX.H>
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
@@ -93,7 +94,9 @@ int main (int argc, char* argv[])
       fab2(bit(),0) = fab1(bit(),0);
     }
   }
-
-  amrex::WriteSingleLevelPlotfile("plt", mfv, {"phi"}, geom, 0.0, 0);
+  // Get the users home directory to write plot file to right place
+  const char* homeDir = getenv("HOME");
+  // Write plot file
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffstackreadertest"), mfv, {"phase"}, geom, 0.0, 0);
 
 }
