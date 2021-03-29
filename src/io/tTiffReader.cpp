@@ -1,6 +1,7 @@
 #include "TiffReader.H"
 #include <iostream>
 #include <vector>
+#include <stdlib.h>
 #include <AMReX.H>
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
@@ -93,7 +94,7 @@ int main (int argc, char* argv[])
       fab2(bit(),0) = fab1(bit(),0);
     }
   }
-
-  amrex::WriteSingleLevelPlotfile("$HOME/openimpalaresults/plt", mfv, {"phi"}, geom, 0.0, 0);
+  const char* homeDir = getenv("HOME");
+  amrex::WriteSingleLevelPlotfile(homeDir + "/openimpalaresults/plt", mfv, {"phi"}, geom, 0.0, 0);
 
 }
