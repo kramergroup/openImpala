@@ -25,8 +25,8 @@
  *
  */
 
-#define SAMPLE_DAT_FILENAME "../../data/SampleData_2Phase.dat"
-#define SAMPLE_THRESHOLD_FILENAME "../../data/SampleData_Threshold"
+#define SAMPLE_DAT_FILENAME "/openImpala/data/SampleData_2Phase.dat"
+#define SAMPLE_THRESHOLD_FILENAME "/openImpala/data/SampleData_Threshold"
 #define BOX_SIZE 32
 
 int main (int argc, char* argv[])
