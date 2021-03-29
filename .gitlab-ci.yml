@@ -1,0 +1,25 @@
+image: 
+    name: quay.io/singularity/singularity:v3.4.0
+    entrypoint: [""]
+
+stages:
+  - pull
+  - test
+
+# Pull OpenImpala Singularity container
+openimpala-image:
+  stage: pull
+  script: 
+     - singularity pull shub://jameslehoux/openimpala-singularity:hamilton
+  artifacts:
+    paths:
+     - openimpala-singularity_hamilton.sif
+
+
+# Test OpenImpala TiffReader class
+tiffreader:
+  stage: test
+  script: 
+     - cd /openImpala/build/tests
+     - ./tTiffReader
+  
