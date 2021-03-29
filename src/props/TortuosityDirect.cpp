@@ -128,7 +128,7 @@ bool TortuosityDirect::solve()
     time_t t = time(0);
     strftime(plot_time, MAXLEN, "%Y/%m/%d", localtime(&t));
     // Write plot file
-    amrex::WriteSingleLevelPlotfile(homeDir + std::string(amrex::Concatenate("/openimpalaresults/diffusionplot",plot_time)), mf_phi_new, {"concentration","phase"}, m_geom, 0.0, 0);
+    amrex::WriteSingleLevelPlotfile(homeDir + std::string(amrex::Concatenate("/openimpalaresults/diffusionplot",std::string(plot_time))), mf_phi_new, {"concentration","phase"}, m_geom, 0.0, 0);
 
     // calculate fluxes again to make sure we have full consistency
     global_fluxes(fxin,fxout);
