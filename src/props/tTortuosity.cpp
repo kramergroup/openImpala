@@ -11,7 +11,7 @@
  *
  */
 
-#include "/openImpala/src/io/TiffReader.H"
+#include "../io/TiffReader.H"
 #include "TortuosityHypre.H"
 #include "VolumeFraction.H"
 
