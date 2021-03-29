@@ -21,6 +21,6 @@ tiffreader:
   stage: test
   script: 
      - singularity shell openimpala-singularity_hamilton.sif
-     - cd /openImpala/build/tests
-     - ./tTiffReader
+     - cd /
+     - ls
   
