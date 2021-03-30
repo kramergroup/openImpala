@@ -28,6 +28,7 @@
 #include <sstream>
 #include <iostream>
 #include <string>
+#include <stdlib.h>
 
 int main (int argc, char* argv[])
 {
@@ -46,6 +47,14 @@ int main (int argc, char* argv[])
     
   std::string DATA_PATH = "/openImpala/data/";
   pp.get("DATA_PATH", DATA_PATH);  // query data directory from inputs file
+  if(DATA_PATH.at(0) == '~')
+  {
+      // Get the users home directory to write plot file to right place
+      const char* homeDir = getenv("HOME");
+      DATA_PATH.erase(0);
+      DATA_PATH = homeDir + DATA_PATH;
+  }
+    
 
   amrex::Real DIRECTION = Direction::X;
   pp.query("DIRECTION", DIRECTION);  // query direction from inputs file
