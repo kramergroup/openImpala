@@ -14,7 +14,7 @@ openimpala-image:
   artifacts:
     paths:
      - openimpala-singularity_hamilton.sif
-
+    expire_in: 1 day
 
 # Test OpenImpala TiffReader class
 tiffreader:
