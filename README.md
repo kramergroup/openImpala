@@ -33,12 +33,24 @@ singularity pull shub://jameslehoux/openimpala-singularity
 ```
 This will pull the OpenImpala Singularity image to your current directory.
 
-To operate the container interactively use the shell command, like so:
+You can either operate the container interactively use the shell command, like so:
 
 ```bash
 singularity shell openimpala-singularity_latest.sif
 ```
-You are now ready to compile and use OpenImpala
+With this you can compile a local version of OpenImpala, useful for development, or you can execute the OpenImpala install that's prebuilt within the container:
+
+```bash
+singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tTortuosity
+```
+
+to run the tortuosity test, or:
+
+```bash
+singularity exec openimpala-singularity_latest.sif /openImpala/build/apps/Diffusion ~/inputs
+```
+
+to run a Diffusion type problem, N.B. you would need an inputs file (https://github.com/kramergroup/openImpala/blob/master/build/apps/inputs) in your home directory for this to run
 
 ### Building OpenImpala
 
