@@ -51,6 +51,7 @@ int main (int argc, char* argv[])
   {
       // Get the users home directory to write plot file to right place
       const char* homeDir = getenv("HOME");
+      DATA_PATH.erase(DATA_PATH[0]); 
       DATA_PATH = homeDir + DATA_PATH;
      amrex::Print() << " DATA_PATH: " << DATA_PATH << "homeDir" << homeDir << std::endl;
   }
