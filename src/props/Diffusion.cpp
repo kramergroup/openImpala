@@ -53,10 +53,8 @@ int main (int argc, char* argv[])
       const char* homeDir = getenv("HOME");
       DATA_PATH = DATA_PATH.substr(1);
       DATA_PATH = homeDir + DATA_PATH;
-     amrex::Print() << " DATA_PATH: " << DATA_PATH << "homeDir" << homeDir << std::endl;
   }
     
-
   amrex::Real DIRECTION = Direction::X;
   pp.query("DIRECTION", DIRECTION);  // query direction from inputs file
 
