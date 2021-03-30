@@ -29,9 +29,6 @@
 #include <iostream>
 #include <string>
 
-// Point DATA_PATH to the location of the segmented datasets
-#define DATA_PATH "../../data/"
-
 int main (int argc, char* argv[])
 {
   amrex::Initialize(argc, argv);
@@ -45,10 +42,13 @@ int main (int argc, char* argv[])
   amrex::Print() << AMREX_SPACEDIM << "D test" << std::endl;
 
   std::string FILENAME;
-  pp.get("FILENAME", FILENAME);  // query string
+  pp.get("FILENAME", FILENAME);  // query filename from inputs file
+    
+  std::string DATA_PATH = "/openImpala/data/";
+  pp.get("DATA_PATH", DATA_PATH);  // query data directory from inputs file
 
   amrex::Real DIRECTION = Direction::X;
-  pp.query("DIRECTION", DIRECTION);  // query string
+  pp.query("DIRECTION", DIRECTION);  // query direction from inputs file
 
   // BOX_SIZE can have a considerable influence on the calculation speed of the programme
   // further work is required to work out the optimum value, if not, leave the value as 32
