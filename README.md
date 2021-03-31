@@ -114,7 +114,7 @@ OpenImpala is built on the AMReX software framework. Output plot files can be vi
 
 For further information on how to view the visualisation data, visit: https://amrex-codes.github.io/amrex/docs_html/Visualization.html
 
-As an example of the visualisation, here is a concentration gradient for steady state diffusive flow in the x-direction, for a 499 cubed voxel microstructure [1]:
+As an example of the visualisation, here is a concentration gradient for steady-state diffusive flow in the x-direction, for a 499 cubed voxel microstructure [1]:
 
 <img src="https://user-images.githubusercontent.com/37665786/93310161-577f4800-f7fc-11ea-8b8c-3cae084f18a5.png" width="800" />
 
