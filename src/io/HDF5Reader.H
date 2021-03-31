@@ -14,7 +14,7 @@
  *  
  */
 
-class hdf5Reader 
+class HDF5Reader 
 {
   public:
 
@@ -25,7 +25,7 @@ class hdf5Reader
      * 
      *  @param filename name of the HDF5 file containing the data
      */
-    hdf5Reader(const std::string& filename);
+    HDF5Reader(const std::string& filename);
 
 
     /** Thresholds the image 
@@ -60,7 +60,7 @@ class hdf5Reader
 
   private:
   
-    void readhdf5File();
+    void readHDF5File();
 
     /*! Filename of the source TIFF file */
     std::string m_filename;
@@ -73,4 +73,4 @@ class hdf5Reader
 
 };
 
-#endif // TIFFREADER_H
+#endif // HDF5READER_H
