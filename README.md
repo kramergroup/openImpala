@@ -14,7 +14,7 @@ OpenImpala has been shown to scale well with an increasing number of computation
 
 ## Getting Started
 
-The source code is available at https://github.com/kramergroup/openImpala.git
+The source code is available at https://github.com/kramergroup/openImpala.git .
 
 ### Containerised compile environment
 
@@ -38,7 +38,7 @@ You can either operate the container interactively using the shell command, like
 ```bash
 singularity shell openimpala-singularity_latest.sif
 ```
-With this you can compile a local version of OpenImpala, useful for development, or you can execute the OpenImpala install that's prebuilt within the container:
+With this, you can compile a local version of OpenImpala, useful for development, or you can execute the OpenImpala install that's prebuilt within the container:
 
 ```bash
 singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tTortuosity
@@ -50,7 +50,7 @@ to run the tortuosity test, or:
 singularity exec openimpala-singularity_latest.sif /openImpala/build/apps/Diffusion ~/inputs
 ```
 
-to run a Diffusion type problem, N.B. you would need an inputs file (https://github.com/kramergroup/openImpala/blob/master/build/apps/inputs) in your home directory for this to run
+to run a Diffusion type problem, N.B., you would need an inputs file (https://github.com/kramergroup/openImpala/blob/master/build/apps/inputs) in your home directory for this to run
 
 ### Building OpenImpala
 
@@ -64,26 +64,26 @@ This command will create a new folder, /build, populated with the .o files and e
 
 ### Testing Functionality
 
-Once the make command is finished navigate to the test directory to check the functionality of the created executables:
+Once the make command is finished, navigate to the test directory to check the functionality of the created executables:
 
 ```bash
 cd build/tests
 ./tTiffReader
 ```
 
-which will open a sample Tiff file and assert the dimensions are as expected, printing the output.
+Which will open a sample Tiff file and assert the dimensions are as expected, printing the output.
 
 ```bash
 ./tVolumeFraction
 ```
 
-which will open a sample 2 phase segmented tiff file and calculate the volume fraction of each phase.
+Which will open a sample 2-phase segmented tiff file and calculate the volume fraction of each phase.
 
 ```bash
 ./tTortuosity
 ```
 
-which will open a sample 2 phase segmented tiff file and calculate the effective diffusion and tortuosity in the x-direction.
+Which will open a sample 2 phase segmented tiff file and calculate the effective diffusion and tortuosity in the x-direction.
 
 ## Diffusion
 
@@ -98,7 +98,7 @@ cd build/apps
 
 It will now calculate steady-state diffusion in the x-direction and print the results, as well as volume fraction.
 
-In order to run the same calculation but using more processors, try:
+To run the same calculation but using more processors, try:
 
 ```bash
 mpirun -np 2 ./Diffusion inputs
@@ -136,7 +136,7 @@ cd /openimpala/build/apps/
 mpirun -np 20 singularity exec openimpala-singularity_latest.sif ./Diffusion inputs
 ```
 
-N.B. the OpenImpala singularity image needs to located in the same directory as the executable.
+N.B., the OpenImpala singularity image needs to located in the same directory as the executable.
 
 ## Continuous Integration
 
@@ -147,5 +147,6 @@ This repo is pull mirrored to a GitLab repository, https://gitlab.com/JLeHoux/op
 OpenImpala Copyright (c) 2020, University of Southampton
 All rights reserved.
 
-License for OpenImpala can be found at LICENSE.
+The license for OpenImpala can be found at LICENSE.
+
 
