@@ -16,7 +16,7 @@ TiffStackReader::TiffStackReader( std::string const& filename) : m_filename(file
 void TiffStackReader::readTiffFile()
 {
   TIFFSetWarningHandler(NULL);
-  for (int j=0; j<1249; ++j)
+  for (int j=0; j<99; ++j)
   {
   std::string name = m_filename;
   std::stringstream ss;
