@@ -1,16 +1,16 @@
-#include "TiffReader.H"
+#include "HDF5Reader.H"
 #include <h5cpp/hdf5.hpp>
 
 #include <AMReX.H>
 #include <AMReX_IntVect.H>
 #include <AMReX_iMultiFab.H>
 
-hdf5Reader::hdf5Reader( std::string const& filename) : m_filename(filename)
+HDF5Reader::HDF5Reader( std::string const& filename) : m_filename(filename)
 {
-  readhdf5File();
+  readHDF5File();
 }
 
-void hdf5Reader::readhdf5File() 
+void HDF5Reader::readHDF5File() 
 {
   TIFF* tif = TIFFOpen(m_filename.c_str(), "r");
   if (tif) 
@@ -46,28 +46,28 @@ void hdf5Reader::readhdf5File()
 
 }
 
-uint32_t hdf5Reader::depth()
+uint32_t HDF5Reader::depth()
 {
   return m_depth;
 }
 
-uint32_t hdf5Reader::height()
+uint32_t HDF5Reader::height()
 {
   return m_height;
 }
 
-uint32_t hdf5Reader::width()
+uint32_t HDF5Reader::width()
 {
   return m_width;
 }
 
-amrex::Box hdf5Reader::box() 
+amrex::Box HDF5Reader::box() 
 {
   amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth-1});
   return box;
 }
 
-void hdf5Reader::threshold(const uint32_t threshold, amrex::iMultiFab& mf)
+void HDF5Reader::threshold(const uint32_t threshold, amrex::iMultiFab& mf)
 {
 
   for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) // Loop over grids
