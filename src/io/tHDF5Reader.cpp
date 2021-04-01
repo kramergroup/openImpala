@@ -26,7 +26,7 @@
  *
  */
 
-#define SAMPLE_HDF5_FILENAME "/openImpala/data/SampleData_2Phase.tif"
+#define SAMPLE_HDF5_FILENAME "/openImpala/data/SampleData_2Phase.h5"
 #define SAMPLE_THRESHOLD_FILENAME "/openImpala/data/SampleData_Threshold"
 #define BOX_SIZE 32
 
@@ -97,6 +97,6 @@ int main (int argc, char* argv[])
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
   // Write plot file
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffreadertest"), mfv, {"phase"}, geom, 0.0, 0);
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/hdf5readertest"), mfv, {"phase"}, geom, 0.0, 0);
 
 }
