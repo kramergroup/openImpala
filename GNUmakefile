@@ -35,7 +35,7 @@ all: tests main
 
 main: builddirs $(APP_DIR)/Diffusion
 
-tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity
+tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity $(TST_DIR)/tHDF5Reader
 
 # General compile targets
 define make-object-goal
@@ -63,6 +63,10 @@ $(TST_DIR)/tTiffStackReader: tTiffStackReader.cpp build/io/TiffStackReader.o
 $(TST_DIR)/tDatReader: tDatReader.cpp build/io/DatReader.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	
+$(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp build/io/HDF5Reader.o
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)	
 
 $(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(addprefix build/props/,VolumeFraction.o) build/io/TiffReader.o
 	@mkdir -p $(@D)
