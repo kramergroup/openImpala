@@ -17,7 +17,7 @@ HDF5Reader::HDF5Reader( std::string const& filename) : m_filename(filename)
 void HDF5Reader::readHDF5File() 
 {
   //open hdf5 file
-  boost::filesystem::path file_path(m_filename);
+  path file_path(m_filename);
   file::File f1 = file::open(file_path);
    
     uint32_t w, h;
