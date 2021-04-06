@@ -1,5 +1,6 @@
 #include "HDF5Reader.H"
 #include <h5cpp/hdf5.hpp>
+#include <boost/filesystem.hpp>
 
 #include <AMReX.H>
 #include <AMReX_IntVect.H>
@@ -12,9 +13,9 @@ HDF5Reader::HDF5Reader( std::string const& filename) : m_filename(filename)
 
 void HDF5Reader::readHDF5File() 
 {
-  TIFF* tif = TIFFOpen(m_filename.c_str(), "r");
-  if (tif) 
-  {
+  //open hdf5 file
+  boost::filesystem::path file_path(m_filename);
+  file::File f1 = file::open(file_path);
    
     uint32_t w, h;
     size_t npixels;
@@ -40,9 +41,6 @@ void HDF5Reader::readHDF5File()
       }
       m_depth++;
     } while (TIFFReadDirectory(tif));
-    
-    TIFFClose(tif);
-  }
 
 }
 
