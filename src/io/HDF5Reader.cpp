@@ -6,6 +6,9 @@
 #include <AMReX_IntVect.H>
 #include <AMReX_iMultiFab.H>
 
+using namespace hdf5;
+using namespace boost::filesystem;
+
 HDF5Reader::HDF5Reader( std::string const& filename) : m_filename(filename)
 {
   readHDF5File();
