@@ -16,34 +16,21 @@ HDF5Reader::HDF5Reader( std::string const& filename) : m_filename(filename)
 
 void HDF5Reader::readHDF5File() 
 {
-  //open hdf5 file
+  //open file
   path file_path(m_filename);
   file::File f1 = file::open(file_path);
-   
-    uint32_t w, h;
-    size_t npixels;
-    uint32_t* raster;
+  node::Group root_group = f1.root();
+  auto Dataset = root_group.get_dataset("data");
+  dataspace::Simple Dataspace(Dataset.dataspace());
+  auto Dimensions = Dataspace.current_dimensions();
+  auto MaxDimensions = Dataspace.maximum_dimensions();
+  std::cout << "Dataset dimensions\n";
+  std::cout << "   Current | Max\n";
+  for (unsigned long long int i = 0; i < Dimensions.size(); i++) {
+    std::cout << "i:" << i  << "    " << Dimensions[i] << " | "
+             << MaxDimensions[i] << "\n";
+  }
 
-    TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &m_width);
-    TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &m_height);
-
-    uint16_t* data;
-    m_depth = 0;
-    do 
-    {
-      npixels = m_width * m_height;
-      raster = (uint32*) _TIFFmalloc(npixels * sizeof (uint32_t));
-      if (raster != NULL) {
-          if (TIFFReadRGBAImage(tif, m_width, m_height, raster, 0)) {
-              for (long i=0; i<m_height*m_width; ++i) 
-              { 
-                m_raw.push_back(-raster[i]-1);
-              }
-          }
-          _TIFFfree(raster);
-      }
-      m_depth++;
-    } while (TIFFReadDirectory(tif));
 
 }
 
