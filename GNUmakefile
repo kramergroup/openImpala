@@ -3,8 +3,8 @@ CXX      := mpic++
 F90      := mpif90
 CXXFLAGS := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++11
 F90FLAGS := -g -O3
-LDFLAGS  := -L/usr/lib64 -lstdc++ -lm -lamrex -ltiff -lgfortran -lHYPRE #-lboost_system -lboost_filesystem -L/usr/local/lib64 -lh5cpp
-INCLUDE  := -I/usr/include/amrex -I/usr/include/hypre -I/usr/include/hdf5 -I/usr/local/include/h5cpp
+LDFLAGS  := -L/usr/lib64 -lstdc++ -lm -lamrex -ltiff -lgfortran -lHYPRE -L/usr/local/lib64 -lh5cpp -I/usr/lib64/boost169
+INCLUDE  := -I/usr/include/amrex -I/usr/include/hypre -I/usr/include/hdf5 -I/usr/local/include/h5cpp -I/usr/include/boost169
 
 
 # Directories
@@ -35,7 +35,7 @@ all: tests main
 
 main: builddirs $(APP_DIR)/Diffusion
 
-tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity #$(TST_DIR)/tHDF5Reader
+tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity $(TST_DIR)/tHDF5Reader
 
 # General compile targets
 define make-object-goal
@@ -64,9 +64,9 @@ $(TST_DIR)/tDatReader: tDatReader.cpp build/io/DatReader.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 	
-#$(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp build/io/HDF5Reader.o
-#	@mkdir -p $(@D)
-#	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)	
+$(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp build/io/HDF5Reader.o
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)	
 
 $(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(addprefix build/props/,VolumeFraction.o) build/io/TiffReader.o
 	@mkdir -p $(@D)
