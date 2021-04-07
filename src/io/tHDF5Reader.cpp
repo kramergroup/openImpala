@@ -109,6 +109,6 @@ int main (int argc, char* argv[])
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
   // Write plot file to user's home dir with datetime appended in YYmmDDHHMM format
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/hdf5readertest" += datetime), mfv, {"phase"}, geom, 0.0, 0);
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/hdf5readertest") += datetime, mfv, {"phase"}, geom, 0.0, 0);
 
 }
