@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <ctime>
+#include <chrono>
 #include <stdlib.h>
 #include <AMReX.H>
 #include <AMReX_Array.H>
@@ -37,7 +38,14 @@ int main (int argc, char* argv[])
   amrex::Initialize(argc, argv);
 
   // What time is it now?
-  amrex::Real strt_time = amrex::second();
+  std::time_t strt_time;
+  std::tm* timeinfo;
+  char buffer [80];
+
+  std::time(&strt_time);
+  timeinfo = std::localtime(&strt_time);
+  
+  std::strftime(buffer,80,"%Y%m%d%H%M",timeinfo);
 
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
@@ -99,7 +107,7 @@ int main (int argc, char* argv[])
     }
   }
   
-  std::cout << "Start time is:" << strt_time << std::endl;
+  std::cout << "Start time is:" << buffer << std::endl;
 
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
