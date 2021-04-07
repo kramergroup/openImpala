@@ -23,14 +23,9 @@ void HDF5Reader::readHDF5File()
   auto Dataset = root_group.get_dataset("t$F/channel$C");
   dataspace::Simple Dataspace(Dataset.dataspace());
   auto Dimensions = Dataspace.current_dimensions();
-  auto MaxDimensions = Dataspace.maximum_dimensions();
-  std::cout << "Dataset dimensions\n";
-  std::cout << "   Current | Max\n";
-  for (unsigned long long int i = 0; i < Dimensions.size(); i++) {
-    std::cout << "i:" << i  << "    " << Dimensions[i] << " | "
-             << MaxDimensions[i] << "\n";
-  }
-
+  m_width  = Dimensions[0];
+  m_height = Dimensions[1];
+  m_depth  = Dimensions[2];
 
 }
 
