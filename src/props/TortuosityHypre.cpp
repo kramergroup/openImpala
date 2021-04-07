@@ -2,6 +2,8 @@
 #include "Tortuosity_filcc_F.H"
 #include "TortuosityHypreFill_F.H"
 #include <stdlib.h>
+#include <ctime>
+#include <chrono>
 #include <AMReX_MultiFab.H>
 #include <AMReX_PlotFileUtil.H>
 
@@ -159,6 +161,17 @@ void TortuosityHypre::setupMatrixEquation()
 bool TortuosityHypre::solve()
 {
 
+  // What time is it now?
+  std::time_t strt_time;
+  std::tm* timeinfo;
+  char datetime [80];
+  
+  std::time(&strt_time);
+  timeinfo = std::localtime(&strt_time);
+  
+  std::strftime(datetime,80,"%Y%m%d%H%M",timeinfo);
+
+
   /* Create Solver */
   HYPRE_StructSolver solver;
   HYPRE_Int ierr;
@@ -225,8 +238,8 @@ bool TortuosityHypre::solve()
 
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
-  // Write plot file
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/diffusionplot"), m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
+  // Write plot file to user's home dir with datetime appended in YYmmDDHHMM format
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/diffusionplot") += datetime, m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
 
   return true;
 }

@@ -2,6 +2,8 @@
 #include <iostream>
 #include <vector>
 #include <stdlib.h>
+#include <ctime>
+#include <chrono>
 #include <AMReX.H>
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
@@ -34,6 +36,17 @@ int main (int argc, char* argv[])
 {
 
   amrex::Initialize(argc, argv);
+
+  // What time is it now?
+  std::time_t strt_time;
+  std::tm* timeinfo;
+  char datetime [80];
+  
+  std::time(&strt_time);
+  timeinfo = std::localtime(&strt_time);
+  
+  std::strftime(datetime,80,"%Y%m%d%H%M",timeinfo);
+               
 
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
@@ -96,7 +109,7 @@ int main (int argc, char* argv[])
   }
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
-  // Write plot file
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffstackreadertest"), mfv, {"phase"}, geom, 0.0, 0);
+  // Write plot file to user's home dir with datetime in YYmmDDHHMM format
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffstackreadertest") += datetime, mfv, {"phase"}, geom, 0.0, 0);
 
 }
