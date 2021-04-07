@@ -40,12 +40,12 @@ int main (int argc, char* argv[])
   // What time is it now?
   std::time_t strt_time;
   std::tm* timeinfo;
-  char buffer [80];
+  char datetime [80];
 
   std::time(&strt_time);
   timeinfo = std::localtime(&strt_time);
   
-  std::strftime(buffer,80,"%Y%m%d%H%M",timeinfo);
+  std::strftime(datetime,80,"%Y%m%d%H%M",timeinfo);
 
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
@@ -107,11 +107,9 @@ int main (int argc, char* argv[])
     }
   }
   
-  std::cout << "Start time is:" << buffer << std::endl;
-
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
-  // Write plot file
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffreadertest"), mfv, {"phase"}, geom, 0.0, 0);
+  // Write plot file to home dir with current date and time in YYmmDDHHMM appended
+  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/tiffreadertest") += datetime, mfv, {"phase"}, geom, 0.0, 0);
 
 }
