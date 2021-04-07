@@ -1,6 +1,7 @@
 #include "TiffReader.H"
 #include <iostream>
 #include <vector>
+#include <ctime>
 #include <stdlib.h>
 #include <AMReX.H>
 #include <AMReX_Array.H>
@@ -34,6 +35,9 @@ int main (int argc, char* argv[])
 {
 
   amrex::Initialize(argc, argv);
+
+  // What time is it now?
+  amrex::Real strt_time = amrex::second();
 
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
@@ -94,6 +98,9 @@ int main (int argc, char* argv[])
       fab2(bit(),0) = fab1(bit(),0);
     }
   }
+  
+  std::cout << "Start time is:" << strt_time << std::endl;
+
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
   // Write plot file
