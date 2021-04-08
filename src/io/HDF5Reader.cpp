@@ -27,17 +27,14 @@ void HDF5Reader::readHDF5File()
   m_height = Dimensions[1];
   m_depth  = Dimensions[2];
 
- std::cout << "\n\nRow access\n";
- std::vector<int> RowData(static_cast<size_t>(Dimensions[1]));
- for (size_t i = 0; i < Dimensions[0]; i++) {
-    dataspace::Hyperslab RowSelection{{i, 0}, {1, 3}};
-    Dataset.read(RowData, RowSelection);
-    std::cout << "i: " << i << " | ";
-    for (auto Value : RowData) {
-      std::cout << Value << " ";
-    }
-    std::cout << "\n";
+  //populate m_raw with values
+  std::vector<int> AllElements(Dataspace.size());
+  Dataset.read(AllElements);
+  for (auto Value : AllElements) {
+    m_raw.push_back(Value);
   }
+
+  
 
 }
 
