@@ -47,7 +47,7 @@ $1/%.o: %.F90 | $(INC_DIR)
 endef
 
 # Main program
-$(APP_DIR)/Diffusion: Diffusion.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o
+$(APP_DIR)/Diffusion: Diffusion.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o build/io/DatReader.o build/io/HDF5Reader.o build/io/TiffStackReader.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
