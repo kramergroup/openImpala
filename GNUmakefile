@@ -3,7 +3,7 @@ CXX      := mpic++
 F90      := mpif90
 CXXFLAGS := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++11
 F90FLAGS := -g -O3
-LDFLAGS  := -L/usr/lib64 -lstdc++ -lm -lamrex -ltiff -lgfortran -lHYPRE -L/usr/local/lib64 -lh5cpp -I/usr/lib64/boost169
+LDFLAGS  := -L/usr/lib64 -lstdc++ -lm -lamrex -ltiff -lgfortran -lHYPRE -L/usr/lib -lh5cpp -lhdf5 -I/usr/lib64/boost169
 INCLUDE  := -I/usr/include/amrex -I/usr/include/hypre -I/usr/include/hdf5 -I/usr/local/include/h5cpp -I/usr/include/boost169
 
 
