@@ -24,8 +24,9 @@ class HDF5Reader
      *  in private member variables. 
      * 
      *  @param filename name of the HDF5 file containing the data
+     *  @param datasetname name of the HDF5 dataset path
      */
-    HDF5Reader(const std::string& filename);
+    HDF5Reader(const std::string& filename, const std::string& hdf5dataset);
 
 
     /** Thresholds the image 
@@ -62,8 +63,8 @@ class HDF5Reader
   
     void readHDF5File();
 
-    /*! Filename of the source TIFF file */
-    std::string m_filename;
+    /*! Filename of the source TIFF file and HDF5 dataset path name */
+    std::string m_filename, m_hdf5dataset;
 
     /*! Vector<int> containing the raw data */
     std::vector<uint32_t> m_raw; 
