@@ -30,6 +30,7 @@
 
 #define SAMPLE_HDF5_FILENAME "/openImpala/data/SampleData_2Phase.h5"
 #define SAMPLE_THRESHOLD_FILENAME "/openImpala/data/SampleData_Threshold"
+#define SAMPLE_HDF5_DATASET "t$F/channel$C"
 #define BOX_SIZE 32
 
 int main (int argc, char* argv[])
@@ -53,7 +54,7 @@ int main (int argc, char* argv[])
 
   // Reading the HDF5 file
   std::cout << "tHDF5Reader - Reading file " << SAMPLE_HDF5_FILENAME << std::endl;
-  HDF5Reader reader(SAMPLE_HDF5_FILENAME);
+  HDF5Reader reader(SAMPLE_HDF5_FILENAME, SAMPLE_HDF5_DATASET);
 
   std::cout << "Image dimensions: " << reader.width() << "x" << reader.height() << "x" << reader.depth() << std::endl;
   assert(reader.width() == 100);

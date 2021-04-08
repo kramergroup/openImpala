@@ -9,7 +9,8 @@
 using namespace hdf5;
 using namespace boost::filesystem;
 
-HDF5Reader::HDF5Reader( std::string const& filename) : m_filename(filename)
+HDF5Reader::HDF5Reader( std::string const& filename, 
+                        std::string const& datasetname) : m_filename(filename), m_datasetname(datasetname)
 {
   readHDF5File();
 }
@@ -20,7 +21,7 @@ void HDF5Reader::readHDF5File()
   path file_path(m_filename);
   file::File f1 = file::open(file_path);
   node::Group root_group = f1.root();
-  auto Dataset = root_group.get_dataset("t$F/channel$C");
+  auto Dataset = root_group.get_dataset(m_datasetname);
   dataspace::Simple Dataspace(Dataset.dataspace());
   auto Dimensions = Dataspace.current_dimensions();
   m_width  = Dimensions[0];

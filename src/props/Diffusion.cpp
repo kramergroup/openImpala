@@ -59,7 +59,10 @@ int main (int argc, char* argv[])
       DATA_PATH = DATA_PATH.substr(1);
       DATA_PATH = homeDir + DATA_PATH;
   }
-    
+  
+  std::string HDF5_DATASET;
+  pp.get("HDF5_DATASET", HDF5_DATASET); // query HDF5 dataset path from inputs file
+  
   amrex::Real DIRECTION = Direction::X;
   pp.query("DIRECTION", DIRECTION);  // query direction from inputs file
 
@@ -146,7 +149,7 @@ int main (int argc, char* argv[])
     else if (FILENAME.substr (FILENAME.length() - 2) == "h5" || FILENAME.substr (FILENAME.length() - 4) == "hdf5")
     {   
     amrex::Print() << "tHDF5Reader - Reading file " << DATA_PATH + FILENAME << std::endl;
-    HDF5Reader reader(DATA_PATH + FILENAME);
+    HDF5Reader reader(DATA_PATH + FILENAME, HDF5_DATASET);
 
     const amrex::Box bx = reader.box();
     fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
