@@ -10,44 +10,44 @@ stages:
 openimpala-image:
   stage: pull
   script: 
-     - singularity pull shub://jameslehoux/openimpala-singularity:hamilton
+     - singularity pull shub://jameslehoux/openimpala-singularity
   artifacts:
     paths:
-     - openimpala-singularity_hamilton.sif
+     - openimpala-singularity_latest.sif
     expire_in: 1 hour
 
 # Test OpenImpala TiffReader class
 tiffreader:
   stage: test
   script: 
-     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTiffReader
+     - singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tTiffReader
 
 # Test OpenImpala TiffStackReader class
 tiffstackreader:
   stage: test
   script: 
-     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTiffStackReader
+     - singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tTiffStackReader
 
 # Test OpenImpala DatReader class
 datreader:
   stage: test
   script: 
-     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tDatReader
+     - singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tDatReader
 
 # Test OpenImpala HDF5Reader class
 HDF5reader:
   stage: test
   script: 
-     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tHDF5Reader
+     - singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tHDF5Reader
 
 # Test OpenImpala VolumeFraction class
 volumefraction:
   stage: test
   script: 
-     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tVolumeFraction
+     - singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tVolumeFraction
      
 # Test OpenImpala Tortuosity class
 tortuosity:
   stage: test
   script: 
-     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTortuosity
+     - singularity exec openimpala-singularity_latest.sif /openImpala/build/tests/tTortuosity
