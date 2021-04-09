@@ -18,13 +18,17 @@ The source code is available at https://github.com/kramergroup/openImpala.git .
 
 ### Containerised compile environment
 
-Singularity hub holds a containerised build environment suitable for running OpenImpala, which uses:
+Singularity hub holds a containerised build environment suitable for running OpenImpala, built from this repository https://github.com/jameslehoux/openimpala-singularity, and contains:
 
-- Ubuntu
+- Centos 7
 - OpenMPI
 - Hypre
 - LibTiff
 - AMReX
+- HDF5
+- h5cpp
+- InfiniBand
+- OpenImpala
 
 To pull the singularity image from the hub, first, ensure you have Singularity installed on your system, then run the following command:
 
