@@ -33,7 +33,13 @@ datreader:
   stage: test
   script: 
      - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tDatReader
-     
+
+# Test OpenImpala HDF5Reader class
+HDF5reader:
+  stage: test
+  script: 
+     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tHDF5Reader
+
 # Test OpenImpala VolumeFraction class
 volumefraction:
   stage: test
