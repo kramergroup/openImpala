@@ -21,7 +21,13 @@ tiffreader:
   stage: test
   script: 
      - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTiffReader
-  
+
+# Test OpenImpala TiffStackReader class
+tiffstackreader:
+  stage: test
+  script: 
+     - singularity exec openimpala-singularity_hamilton.sif /openImpala/build/tests/tTiffStackReader
+
 # Test OpenImpala DatReader class
 datreader:
   stage: test
