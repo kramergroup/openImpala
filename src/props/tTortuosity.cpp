@@ -99,8 +99,13 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction ERROR" << std::endl;
   }
 
+  // Define results path directory
+  // Get the users home directory to write plot file to right place
+  const char* homeDir = getenv("HOME");
+  std::string resultsdir = homeDir + std::string("/openimpalaresults");
+
   // Compute tortuosity
-  TortuosityHypre tortuosity(geom,ba,dm,mf_phase,vf.value(),0,DIRECTION,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosity(geom,ba,dm,mf_phase,vf.value(),0,DIRECTION,TortuosityHypre::SolverType::FlexGMRES, resultsdir);
 
   amrex::Real tau_value = tortuosity.value();
   amrex::Print() << " Tortuosity value: " << tau_value << std::endl;

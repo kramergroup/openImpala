@@ -49,15 +49,24 @@ int main (int argc, char* argv[])
 
   std::string FILENAME;
   pp.get("FILENAME", FILENAME);  // query filename from inputs file
-    
+  
+  // Get the users home directory to write plot file to right place
+  const char* homeDir = getenv("HOME");
+  
   std::string DATA_PATH = "/openImpala/data/";
   pp.get("DATA_PATH", DATA_PATH);  // query data directory from inputs file
   if(DATA_PATH.at(0) == '~')
   {
-      // Get the users home directory to write plot file to right place
-      const char* homeDir = getenv("HOME");
       DATA_PATH = DATA_PATH.substr(1);
       DATA_PATH = homeDir + DATA_PATH;
+  }
+
+  std::string RESULTS_PATH = "~/openimpalaresults/";
+  pp.get("RESULTS_PATH", RESULTS_PATH);  // query results directory from inputs file
+  if(RESULTS_PATH.at(0) == '~')
+  {
+      RESULTS_PATH = RESULTS_PATH.substr(1);
+      RESULTS_PATH = homeDir + RESULTS_PATH;   
   }
   
   std::string HDF5_DATASET;
@@ -219,7 +228,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
   // Compute tortuosity in x direction
-  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
 
   amrex::Real tau_value_x = tortuosityx.value();
   amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
@@ -230,7 +239,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Y" << std::endl;
 
   // Compute tortuosity in y direction
-  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
 
   amrex::Real tau_value_y = tortuosityy.value();
   amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;
@@ -241,7 +250,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Z" << std::endl;
 
   // Compute tortuosity in z direction
-  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
 
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;
@@ -252,7 +261,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
   // Compute tortuosity in x direction
-  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
 
   amrex::Real tau_value_x = tortuosityx.value();
   amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
@@ -260,7 +269,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Y" << std::endl;
 
   // Compute tortuosity in y direction
-  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
 
   amrex::Real tau_value_y = tortuosityy.value();
   amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;
@@ -268,7 +277,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Z" << std::endl;
 
   // Compute tortuosity in z direction
-  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES);
+  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
 
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;

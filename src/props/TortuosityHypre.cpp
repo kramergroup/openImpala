@@ -19,9 +19,11 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                  const amrex::Real& vf,
                                  const int phase,
                                  const Direction dir,
-                                 const SolverType st) : m_geom(geom), m_ba(ba), m_dm(dm),
+                                 const SolverType st,
+                                 std::string const& resultspath) : m_geom(geom), m_ba(ba), m_dm(dm),
                                                         m_mf_phase(mf), m_phase(phase), m_vf(vf),
-                                                        m_dir(dir), m_solvertype(st),
+                                                        m_dir(dir), m_solvertype(st), 
+                                                        m_resultspath(resultspath),
                                                         m_mf_phi(ba,dm,2,0),
                                                         m_first_call(true)
 {
@@ -236,10 +238,8 @@ bool TortuosityHypre::solve()
   getSolution(m_mf_phi,0);
   getCellTypes(m_mf_phi,1);
 
-  // Get the users home directory to write plot file to right place
-  const char* homeDir = getenv("HOME");
   // Write plot file to user's home dir with datetime appended in YYmmDDHHMM format
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/diffusionplot") += datetime, m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
+  amrex::WriteSingleLevelPlotfile(m_resultspath + std::string("/diffusionplot") += datetime, m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
 
   return true;
 }

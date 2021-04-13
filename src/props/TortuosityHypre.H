@@ -40,6 +40,7 @@ class TortuosityHypre : public Tortuosity
      * @param mf the amrex::iMultiFab describing the phase space
      * @param phase the index of the phase for which the tortuosity should be calculated
      * @param dir the principal direction of the flow
+     * @param resultspath the directory path to results
      *
      */
     TortuosityHypre(const amrex::Geometry& geom,
@@ -49,7 +50,8 @@ class TortuosityHypre : public Tortuosity
                     const amrex::Real& vf,
                     const int phase,
                     const Direction dir,
-                    const SolverType = GMRES);
+                    const SolverType = GMRES,
+                    const std::string& resultspath = "~/openimpalaresults");
 
 
     amrex::Real value(const bool refresh = false) override;
@@ -132,7 +134,7 @@ class TortuosityHypre : public Tortuosity
      */
     void getCellTypes(amrex::MultiFab& phi, int ncomp=1);
 
-        /** Compute global fluxes
+    /** Compute global fluxes
      *
      * This function computes the global fluxes in and out of the domain.
      * A call to solve() is expected before this funcition is called.
@@ -151,8 +153,12 @@ class TortuosityHypre : public Tortuosity
      */
     const SolverType m_solvertype;
 
-
-
+    /** Define the results path directory
+     *
+     *  This variable defines where the results will be produced.
+     */
+    std::string m_resultspath;   
+    
     /** Fab geometry
      *
      * These variable define the Amrex box geometry and
