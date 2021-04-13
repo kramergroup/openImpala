@@ -19,7 +19,7 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                  const amrex::Real& vf,
                                  const int phase,
                                  const Direction dir,
-                                 const SolverType st
+                                 const SolverType st,
                                  std::string const& resultspath) : m_geom(geom), m_ba(ba), m_dm(dm),
                                                         m_mf_phase(mf), m_phase(phase), m_vf(vf),
                                                         m_dir(dir), m_solvertype(st), 

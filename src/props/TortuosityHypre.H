@@ -50,8 +50,8 @@ class TortuosityHypre : public Tortuosity
                     const amrex::Real& vf,
                     const int phase,
                     const Direction dir,
-                    const SolverType = GMRES
-                    const std::string& resultspath);
+                    const SolverType = GMRES,
+                    const std::string& resultspath = "~/openimpalaresults");
 
 
     amrex::Real value(const bool refresh = false) override;
