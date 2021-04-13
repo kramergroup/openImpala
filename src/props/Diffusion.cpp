@@ -49,15 +49,27 @@ int main (int argc, char* argv[])
 
   std::string FILENAME;
   pp.get("FILENAME", FILENAME);  // query filename from inputs file
-    
+  
+  // Get the users home directory to write plot file to right place
+  const char* homeDir = getenv("HOME");
+  
   std::string DATA_PATH = "/openImpala/data/";
   pp.get("DATA_PATH", DATA_PATH);  // query data directory from inputs file
   if(DATA_PATH.at(0) == '~')
   {
-      // Get the users home directory to write plot file to right place
-      const char* homeDir = getenv("HOME");
       DATA_PATH = DATA_PATH.substr(1);
       DATA_PATH = homeDir + DATA_PATH;
+  }
+
+  std::string FILENAME;
+  pp.get("FILENAME", FILENAME);  // query filename from inputs file
+
+  std::string RESULTS_PATH = "~/openimpalaresults/";
+  pp.get("RESULTS_PATH", RESULTS_PATH);  // query results directory from inputs file
+  if(RESULTS_PATH.at(0) == '~')
+  {
+      RESULTS_PATH = RESULTS_PATH.substr(1);
+      RESULTS_PATH = homeDir + RESULTS_PATH   
   }
   
   std::string HDF5_DATASET;
