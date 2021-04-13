@@ -102,7 +102,7 @@ int main (int argc, char* argv[])
   // Define results path directory
   // Get the users home directory to write plot file to right place
   const char* homeDir = getenv("HOME");
-  std::string resultsdir = homeDir + "/openimpalaresults";
+  std::string resultsdir = homeDir + std::string("/openimpalaresults");
 
   // Compute tortuosity
   TortuosityHypre tortuosity(geom,ba,dm,mf_phase,vf.value(),0,DIRECTION,TortuosityHypre::SolverType::FlexGMRES, resultsdir);
