@@ -61,15 +61,12 @@ int main (int argc, char* argv[])
       DATA_PATH = homeDir + DATA_PATH;
   }
 
-  std::string FILENAME;
-  pp.get("FILENAME", FILENAME);  // query filename from inputs file
-
   std::string RESULTS_PATH = "~/openimpalaresults/";
   pp.get("RESULTS_PATH", RESULTS_PATH);  // query results directory from inputs file
   if(RESULTS_PATH.at(0) == '~')
   {
       RESULTS_PATH = RESULTS_PATH.substr(1);
-      RESULTS_PATH = homeDir + RESULTS_PATH   
+      RESULTS_PATH = homeDir + RESULTS_PATH;   
   }
   
   std::string HDF5_DATASET;
