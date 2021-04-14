@@ -29,7 +29,7 @@
 int main (int argc, char* argv[])
 {
   amrex::Initialize(argc, argv);
-
+  {
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
   std::cout << AMREX_SPACEDIM << "D test" << std::endl;
@@ -87,4 +87,9 @@ int main (int argc, char* argv[])
   assert( vf_value_1 <= 1.0 );
 
   assert( abs(1.0-vf_value_0-vf_value_1) < EPS );
+
+  } // Ensure amrex related destructors have been called before tearing down the whole thing
+    // by putting everything in curly brackets.
+  amrex::Finalize();
+
 }
