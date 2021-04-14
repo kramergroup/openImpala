@@ -37,7 +37,7 @@ int main (int argc, char* argv[])
 {
 
   amrex::Initialize(argc, argv);
-
+  {
   // What time is it now?
   std::time_t strt_time;
   std::tm* timeinfo;
@@ -112,4 +112,8 @@ int main (int argc, char* argv[])
   // Write plot file to user's home dir with datetime appended in YYmmDDHHMM format
   amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/hdf5readertest") += datetime, mfv, {"phase"}, geom, 0.0, 0);
 
+  } // Ensure amrex related destructors have been called before tearing down the whole thing
+  // by putting everything in curly brackets.
+  amrex::Finalize();
+  
 }
