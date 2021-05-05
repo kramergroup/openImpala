@@ -20,7 +20,7 @@ The source code is available at https://github.com/kramergroup/openImpala.git .
 
 ### Containerised compile environment
 
-Singularity hub holds a containerised build environment suitable for running OpenImpala, built from this repository https://github.com/jameslehoux/openimpala-singularity, and contains:
+cloud.sylabs.io holds a containerised build environment suitable for running OpenImpala and contains:
 
 - Centos 7
 - OpenMPI
@@ -35,7 +35,7 @@ Singularity hub holds a containerised build environment suitable for running Ope
 To pull the singularity image from the hub, first, ensure you have Singularity installed on your system, then run the following command:
 
 ```bash
-singularity pull shub://jameslehoux/openimpala-singularity
+singularity pull library://jameslehoux/default/openimpala:latest
 ```
 This command will pull the OpenImpala Singularity image to your current directory.
 
