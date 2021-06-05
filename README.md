@@ -14,6 +14,10 @@ OpenImpala then calculates the equivalent homogenised transport coefficients for
 
 OpenImpala has been shown to scale well with an increasing number of computational cores on distributed memory architectures, making it applicable to large datasets typical of modern tomography.
 
+## Citation
+
+If you've used OpenImpala in the preparation of a publication, please consider citing this publication: https://doi.org/10.1016/j.softx.2021.100729 
+
 ## Getting Started
 
 The source code is available at https://github.com/kramergroup/openImpala.git .
