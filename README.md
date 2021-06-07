@@ -159,4 +159,5 @@ All rights reserved.
 
 The license for OpenImpala can be found at LICENSE.
 
+This work was funded by the EPSRC and STFC.
 
