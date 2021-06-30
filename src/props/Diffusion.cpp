@@ -182,7 +182,7 @@ int main (int argc, char* argv[])
     mf_phase.FillBoundary(geom.periodicity());
                                                              
 }
-    else if (FILENAME.at(FILENAME.length() - 4) == '.' || FILENAME.at(FILENAME.length() - 5) == '.')
+    else if (FILENAME.at(FILENAME.length() - 3) != '.' || FILENAME.at(FILENAME.length() - 4) != '.' || FILENAME.at(FILENAME.length() - 5) != '.')
     {   
     amrex::Print() << "tTiffStackReader - Reading file " << DATA_PATH + FILENAME << std::endl;
     TiffStackReader reader(DATA_PATH + FILENAME);
