@@ -80,6 +80,9 @@ int main (int argc, char* argv[])
   amrex::Real BOX_SIZE = 32;
   pp.query("BOX_SIZE", BOX_SIZE);
 
+  std::int TIFF_STACK = 100;
+  pp.query("TIFF_STACK", TIFF_STACK);    
+    
   amrex::Real EPS= 1e-10;
   pp.query("EPS", EPS);
 
@@ -185,7 +188,7 @@ int main (int argc, char* argv[])
     else if (FILENAME.at(FILENAME.length() - 3) != '.' || FILENAME.at(FILENAME.length() - 4) != '.' || FILENAME.at(FILENAME.length() - 5) != '.')
     {   
     amrex::Print() << "tTiffStackReader - Reading file " << DATA_PATH + FILENAME << std::endl;
-    TiffStackReader reader(DATA_PATH + FILENAME);
+    TiffStackReader reader(DATA_PATH + FILENAME. TIFF_STACK);
 
     const amrex::Box bx = reader.box();
     fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
