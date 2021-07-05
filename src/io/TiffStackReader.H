@@ -25,7 +25,8 @@ class TiffStackReader
      *
      *  @param filename name of the TIFF file containing the data
      */
-    TiffStackReader(const std::string& filename);
+    TiffStackReader(const std::string& filename,
+                    const int& tiffstack);
 
 
     /** Thresholds the image
@@ -70,6 +71,9 @@ class TiffStackReader
 
     /*! Dimensions of the domain */
     int m_width, m_height, m_depth;
+  
+    /*! Reference to size of tiff stack */
+    int& m_tiffstack;
 
 };
 
