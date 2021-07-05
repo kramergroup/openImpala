@@ -8,7 +8,9 @@
 #include <sstream>
 #include <iomanip>
 
-TiffStackReader::TiffStackReader( std::string const& filename) : m_filename(filename)
+TiffStackReader::TiffStackReader( std::string const& filename,
+                                  const int& tiffstack) : m_filename(filename)
+                                                           m_tiffstack(tiffstack),
 {
   readTiffFile();
 }
@@ -16,7 +18,7 @@ TiffStackReader::TiffStackReader( std::string const& filename) : m_filename(file
 void TiffStackReader::readTiffFile()
 {
   TIFFSetWarningHandler(NULL);
-  for (int j=0; j<99; ++j)
+  for (int j=0; j<m_tiffstack; ++j)
   {
   std::string name = m_filename;
   std::stringstream ss;
