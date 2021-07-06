@@ -72,7 +72,7 @@ class TiffStackReader
     int m_width, m_height, m_depth;
   
     /*! Reference to size of tiff stack */
-    int& m_tiffstack;
+    int m_tiffstack;
 
 };
 
