@@ -9,8 +9,8 @@
 #include <iomanip>
 
 TiffStackReader::TiffStackReader( std::string const& filename,
-                                  const int& tiffstack) : m_filename(filename),
-                                                           m_tiffstack(tiffstack)
+                                  std::int    const& tiffstack) : m_filename(filename),
+                                                                  m_tiffstack(tiffstack)
 {
   readTiffFile();
 }
