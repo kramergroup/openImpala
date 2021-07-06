@@ -25,7 +25,7 @@ class TiffStackReader
      *
      *  @param filename name of the TIFF file containing the data
      */
-    TiffStackReader(const std::string& filename, const int& tiffstack);
+    TiffStackReader(const std::string& filename, const int tiffstack);
 
 
     /** Thresholds the image
