@@ -54,7 +54,7 @@ int main (int argc, char* argv[])
 
   // Reading the tiff file
   std::cout << "tTiffStackReader - Reading file " << SAMPLE_TIFF_FILENAME << std::endl;
-  TiffStackReader reader(SAMPLE_TIFF_FILENAME);
+  TiffStackReader reader(SAMPLE_TIFF_FILENAME, 100);
 
   std::cout << "Image dimensions: " << reader.width() << "x" << reader.height() << "x" << reader.depth() << std::endl;
   assert(reader.width() == 100);
