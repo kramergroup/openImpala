@@ -80,7 +80,7 @@ int main (int argc, char* argv[])
   amrex::Real BOX_SIZE = 32;
   pp.query("BOX_SIZE", BOX_SIZE);
 
-  std::int TIFF_STACK = 100;
+  int TIFF_STACK = 100;
   pp.query("TIFF_STACK", TIFF_STACK);    
     
   amrex::Real EPS= 1e-10;
