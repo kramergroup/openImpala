@@ -188,7 +188,7 @@ int main (int argc, char* argv[])
     else if (FILENAME.at(FILENAME.length() - 3) != '.' || FILENAME.at(FILENAME.length() - 4) != '.' || FILENAME.at(FILENAME.length() - 5) != '.')
     {   
     amrex::Print() << "tTiffStackReader - Reading file " << DATA_PATH + FILENAME << std::endl;
-    TiffStackReader reader(DATA_PATH + FILENAME. TIFF_STACK);
+    TiffStackReader reader(DATA_PATH + FILENAME, TIFF_STACK);
 
     const amrex::Box bx = reader.box();
     fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
