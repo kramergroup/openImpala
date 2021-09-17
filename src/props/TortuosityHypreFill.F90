@@ -122,11 +122,11 @@ contains
             if ( dir .eq. 0 ) then
                if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
                  a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-                 rhs(m) = vhi
+                 !rhs(m) = vhi
                end if
                if ( (p(i+1,j,k) .ne. p(i,j,k)) ) then
                  a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-                 rhs(m) = vlo
+                 !rhs(m) = vlo
                end if
                if ((i .eq. domlo(1)) )  then
                  a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
