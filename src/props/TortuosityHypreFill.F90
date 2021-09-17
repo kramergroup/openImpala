@@ -121,11 +121,11 @@ contains
             ! neumann boundary conditions
             if ( dir .eq. 0 ) then
                if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
-                 a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
+                 a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
                  rhs(m) = vhi
                end if
                if ( (p(i+1,j,k) .ne. p(i,j,k)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
+                 a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
                  rhs(m) = vlo
                end if
                if ((i .eq. domlo(1)) )  then
