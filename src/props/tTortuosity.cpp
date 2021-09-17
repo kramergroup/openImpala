@@ -24,7 +24,7 @@
 
 #include <sstream>
 
-#define SAMPLE_TIFF_FILENAME "/openImpala/data/SampleData_3Phase.tif"
+#define SAMPLE_TIFF_FILENAME "/openImpala/data/spheres.tif"
 #define BOX_SIZE 32
 #define EPS 1e-10
 
