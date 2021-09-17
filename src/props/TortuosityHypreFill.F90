@@ -149,11 +149,11 @@ contains
 
           ! Change to Neumann condition at domain boundaries
           ! perpendicular to flow direction
-          if ( ( dir .eq. direction_x ) .and. (i .eq. domlo(1) ) ) then
+          if ( ( dir .eq. 0 ) .and. (i .eq. domlo(1) ) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
-          if ( ( dir .eq. direction_x ) .and. (i .eq. domhi(1) ) ) then
+          if ( ( dir .eq. 0 ) .and. (i .eq. domhi(1) ) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
