@@ -119,7 +119,7 @@ contains
             ! Change to one-sided Dirichlet condition at phase and domain boundaries
             ! and populate mixed cells in the principal flow direction with von
             ! neumann boundary conditions
-            if ( dir .eq. 0 ) then
+            if ( dir .eq. direction_x ) then
                if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
                  a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
                  !rhs(m) = vhi
