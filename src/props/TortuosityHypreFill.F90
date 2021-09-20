@@ -116,9 +116,9 @@ contains
             a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
             rhs(m) = 0.0
             
-            ! Change to one-sided Dirichlet condition at phase and domain boundaries
-            ! and populate mixed cells in the principal flow direction with von
-            ! neumann boundary conditions
+            ! Change to one-sided zero flux Neumann at phase and domain boundaries
+            ! and populate mixed cells in the principal flow direction with Dirichlet
+            ! boundary conditions
             if ( dir .eq. direction_x ) then
                if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
                  a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
