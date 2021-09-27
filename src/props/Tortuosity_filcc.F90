@@ -219,11 +219,11 @@ end subroutine tortuosity_remspot
             do k = domlo(3), domhi(3)
                do j = domlo(2), domhi(2)
                   do i = domlo(1), domhi(1)
-                     if ( p(i,j,k) .e. 0) then
-                        if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
+                     if ( p(i,j,k,1) .e. 0) then
+                        if ( (p(i-1,j,k,1) .ne. p(i,j,k,1)) )  then
                             q(i,j,k,n) = vhi 
                         end if
-                        if ( (p(i+1,j,k) .ne. p(i,j,k)) ) then
+                        if ( (p(i+1,j,k,1) .ne. p(i,j,k,1)) ) then
                             q(i,j,k,n) = vlo      
                         end if
                      end if
@@ -238,11 +238,11 @@ end subroutine tortuosity_remspot
             do k = domlo(3), domhi(3)
                do j = domlo(2), domhi(2)
                   do i = domlo(1), domhi(1)
-                     if ( p(i,j,k) .e. 0) then
-                        if ( (p(i,j-1,k) .ne. p(i,j,k)) )  then
+                     if ( p(i,j,k,1) .e. 0) then
+                        if ( (p(i,j-1,k,1) .ne. p(i,j,k,1)) )  then
                             q(i,j,k,n) = vhi 
                         end if
-                        if ( (p(i,j+1,k) .ne. p(i,j,k)) ) then
+                        if ( (p(i,j+1,k,1) .ne. p(i,j,k,1)) ) then
                             q(i,j,k,n) = vlo 
                         end if
                      end if                            
@@ -257,11 +257,11 @@ end subroutine tortuosity_remspot
             do k = domlo(3), domhi(3)
                do j = domlo(2), domhi(2)
                   do i = domlo(1), domhi(1)
-                     if ( p(i,j,k) .e. 0) then
-                        if ( (p(i,j,k-1) .ne. p(i,j,k)) )  then
+                     if ( p(i,j,k,1) .e. 0) then
+                        if ( (p(i,j,k-1,1) .ne. p(i,j,k,1)) )  then
                             q(i,j,k,n) = vhi 
                         end if
-                        if ( (p(i,j,k+1) .ne. p(i,j,k)) ) then
+                        if ( (p(i,j,k+1,1) .ne. p(i,j,k,1)) ) then
                             q(i,j,k,n) = vlo 
                         end if
                      end if                            
