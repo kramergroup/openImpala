@@ -68,12 +68,18 @@ contains
   ! ::: 
   ! :::         0 = x[i+1] - x[i]
   ! :::
-  ! :::      which is a normal upwind gradient for zero flux. 
-  ! :::      mixed cells in the principal flow direction are populated with von Neumann 
-  ! :::      conditions, used to fix the concentration. 
+  ! :::      which is a normal upwind gradient for zero flux
+  ! :::
+  ! :::    Domain boundary cells:
+  ! :::      At the inlet and outlet in flow direction, von Neumann conditions are used
+  ! :::      to fix the concentration. 
   ! :::
   ! :::         v_lo = x[0]     v_hi = x[max]
   ! :::
+  ! :::      The kernel and right-hand side are set accordingly
+  ! :::        
+  ! :::                 c  -x  +x  -y  +y  -z  +z
+  ! :::      neumann:   1   0   0   0   0   0   0
   ! :::
   ! :::      Domain boundaries parallel to the flow direction have Dirichlet boundary 
   ! :::      conditions and are configured like internal Dirichlet conditions (see above).
@@ -116,95 +122,57 @@ contains
             a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
             rhs(m) = 0.0
             
-            ! Change to one-sided zero flux Neumann at phase and domain boundaries
-            ! and populate mixed cells in the principal flow direction with Dirichlet
-            ! boundary conditions
-            if ( dir .eq. direction_x ) then
-               if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
-                 a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-                 rhs(m) = vhi
-               end if
-               if ( (p(i+1,j,k) .ne. p(i,j,k)) ) then
-                 a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-                 rhs(m) = vlo
-               end if
-               if ((i .eq. domlo(1)) )  then
-                 a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
-               end if
-               if ((i .eq. domhi(1)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
-               end if
-               if ( (p(i,j-1,k) .ne. p(i,j,k)) .or. (j .eq. domlo(2)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
-               end if
-               if ( (p(i,j+1,k) .ne. p(i,j,k)) .or. (j .eq. domhi(2)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
-               end if
-               if ( (p(i,j,k-1) .ne. p(i,j,k)) .or. (k .eq. domlo(3)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
-               end if 
-               if ( (p(i,j,k+1) .ne. p(i,j,k)) .or. (k .eq. domhi(3)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
-               end if
+            ! Change to one-sided Dirichlet condition at phase and domain boundaries
+            if ( (p(i-1,j,k) .ne. p(i,j,k)) .or. (i .eq. domlo(1)) )  then
+              a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
             end if
-            if ( dir .eq. direction_y ) then
-               if ( (p(i-1,j,k) .ne. p(i,j,k)) .or. (i .eq. domlo(1)) )  then
-                 a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
-               end if
-               if ( (p(i+1,j,k) .ne. p(i,j,k)) .or. (i .eq. domhi(1)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
-               end if
-               if ((j .eq. domlo(2)) )  then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
-               end if
-               if ((j .eq. domhi(2)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
-               end if
-               if ( (p(i,j-1,k) .ne. p(i,j,k))) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
-                 rhs(m) = vhi
-               end if
-               if ( (p(i,j+1,k) .ne. p(i,j,k))) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
-                 rhs(m) = vlo
-               end if
-               if ( (p(i,j,k-1) .ne. p(i,j,k)) .or. (k .eq. domlo(3)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
-               end if 
-               if ( (p(i,j,k+1) .ne. p(i,j,k)) .or. (k .eq. domhi(3)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
-               end if
+            if ( (p(i+1,j,k) .ne. p(i,j,k)) .or. (i .eq. domhi(1)) ) then
+              a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
             end if
-            if ( dir .eq. direction_z ) then
-               if ( (p(i-1,j,k) .ne. p(i,j,k)) .or. (i .eq. domlo(1)) )  then
-                 a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
-               end if
-               if ( (p(i+1,j,k) .ne. p(i,j,k)) .or. (i .eq. domhi(1)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
-               end if
-               if ( (p(i,j-1,k) .ne. p(i,j,k)) .or. (j .eq. domlo(2)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
-               end if
-               if ( (p(i,j+1,k) .ne. p(i,j,k)) .or. (j .eq. domhi(2)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
-               end if
-               if ((k .eq. domlo(3)) )  then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
-               end if
-               if ((k .eq. domhi(3)) ) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
-               end if
-               if ( (p(i,j,k-1) .ne. p(i,j,k))) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
-                 rhs(m) = vhi
-               end if
-               if ( (p(i,j,k+1) .ne. p(i,j,k))) then
-                 a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
-                 rhs(m) = vlo
-               end if
-            end if           
+            if ( (p(i,j-1,k) .ne. p(i,j,k)) .or. (j .eq. domlo(2)) ) then
+              a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
+            end if
+            if ( (p(i,j+1,k) .ne. p(i,j,k)) .or. (j .eq. domhi(2)) ) then
+              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
+            end if
+            if ( (p(i,j,k-1) .ne. p(i,j,k)) .or. (k .eq. domlo(3)) ) then
+              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
+            end if 
+            if ( (p(i,j,k+1) .ne. p(i,j,k)) .or. (k .eq. domhi(3)) ) then
+              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
+            end if
+
           end if 
 
+          ! Fixed Boundaries 
+          ! ----------------
+
+          ! Change to Neumann condition at domain boundaries
+          ! perpendicular to flow direction
+          if ( ( dir .eq. direction_x ) .and. (i .eq. domlo(1) ) ) then
+            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+            rhs(m) = vlo
+          end if
+          if ( ( dir .eq. direction_x ) .and. (i .eq. domhi(1) ) ) then
+            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+            rhs(m) = vhi
+          end if
+          if ( ( dir .eq. direction_y ) .and. (j .eq. domlo(2) ) ) then
+            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+            rhs(m) = vlo
+          end if
+          if ( ( dir .eq. direction_y ) .and. (j .eq. domhi(2) ) ) then
+            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+            rhs(m) = vhi
+          end if
+          if ( ( dir .eq. direction_z ) .and. (k .eq. domlo(3) ) ) then
+            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+            rhs(m) = vlo
+          end if
+          if ( ( dir .eq. direction_z ) .and. (k .eq. domhi(3) ) ) then
+            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+            rhs(m) = vhi
+          end if
           
           ! Initial guess
           ! -------------
