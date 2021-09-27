@@ -225,6 +225,8 @@ bool TortuosityHypre::solve()
     if (HYPRE_CheckError(ierr,HYPRE_ERROR_CONV))
     {
       amrex::Print() << "ERROR: Solver did not converge" << std::endl;
+      // Write plot file to user's home dir with datetime appended in YYmmDDHHMM format
+      amrex::WriteSingleLevelPlotfile(m_resultspath + std::string("/failedplot") += datetime, m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
     } else if (HYPRE_CheckError(ierr,HYPRE_ERROR_MEMORY)) {
       amrex::Print() << "ERROR: Solver was unable to allocate memory" << std::endl;
     } else if (HYPRE_CheckError(ierr,HYPRE_ERROR_ARG)) {
