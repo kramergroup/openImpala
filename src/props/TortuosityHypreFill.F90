@@ -103,7 +103,7 @@ contains
 
           idx = (/ (7*(m-1)+u,u=1,7) /)
 
-          if ( p(i,j,k) .eq. phase) then
+          if ( p(i,j,k) .ne. phase) then
           
             ! Constant value in non fluidic phase
             ! p[x,y,z]  =  0
