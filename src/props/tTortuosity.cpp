@@ -24,7 +24,7 @@
 
 #include <sstream>
 
-#define SAMPLE_TIFF_FILENAME "../../data/spheres.tif"
+#define SAMPLE_TIFF_FILENAME "../../data/SampleData_2Phase.tif"
 #define BOX_SIZE 32
 #define EPS 1e-10
 
