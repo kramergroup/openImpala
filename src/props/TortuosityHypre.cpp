@@ -260,8 +260,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     amrex::Real phisumhi = 0.0;
     int num_phase_cells_0 = 0;
     int num_phase_cells_1 = 0;
-    int num_phase_cells_2 = 0;
-    int num_phase_cells_3 = 0;
 
     // Iterate over all boxes and count cells with value=m_phase
     if ( m_dir==0)
@@ -284,12 +282,12 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
 
       // Sum all concentration values for each slice in x direction
-      const auto domain_min_x = m_geom.Domain().loVect()[0];
-      if ( lo.x == domain_min_x) {
+      const auto domain_min_x = m_geom.Domain().loVect()[0];      
+      for (int x = (lo.x+1); x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
-                if ( phase_fab_4(lo.x,y,z) == m_phase && phase_fab_4(lo.x+1,y,z) == m_phase ) {
-                  phisumlo += phi_fab_4(lo.x+1,y,z) - phi_fab_4(lo.x,y,z);
+                if ( phase_fab_4(x,y,z) != phase_fab_4(x-1,y,z) && phase_fab_4(x,y,z) == m_phase ) {
+                  phisumhi += phi_fab_4(x,y,z) - phi_fab_4(x+1,y,z);
                   num_phase_cells_0 += 1;
               }
             }
@@ -297,11 +295,11 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       }
 
       const auto domain_max_x = m_geom.Domain().hiVect()[0];;
-      if ( hi.x == domain_max_x) {
+      for (int x = lo.x; x <= (hi.x-1); ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
-                if ( phase_fab_4(hi.x,y,z) == m_phase && phase_fab_4(hi.x-1,y,z) == m_phase ) {
-                  phisumhi += phi_fab_4(hi.x,y,z) - phi_fab_4(hi.x-1,y,z);
+                if ( phase_fab_4(x,y,z) != phase_fab_4(x+1,y,z) && phase_fab_4(x,y,z) == m_phase ) {
+                  phisumlo += phi_fab_4(x,y,z) - phi_fab_4(x-1,y,z);
                   num_phase_cells_1 += 1;
               }
             }
@@ -333,11 +331,11 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
     // Sum all concentration values for each slice in y direction
     const auto domain_min_y = m_geom.Domain().loVect()[1];
-    if ( lo.y == domain_min_y) {
+    for (int y = (lo.y+1); y <= hi.y; ++y) {
           for (int x = lo.x; x <= hi.x; ++x) {
             for (int z = lo.z; z <= hi.z; ++z) {
-              if ( phase_fab_4(x,lo.y,z) == m_phase && phase_fab_4(x,lo.y+1,z) == m_phase ) {
-                phisumlo += phi_fab_4(x,lo.y+1,z) - phi_fab_4(x,lo.y,z);
+              if ( phase_fab_4(x,y,z) != phase_fab_4(x,y-1,z) && phase_fab_4(x,y,z) == m_phase ) {
+                phisumhi += phi_fab_4(x,y,z) - phi_fab_4(x,y+1,z);
                 num_phase_cells_0 += 1;
             }
           }
@@ -345,11 +343,11 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     }
 
     const auto domain_max_y = m_geom.Domain().hiVect()[1];;
-    if ( hi.y == domain_max_y) {
+    for (int y = lo.y; y <= (hi.y-1); ++y) {
           for (int x = lo.x; x <= hi.x; ++x) {
             for (int z = lo.z; z <= hi.z; ++z) {
-              if ( phase_fab_4(x,hi.y,z) == m_phase && phase_fab_4(x,hi.y-1,z) == m_phase ) {
-                phisumhi += phi_fab_4(x,hi.y,z) - phi_fab_4(x,hi.y-1,z);
+              if ( phase_fab_4(x,y,z) != phase_fab_4(x,y+1,z) && phase_fab_4(x,y,z) == m_phase ) {
+                phisumlo += phi_fab_4(x,y,z) - phi_fab_4(x,y-1,z);
                 num_phase_cells_1 += 1;
             }
           }
@@ -380,24 +378,24 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
 
   // Sum all concentration values for each slice in x direction
   const auto domain_min_z = m_geom.Domain().loVect()[2];
-  if ( lo.z == domain_min_z) {
+    for (int z = (lo.z+1); z <= hi.z; ++z) {
         for (int x = lo.x; x <= hi.x; ++x) {
           for (int y = lo.y; y <= hi.y; ++y) {
-            if ( phase_fab_4(x,y,lo.z) == m_phase && phase_fab_4(x,y,lo.z+1) == m_phase ) {
-              phisumlo += phi_fab_4(x,y,lo.z+1) - phi_fab_4(x,y,lo.z);
-              num_phase_cells_0 += 1;
+              if ( phase_fab_4(x,y,z) != phase_fab_4(x,y,z-1) && phase_fab_4(x,y,z) == m_phase ) {
+                phisumhi += phi_fab_4(x,y,z) - phi_fab_4(x,y,z+1);
+                num_phase_cells_0 += 1;
           }
         }
     }
   }
 
   const auto domain_max_z = m_geom.Domain().hiVect()[2];;
-  if ( hi.z == domain_max_z) {
+    for (int z = lo.z; z <= (hi.z-1); ++z) {
         for (int x = lo.x; x <= hi.x; ++x) {
           for (int y = lo.y; y <= hi.y; ++y) {
-            if ( phase_fab_4(x,y,hi.z) == m_phase && phase_fab_4(x,y,hi.z-1) == m_phase ) {
-              phisumhi += phi_fab_4(x,y,hi.z) - phi_fab_4(x,y,hi.z-1);
-              num_phase_cells_1 += 1;
+              if ( phase_fab_4(x,y,z) != phase_fab_4(x,y,z+1) && phase_fab_4(x,y,z) == m_phase ) {
+                phisumlo += phi_fab_4(x,y,z) - phi_fab_4(x,y,z-1);
+                num_phase_cells_1 += 1;
           }
         }
     }
