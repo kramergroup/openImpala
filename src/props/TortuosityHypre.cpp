@@ -429,8 +429,8 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     auto num_cell_z = length_z/dz;
 
     // Compute flux between adjacent slices
-    fluxlo = phisumlo * (length_y*length_z) / (dx * num_phase_cells_1) * (dy*dz);
-    fluxhi = phisumhi * (length_y*length_z) / (dx * num_phase_cells_0) * (dy*dz);
+    fluxlo = phisumlo / dx * (dy*dz);
+    fluxhi = phisumhi / dx * (dy*dz);
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
