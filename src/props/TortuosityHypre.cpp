@@ -446,7 +446,16 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     else if ( m_dir==2) {
       flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_z*num_cell_z));
     }
+  
+    // Print all of fluxvect values
+    amrex::Print() << std::endl << " Number phase cells 0: "
+                    << num_phase_cells_0 << std::endl << " Number phase cells 1: "
+                    << num_phase_cells_1 << std::endl ;
 
+    amrex::Print() << std::endl << " Phi Sum High: "
+                    << phisumhi << std::endl << " Phi Sum Low: "
+                    << phisumlo << std::endl ;  
+  
     // Compute Volume Fractions
 
     amrex::Real rel_diffusivity = (fluxlo+fluxhi)/2.0/flux_max;
