@@ -151,11 +151,11 @@ contains
           ! perpendicular to flow direction
           if ( ( dir .eq. direction_x ) .and. (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. domlo(1)) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
+            rhs(m) = vlo
           end if
           if ( ( dir .eq. direction_x ) .and. (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. domhi(1)) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
+            rhs(m) = vhi
           end if
           if ( ( dir .eq. direction_y ) .and. (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. domlo(2))) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
