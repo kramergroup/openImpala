@@ -174,6 +174,7 @@ contains
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
+        end if
           
           ! Initial guess
           ! -------------
