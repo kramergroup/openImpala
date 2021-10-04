@@ -299,7 +299,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) != phase_fab_4(x+1,y,z) && phase_fab_4(x,y,z) == m_phase ) {
-                  phisumlo += phi_fab_4(x,y,z) - phi_fab_4(x-1,y,z);
+                  phisumlo += phi_fab_4(x-1,y,z) - phi_fab_4(x,y,z);
                   num_phase_cells_1 += 1;
               }
             }
@@ -347,7 +347,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
           for (int x = lo.x; x <= hi.x; ++x) {
             for (int z = lo.z; z <= hi.z; ++z) {
               if ( phase_fab_4(x,y,z) != phase_fab_4(x,y+1,z) && phase_fab_4(x,y,z) == m_phase ) {
-                phisumlo += phi_fab_4(x,y,z) - phi_fab_4(x,y-1,z);
+                phisumlo += - phi_fab_4(x,y,z) + phi_fab_4(x,y-1,z);
                 num_phase_cells_1 += 1;
             }
           }
@@ -455,6 +455,11 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     amrex::Print() << std::endl << " Phi Sum High: "
                     << phisumhi << std::endl << " Phi Sum Low: "
                     << phisumlo << std::endl ;  
+
+    amrex::Print() << std::endl << " Flux Sum High: "
+                    << fluxhi << std::endl << " Flux Sum Low: "
+                    << fluxlo << std::endl << " Flux Max:" 
+                    << flux_max << std::endl ;  
   
     // Compute Volume Fractions
 
