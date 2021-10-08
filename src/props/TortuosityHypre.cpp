@@ -322,7 +322,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
   
-      flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z) * m_vf;
+      flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
     amrex::Print() << std::endl << " Number phase cells 0: "
