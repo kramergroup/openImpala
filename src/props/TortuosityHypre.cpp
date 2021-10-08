@@ -321,7 +321,15 @@ amrex::Real TortuosityHypre::value(const bool refresh)
   
     // Print all of fluxvect values
     amrex::Print() << std::endl << " Number phase cells 0: "
-                    << num_phase_cells_0 << std::endl;
+                    << num_phase_cells_0 << std::endl << " Vhi "
+                    << m_vhi << std::endl << " Vlo "
+                    << m_vlo << std::endl << " Length_x "
+                    << length_x << std::endl << " Length_y "
+                    << length_y << std::endl << " Length_z "
+                    << length_z << std::endl << " Num_cells_x "
+                    << num_cell_x << std::endl << " Num_cells_y "
+                    << num_cell_y << std::endl << " Num_cells_z "
+                    << num_cell_z << std::endl;
 
     amrex::Print() << std::endl << " Phi Sum High: "
                     << phisumtotal << std::endl;  
