@@ -295,6 +295,11 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     if (!refresh) {
       amrex::ParallelAllReduce::Sum(phisumtotal, amrex::ParallelContext::CommunicatorSub());
       }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(num_phase_cells_0, amrex::ParallelContext::CommunicatorSub());
+      }  
 
     // Total problem length each direction
     auto length_x = m_geom.ProbLength(0);
