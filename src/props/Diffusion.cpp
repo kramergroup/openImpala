@@ -220,7 +220,7 @@ int main (int argc, char* argv[])
  
   }
 
-  VolumeFraction vf(mf_phase, 0);
+  VolumeFraction vf(mf_phase, 1);
 
   // Print volume fraction value
   amrex::Print() << std::endl << " Volume Fraction: "
