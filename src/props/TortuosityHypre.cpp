@@ -254,9 +254,15 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       solve();
     }
 
-    amrex::Real fluxtotal = 0.0;
-    amrex::Real phisumtotal = 0.0;
+    amrex::Real fluxx = 0.0;
+    amrex::Real fluxy = 0.0;
+    amrex::Real fluxz = 0.0;
+    amrex::Real phisumx = 0.0;
+    amrex::Real phisumy = 0.0;
+    amrex::Real phisumz = 0.0;
     int num_phase_cells_0 = 0;
+    int num_phase_cells_1 = 0;
+    int num_phase_cells_2 = 0;
 
     for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     {
@@ -280,9 +286,17 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       for (int x = lo.x; x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
-                if ( phase_fab_4(x,y,z) == m_phase ) {
-                  phisumtotal += phi_fab_4(x,y,z);
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) == m_phase) {
+                  phisumx += phi_fab_4(x+1,y,z) - phi_fab_4(x,y,z);
                   num_phase_cells_0 += 1;
+              }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) == m_phase) {
+                  phisumy += phi_fab_4(x,y+1,z) - phi_fab_4(x,y,z);
+                  num_phase_cells_1 += 1;
+              }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) == m_phase) {
+                  phisumz += phi_fab_4(x,y,z+1) - phi_fab_4(x,y,z);
+                  num_phase_cells_2 += 1;
               }
             }
         }
@@ -293,13 +307,33 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
     // Reduce parallel processes
     if (!refresh) {
-      amrex::ParallelAllReduce::Sum(phisumtotal, amrex::ParallelContext::CommunicatorSub());
+      amrex::ParallelAllReduce::Sum(phisumx, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(phisumy, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(phisumz, amrex::ParallelContext::CommunicatorSub());
       }
   
     // Reduce parallel processes
     if (!refresh) {
       amrex::ParallelAllReduce::Sum(num_phase_cells_0, amrex::ParallelContext::CommunicatorSub());
-      }  
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(num_phase_cells_1, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(num_phase_cells_2, amrex::ParallelContext::CommunicatorSub());
+      } 
 
     // Total problem length each direction
     auto length_x = m_geom.ProbLength(0);
@@ -317,16 +351,24 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     auto num_cell_z = length_z/dz;
 
     // Compute flux between adjacent slices
-    fluxtotal = phisumtotal * (dx*dy*dz);
+    fluxx = phisumx * (dx*dy*dz);
+  
+    // Compute flux between adjacent slices
+    fluxy = phisumy * (dx*dy*dz);
+  
+    // Compute flux between adjacent slices
+    fluxz = phisumz * (dx*dy*dz);
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
   
-      flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
+    flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
     amrex::Print() << std::endl << " Number phase cells 0: "
-                    << num_phase_cells_0 << std::endl << " Vhi "
+                    << num_phase_cells_0  << std::endl << " Number phase cells 1: "
+                    << num_phase_cells_1  << std::endl << " Number phase cells 2: "
+                    << num_phase_cells_2  << std::endl << " Vhi "
                     << m_vhi << std::endl << " Vlo "
                     << m_vlo << std::endl << " Length_x "
                     << length_x << std::endl << " Length_y "
@@ -336,16 +378,20 @@ amrex::Real TortuosityHypre::value(const bool refresh)
                     << num_cell_y << std::endl << " Num_cells_z "
                     << num_cell_z << std::endl;
 
-    amrex::Print() << std::endl << " Phi Sum High: "
-                    << phisumtotal << std::endl;  
+    amrex::Print() << std::endl << " Phi Sum X: "
+                    << phisumx << std::endl << " Phi Sum Y: "
+                    << phisumy << std::endl << " Phi Sum Z: "
+                    << phisumz << std::endl;  
 
-    amrex::Print() << std::endl << " Flux Sum High: "
-                    << fluxtotal << std::endl << " Flux Max:" 
+    amrex::Print() << std::endl << " Flux Sum X: "
+                    << fluxx << std::endl << " Flux Sum Y: "
+                    << fluxy << std::endl << " Flux Sum Z: "
+                    << fluxz << std::endl << " Flux Max:" 
                     << flux_max << std::endl ;  
   
     // Compute Volume Fractions
 
-    amrex::Real rel_diffusivity = fluxtotal/flux_max;
+    amrex::Real rel_diffusivity = fluxx/flux_max;
 
     amrex::Real tau = m_vf / rel_diffusivity;
 
@@ -353,7 +399,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
                     << rel_diffusivity << std::endl ;
 
-    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxtotal) << std::endl;
+    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxx) << std::endl;
 
     return tau;
 
