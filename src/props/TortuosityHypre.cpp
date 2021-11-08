@@ -283,33 +283,17 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
       // Sum all concentration values for each slice in x direction
       const auto domain_min_x = m_geom.Domain().loVect()[0];      
-      for (int x = lo.x; x < hi.x; ++x) {
+      for (int x = lo.x; x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) == m_phase) {
                   phisumx += phi_fab_4(x+1,y,z) - phi_fab_4(x,y,z);
                   num_phase_cells_0 += 1;
               }
-            }
-        }
-      }
-      
-      // Sum all concentration values for each slice in y direction    
-      for (int y = lo.y; y < hi.y; ++y) {
-            for (int x = lo.x; x <= hi.x; ++x) {
-              for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) == m_phase) {
                   phisumy += phi_fab_4(x,y+1,z) - phi_fab_4(x,y,z);
                   num_phase_cells_1 += 1;
               }
-            }
-        }
-      }
-
-      // Sum all concentration values for each slice in z direction     
-      for (int z = lo.z; z < hi.z; ++z) {
-            for (int x = lo.x; x <= hi.x; ++x) {
-              for (int y = lo.y; y <= hi.y; ++y) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) == m_phase) {
                   phisumz += phi_fab_4(x,y,z+1) - phi_fab_4(x,y,z);
                   num_phase_cells_2 += 1;
@@ -317,7 +301,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
             }
         }
       }
-      
+
     }
 
 
@@ -367,28 +351,18 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     auto num_cell_z = length_z/dz;
 
     // Compute flux between adjacent slices
-    fluxx = phisumx / (dx*(num_cell_x-1)) * (dy*dz);
+    fluxx = phisumx * (dx*dy*dz);
   
     // Compute flux between adjacent slices
-    fluxy = phisumy / (dy*(num_cell_y-1)) * (dx*dz);
+    fluxy = phisumy * (dx*dy*dz);
   
     // Compute flux between adjacent slices
-    fluxz = phisumz / (dz*(num_cell_z-1)) * (dx*dy);
+    fluxz = phisumz * (dx*dy*dz);
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
   
-    if ( m_dir==0) {
-      flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
-    }
-
-    else if ( m_dir==1) {
-      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_y*num_cell_y));
-    }
-
-    else if ( m_dir==2) {
-      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_z*num_cell_z));
-    }
+    flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
     amrex::Print() << std::endl << " Number phase cells 0: "
@@ -428,6 +402,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxx) << std::endl;
 
     return tau;
+
 
 }
 
