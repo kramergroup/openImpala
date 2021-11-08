@@ -366,13 +366,13 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     auto num_cell_z = length_z/dz;
 
     // Compute flux between adjacent slices
-    fluxx = phisumx / (dx*num_cell_x) * (dy*dz);
+    fluxx = phisumx / (dx*(num_cell_x-1)) * (dy*dz);
   
     // Compute flux between adjacent slices
-    fluxy = phisumy / (dy*num_cell_y) * (dx*dz);
+    fluxy = phisumy / (dy*(num_cell_y-1)) * (dx*dz);
   
     // Compute flux between adjacent slices
-    fluxz = phisumz / (dz*num_cell_z) * (dx*dy);
+    fluxz = phisumz / (dz*(num_cell_z-1)) * (dx*dy);
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
