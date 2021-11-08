@@ -454,8 +454,14 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     amrex::Real tau = m_vf / rel_diffusivity;
 
     // Print all of fluxvect values
-    amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
-                    << rel_diffusivity << std::endl ;
+   amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
+                    << rel_diffusivity << std::endl << " Phi Sum High: "
+                    << phisumhi << std::endl << " Phi Sum Low: "
+                    << phisumlo << std::endl << " Flux High: "
+                    << fluxhi << std::endl << " Flux Low: "
+                    << fluxlo << std::endl << " Flux Max: "
+                    << flux_max << std::endl ;
+
 
     amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxlo - fluxhi) << std::endl;
 
