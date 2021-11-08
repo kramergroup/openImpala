@@ -366,28 +366,18 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     auto num_cell_z = length_z/dz;
 
     // Compute flux between adjacent slices
-    fluxx = phisumx / (dx*(num_cell_x-1)) * (dy*dz);
+    fluxx = phisumx * (dx*dy*dz);
   
     // Compute flux between adjacent slices
-    fluxy = phisumy / (dy*(num_cell_y-1)) * (dx*dz);
+    fluxy = phisumy * (dx*dy*dz);
   
     // Compute flux between adjacent slices
-    fluxz = phisumz / (dz*(num_cell_z-1)) * (dx*dy);
+    fluxz = phisumz * (dx*dy*dz);
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
   
-    if ( m_dir==0) {
-      flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
-    }
-
-    else if ( m_dir==1) {
-      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_y*num_cell_y));
-    }
-
-    else if ( m_dir==2) {
-      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_z*num_cell_z));
-    }
+      flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
     amrex::Print() << std::endl << " Number phase cells 0: "
