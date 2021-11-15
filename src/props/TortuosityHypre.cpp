@@ -262,6 +262,12 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     int num_phase_cells_0 = 0;
     int num_phase_cells_1 = 0;
     int num_phase_cells_2 = 0;
+    int source_cells_x = 0;
+    int sink_cells_x = 0;
+    int source_cells_y = 0;
+    int sink_cells_y = 0;
+    int source_cells_z = 0;
+    int sink_cells_z = 0;
 
     for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     {
