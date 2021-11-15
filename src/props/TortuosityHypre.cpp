@@ -288,7 +288,13 @@ amrex::Real TortuosityHypre::value(const bool refresh)
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) == m_phase) {
                   phisumx += phi_fab_4(x+1,y,z) - phi_fab_4(x,y,z);
                   num_phase_cells_0 += 1;
-              }
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) != m_phase) {
+                  sink_cells_x += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x-1,y,z) != m_phase) {
+                  source_cells_x += 1;
+                }  
             }
         }
       }
@@ -300,7 +306,13 @@ amrex::Real TortuosityHypre::value(const bool refresh)
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) == m_phase) {
                   phisumy += phi_fab_4(x,y+1,z) - phi_fab_4(x,y,z);
                   num_phase_cells_1 += 1;
-              }
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) != m_phase) {
+                  sink_cells_y += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y-1,z) != m_phase) {
+                  source_cells_y += 1;
+                }
             }
         }
       }
@@ -313,6 +325,12 @@ amrex::Real TortuosityHypre::value(const bool refresh)
                   phisumz += phi_fab_4(x,y,z+1) - phi_fab_4(x,y,z);
                   num_phase_cells_2 += 1;
               }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) != m_phase) {
+                  sink_cells_z += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z-1) != m_phase) {
+                  source_cells_z += 1;
+                }
             }
         }
       }
@@ -333,6 +351,38 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     // Reduce parallel processes
     if (!refresh) {
       amrex::ParallelAllReduce::Sum(phisumz, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+      // Reduce parallel processes
+     if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+  
+      // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+ 
+      // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_y, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+      // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_y, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+      // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_z, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+      // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_z), amrex::ParallelContext::CommunicatorSub());
       }
   
     // Reduce parallel processes
@@ -391,7 +441,13 @@ amrex::Real TortuosityHypre::value(const bool refresh)
                     << length_z << std::endl << " Num_cells_x "
                     << num_cell_x << std::endl << " Num_cells_y "
                     << num_cell_y << std::endl << " Num_cells_z "
-                    << num_cell_z << std::endl;
+                    << num_cell_z << std::endl << " Source_cells_x "
+                    << source_cells_x << std::endl << " Sink_cells_x "
+                    << sink_cells_x << std::endl << " Source_cells_y "
+                    << source_cells_y << std::endl << " Sink_cells_y "
+                    << sink_cells_y << std::endl << " Source_cells_z "
+                    << source_cells_z << std::endl << " Sink_cells_z "
+                    << sink_cells_z << std::endl;
 
     amrex::Print() << std::endl << " Phi Sum X: "
                     << phisumx << std::endl << " Phi Sum Y: "
