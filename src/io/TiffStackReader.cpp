@@ -48,7 +48,7 @@ void TiffStackReader::readTiffFile()
       npixels = m_width * m_height;
       raster = (uint32*) _TIFFmalloc(npixels * sizeof (uint32_t));
       if (raster != NULL) {
-          if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_BOTRIGHT, 0)) {
+          if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_TOPLEFT, 0)) {
               for (long i=0; i<m_height*m_width; ++i)
               {
                 m_raw.push_back(-raster[i]-1);
