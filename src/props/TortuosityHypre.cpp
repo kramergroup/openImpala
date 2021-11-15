@@ -359,38 +359,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       amrex::ParallelAllReduce::Sum(phisumz, amrex::ParallelContext::CommunicatorSub());
       }
   
-      // Reduce parallel processes
-     if (!refresh) {
-      amrex::ParallelAllReduce::Sum(source_cells_x, amrex::ParallelContext::CommunicatorSub());
-      }
-  
-  
-      // Reduce parallel processes
-    if (!refresh) {
-      amrex::ParallelAllReduce::Sum(sink_cells_x, amrex::ParallelContext::CommunicatorSub());
-      }
-  
- 
-      // Reduce parallel processes
-    if (!refresh) {
-      amrex::ParallelAllReduce::Sum(source_cells_y, amrex::ParallelContext::CommunicatorSub());
-      }
-  
-      // Reduce parallel processes
-    if (!refresh) {
-      amrex::ParallelAllReduce::Sum(sink_cells_y, amrex::ParallelContext::CommunicatorSub());
-      }
-  
-      // Reduce parallel processes
-    if (!refresh) {
-      amrex::ParallelAllReduce::Sum(source_cells_z, amrex::ParallelContext::CommunicatorSub());
-      }
-  
-      // Reduce parallel processes
-    if (!refresh) {
-      amrex::ParallelAllReduce::Sum(sink_cells_z), amrex::ParallelContext::CommunicatorSub());
-      }
-  
     // Reduce parallel processes
     if (!refresh) {
       amrex::ParallelAllReduce::Sum(num_phase_cells_0, amrex::ParallelContext::CommunicatorSub());
@@ -406,6 +374,37 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       amrex::ParallelAllReduce::Sum(num_phase_cells_2, amrex::ParallelContext::CommunicatorSub());
       } 
 
+
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_y, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_y, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_z, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_z, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
     // Total problem length each direction
     auto length_x = m_geom.ProbLength(0);
     auto length_y = m_geom.ProbLength(1);
