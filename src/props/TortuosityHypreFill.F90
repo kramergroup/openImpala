@@ -141,7 +141,61 @@ contains
             if ( (p(i,j,k+1) .ne. p(i,j,k)) .or. (k .eq. domhi(3)) ) then
               a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
             end if
+            
+          ! Periodic boundaries
+          ! ----------------
 
+          ! Change to periodic boundaries
+          ! parallel to flow direction
+            if ( ( dir .eq. direction_x ) .and. (j .eq. domlo(2) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_x ) .and. (j .eq. domhi(2) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_x ) .and. (k .eq. domlo(3) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_x ) .and. (k .eq. domlo(3) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_y ) .and. (i .eq. domlo(1) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_y ) .and. (i .eq. domlo(1) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if        
+            if ( ( dir .eq. direction_y ) .and. (k .eq. domlo(3) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_y ) .and. (k .eq. domhi(3) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_z ) .and. (i .eq. domlo(1) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_z ) .and. (i .eq. domlo(1) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_z ) .and. (j .eq. domlo(2) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if
+            if ( ( dir .eq. direction_z ) .and. (j .eq. domlo(2) ) ) then
+              a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
+              rhs(m) = 0.0
+            end if     
+            
           end if 
 
           ! Fixed Boundaries 
