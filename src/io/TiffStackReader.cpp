@@ -66,6 +66,9 @@ void TiffStackReader::readTiffFile()
                    m_raw.push_back(0);
                   }
                    m_raw.push_back(-raster[i+j*m_width]-1);
+                  if (i==m_width-1){
+                   m_raw.push_back(0);
+                  }
                 }
               }
           }
@@ -90,7 +93,7 @@ void TiffStackReader::readTiffFile()
    
 }
 
-  m_width = m_width + 1;
+  m_width = m_width + 2;
   m_height = m_height;
   m_depth = m_depth + 2;
   
@@ -113,7 +116,7 @@ uint32_t TiffStackReader::width()
 
 amrex::Box TiffStackReader::box()
 {
-  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth});
+  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width,m_height-1,m_depth});
   return box;
 }
 
