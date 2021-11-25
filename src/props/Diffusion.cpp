@@ -190,7 +190,7 @@ int main (int argc, char* argv[])
     amrex::Print() << "tTiffStackReader - Reading file " << DATA_PATH + FILENAME << std::endl;
     TiffStackReader reader(DATA_PATH + FILENAME, TIFF_STACK);
 
-    const amrex::Box bx = amrex::grow((reader.box()),3);
+    const amrex::Box bx = reader.box();
     fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
     fy = 1.0*bx.size()[1]/bx.size()[DIRECTION];
     fz = 1.0*bx.size()[2]/bx.size()[DIRECTION];
