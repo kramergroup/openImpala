@@ -127,7 +127,7 @@ uint32_t TiffStackReader::width()
 
 amrex::Box TiffStackReader::box()
 {
-  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width+1,m_height+1,m_depth+2});
+  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth+2});
   return box;
 }
 
