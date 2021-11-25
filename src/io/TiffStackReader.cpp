@@ -45,7 +45,7 @@ void TiffStackReader::readTiffFile()
     if (k==0) { 
        for (long j=0; j<m_height; ++j) {
           for (long i=0; i<m_width; ++i) {
-              m_raw.push_back(255);
+              m_raw.push_back(0);
            }
         }
     }
@@ -72,18 +72,19 @@ void TiffStackReader::readTiffFile()
     } while (TIFFReadDirectory(tif));
 
     m_depth=k;
-
-    TIFFClose(tif);
-  }
     
     // Add ghost cells to final slice
     if (k==m_tiffstack-1) { 
        for (long j=0; j<m_height; ++j) {
           for (long i=0; i<m_width; ++i) {
-              m_raw.push_back(255);
+              m_raw.push_back(0);
            }
         }
     }
+
+    TIFFClose(tif);
+  }
+   
 }
 
 }
@@ -105,7 +106,7 @@ uint32_t TiffStackReader::width()
 
 amrex::Box TiffStackReader::box()
 {
-  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth-1});
+  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth+1});
   return box;
 }
 
