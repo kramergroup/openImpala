@@ -17,11 +17,11 @@ TiffStackReader::TiffStackReader( std::string const& filename, const int tiffsta
 void TiffStackReader::readTiffFile()
 {
   TIFFSetWarningHandler(NULL);
-  for (int j=0; j<m_tiffstack; ++j)
+  for (int k=0; k<m_tiffstack; ++k)
   {
   std::string name = m_filename;
   std::stringstream ss;
-  ss << std::setw(4) << std::setfill('0') << j;
+  ss << std::setw(4) << std::setfill('0') << k;
   std::string image_number = ss.str();
 
   name += image_number;
@@ -49,9 +49,12 @@ void TiffStackReader::readTiffFile()
       raster = (uint32*) _TIFFmalloc(npixels * sizeof (uint32_t));
       if (raster != NULL) {
           if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_TOPLEFT, 0)) {
-              for (long i=0; i<m_height*m_width; ++i)
+              for (long j=0; j<m_height; ++j)
               {
-                m_raw.push_back(-raster[i]-1);
+                for (long i=0; i<m_width; ++i)
+                 {
+                   m_raw.push_back(-raster[i+j*m_width]-1);
+                }
               }
           }
           _TIFFfree(raster);
@@ -59,7 +62,7 @@ void TiffStackReader::readTiffFile()
 
     } while (TIFFReadDirectory(tif));
 
-    m_depth=j;
+    m_depth=k;
 
     TIFFClose(tif);
   }
