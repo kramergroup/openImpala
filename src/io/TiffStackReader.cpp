@@ -90,6 +90,10 @@ void TiffStackReader::readTiffFile()
    
 }
 
+  m_width = m_width + 1;
+  m_height = m_height;
+  m_depth = m_depth + 2;
+  
 }
 
 uint32_t TiffStackReader::depth()
@@ -109,7 +113,7 @@ uint32_t TiffStackReader::width()
 
 amrex::Box TiffStackReader::box()
 {
-  amrex::Box box(amrex::IntVect{-1,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth+2});
+  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth-1});
   return box;
 }
 
@@ -125,7 +129,7 @@ void TiffStackReader::threshold(const uint32_t threshold, amrex::iMultiFab& mf)
     // Iterate over all cells in Box and threshold
     for (amrex::BoxIterator bit(box); bit.ok(); ++bit)
     {
-      idx = bit()[0] + bit()[1]*(m_width+1) + bit()[2]*m_height*(m_width);
+      idx = bit()[0] + bit()[1]*(m_width) + bit()[2]*m_height*(m_width);
       // bit() returns IntVect
       fab(bit(),0) = (m_raw[idx] < threshold);
     }
