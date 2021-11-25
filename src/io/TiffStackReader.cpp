@@ -62,13 +62,9 @@ void TiffStackReader::readTiffFile()
               {
                 for (long i=0; i<m_width; ++i)
                  {
-                  if (i==0){
-                   m_raw.push_back(0);
-                  }
+
                    m_raw.push_back(-raster[i+j*m_width]-1);
-                  if (i==m_width-1){
-                   m_raw.push_back(0);
-                  }
+
                 }
               }
           }
@@ -93,7 +89,7 @@ void TiffStackReader::readTiffFile()
    
 }
 
-  m_width = m_width + 2;
+  m_width = m_width;
   m_height = m_height;
   m_depth = m_depth + 2;
   
