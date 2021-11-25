@@ -60,16 +60,31 @@ void TiffStackReader::readTiffFile()
           if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_TOPLEFT, 0)) {
               for (long j=0; j<m_height; ++j)
               {
-                for (long i=0; i<m_width; ++i)
+                if (j==0) {
+                  for (long i=0; i<m_width; ++i)
                  {
-                  if (i==0 || j==0) {
-                  m_raw.push_back(0);  
-                  }
-                  m_raw.push_back(-raster[i+j*m_width]-1);
-                  if (i==m_width-1 || j==m_height-1) {
-                  m_raw.push_back(0);  
+                    m_raw.push_back(0);  
                   }
                 }
+                    
+                for (long i=0; i<m_width; ++i)
+                 {
+                  if (i==0) {
+                    m_raw.push_back(0);  
+                  }
+                  
+                  m_raw.push_back(-raster[i+j*m_width]-1);
+                  
+                  if (i==m_width-1) {
+                    m_raw.push_back(0);  
+                  }
+                }
+                if (j==m_height-1) {
+                  for (long i=0; i<m_width; ++i)
+                 {
+                    m_raw.push_back(0);  
+                }
+                  }
               }
           }
           _TIFFfree(raster);
