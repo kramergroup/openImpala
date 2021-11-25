@@ -40,6 +40,15 @@ void TiffStackReader::readTiffFile()
 
     TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &m_width);
     TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &m_height);
+    
+    // Add ghost cells to initial slice
+    if (k==0) { 
+       for (long j=0; j<m_height; ++j) {
+          for (long i=0; i<m_width; ++i) {
+              m_raw.push_back(255);
+           }
+        }
+    }
 
     uint16_t* data;
     m_depth = 0;
@@ -66,6 +75,15 @@ void TiffStackReader::readTiffFile()
 
     TIFFClose(tif);
   }
+    
+    // Add ghost cells to final slice
+    if (k==m_tiffstack-1) { 
+       for (long j=0; j<m_height; ++j) {
+          for (long i=0; i<m_width; ++i) {
+              m_raw.push_back(255);
+           }
+        }
+    }
 }
 
 }
