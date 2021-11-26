@@ -89,8 +89,8 @@ void TiffStackReader::readTiffFile()
    
 }
 
-  m_width = m_width;
-  m_height = m_height;
+  m_width = m_width + 1;
+  m_height = m_height + 1;
   m_depth = m_depth + 2;
   
 }
