@@ -44,7 +44,7 @@ void TiffStackReader::readTiffFile()
     // Add ghost cells to initial slice
     if (k==0) { 
        for (long j=0; j<m_height; ++j) {
-          for (long i=0; i<m_width; ++i) {
+          for (long i=0; i<m_width+1; ++i) {
               m_raw.push_back(0);
            }
         }
@@ -62,7 +62,9 @@ void TiffStackReader::readTiffFile()
               {
                 for (long i=0; i<m_width; ++i)
                  {
-
+                   if (i==0){
+                     m_raw.push_back(0);
+                   }
                    m_raw.push_back(-raster[i+j*m_width]-1);
 
                 }
@@ -78,7 +80,7 @@ void TiffStackReader::readTiffFile()
     // Add ghost cells to final slice
     if (k==m_tiffstack-1) { 
        for (long j=0; j<m_height; ++j) {
-          for (long i=0; i<m_width; ++i) {
+          for (long i=0; i<m_width+1; ++i) {
               m_raw.push_back(0);
            }
         }
@@ -90,7 +92,7 @@ void TiffStackReader::readTiffFile()
 }
 
   m_width = m_width + 1;
-  m_height = m_height + 1;
+  m_height = m_height;
   m_depth = m_depth + 2;
   
 }
