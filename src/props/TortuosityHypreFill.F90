@@ -123,22 +123,22 @@ contains
             rhs(m) = 0.0
             
             ! Change to one-sided Dirichlet condition at phase and domain boundaries
-            if ( (p(i-1,j,k) .ne. p(i,j,k)) )  then
+            if ( (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. domlo(1)))  then
               a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
             end if
-            if ( (p(i+1,j,k) .ne. p(i,j,k)) ) then
+            if ( (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. domhi(1)) ) then
               a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
             end if
-            if ( (p(i,j-1,k) .ne. p(i,j,k)) ) then
+            if ( (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. domlo(2)) ) then
               a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
             end if
-            if ( (p(i,j+1,k) .ne. p(i,j,k)) ) then
+            if ( (p(i,j+1,k) .ne. p(i,j,k)) .and. (j .ne. domhi(2)) ) then
               a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
             end if
-            if ( (p(i,j,k-1) .ne. p(i,j,k)) ) then
+            if ( (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. domlo(3)) ) then
               a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
             end if 
-            if ( (p(i,j,k+1) .ne. p(i,j,k)) ) then
+            if ( (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. domhi(3)) ) then
               a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
             end if
             
