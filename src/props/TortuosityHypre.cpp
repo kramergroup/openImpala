@@ -55,7 +55,9 @@ void TortuosityHypre::setupGrids()
 
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
     
-    amrex::Print() << "Box boundaries are " << hi[1] << "and " << lo[1] << std::endl;
+    amrex::Print() << "X Box boundaries are " << hi[0] << "and " << lo[0] << std::endl;
+    amrex::Print() << "Y Box boundaries are " << hi[1] << "and " << lo[1] << std::endl;
+    amrex::Print() << "Z Box boundaries are " << hi[2] << "and " << lo[2] << std::endl;
   }
 
   // 3 - Set grid to be periodic
