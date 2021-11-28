@@ -57,7 +57,13 @@ void TortuosityHypre::setupGrids()
 
   }
 
-  // 3 - Finish setup
+  // 3 - Set grid to be periodic
+   if (m_dir==0){
+     int* periodic = [0, bx.hiVect()[1]-bx.loVect()[1], bx.hiVect()[2]-bx.loVect()[2]]
+   }
+   HYPRE_StructGridSetPeriodic(m_grid, periodic)
+  
+  // 4 - Finish setup
    HYPRE_StructGridAssemble(m_grid);
 }
 
