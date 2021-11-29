@@ -150,11 +150,11 @@ contains
           ! Change to Neumann condition at domain boundaries
           ! perpendicular to flow direction
          if ( p(i,j,k) .eq. phase) then
-          if ( ( dir .eq. direction_x ) .and. (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. domlo(1)) ) then
+          if ( ( dir .eq. direction_x ) .and. (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1))  ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
-          if ( ( dir .eq. direction_x ) .and. (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. domhi(1)) ) then
+          if ( ( dir .eq. direction_x ) .and. (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. domhi(1)) .and. (i .ne. domlo(1))  ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
