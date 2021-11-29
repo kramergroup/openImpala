@@ -158,19 +158,19 @@ contains
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
-          if ( ( dir .eq. direction_y ) .and. (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. domlo(2)) ) then
+          if ( ( dir .eq. direction_y ) .and. (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2))  ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
-          if ( ( dir .eq. direction_y ) .and. (p(i,j+1,k) .ne. p(i,j,k)) .and. (j .ne. domhi(2)) ) then
+          if ( ( dir .eq. direction_y ) .and. (p(i,j+1,k) .ne. p(i,j,k)) .and. (j .ne. domhi(2)) .and. (j .ne. domlo(2)) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
-          if ( ( dir .eq. direction_z ) .and. (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. domlo(3)) ) then
+          if ( ( dir .eq. direction_z ) .and. (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. domlo(3)) .and. (k .ne. domhi(3)) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
-          if ( ( dir .eq. direction_z ) .and. (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. domhi(3)) ) then
+          if ( ( dir .eq. direction_z ) .and. (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
