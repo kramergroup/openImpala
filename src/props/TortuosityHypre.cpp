@@ -56,24 +56,13 @@ void TortuosityHypre::setupGrids()
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
     
     // 3 - Set grid to be periodic
-    // int periodic[3] = {hi[0]-1-lo[0], hi[1]-1-lo[1], hi[2]-1-lo[2]};
-    /*int periodic[3] = {16, 16, 16};
-    HYPRE_StructGridSetPeriodic(m_grid, periodic);*/
-    
-    int periodic[3] = {33, 32, 33};
+    int periodic[3] = {hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]};
     HYPRE_StructGridSetPeriodic(m_grid, periodic);
-    
-    amrex::Print() << "Periodic coordinates are " << hi[0]-1-lo[0] << hi[0] << std::endl;
       
   }
   
-  // 4 - Finish setup
-  
-  
+  // 4 - Finish setup 
   HYPRE_StructGridAssemble(m_grid);
-  
-
-  
 }
 
 
