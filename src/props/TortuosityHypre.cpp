@@ -63,7 +63,7 @@ void TortuosityHypre::setupGrids()
   }
   
   // 4 - Finish setup
-  int periodic[3] = {34, 32, 33};
+  int periodic[3] = {hi[0]-1-lo[0], hi[1]-1-lo[1], hi[2]-1-lo[2]};
   HYPRE_StructGridSetPeriodic(m_grid, periodic);
   
   HYPRE_StructGridAssemble(m_grid);
