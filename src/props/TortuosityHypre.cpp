@@ -44,9 +44,9 @@ void TortuosityHypre::setupGrids()
 
   // 1 - Initialise the grid owned by this MPI rank
   HYPRE_StructGridCreate(MPI_COMM_WORLD, AMREX_SPACEDIM, &m_grid);
-  
+  /*
   int periodic[3] = {35, 34, 35};
-  HYPRE_StructGridSetPeriodic(m_grid, periodic);
+  HYPRE_StructGridSetPeriodic(m_grid, periodic);*/
 
   // 2 - Configure the dimensions of each box owned by this MPI rank
   int ilower[2], iupper[2];
