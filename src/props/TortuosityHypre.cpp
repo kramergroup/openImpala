@@ -62,6 +62,8 @@ void TortuosityHypre::setupGrids()
     
     int periodic[3] = {33, 32, 33};
     HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    
+    amrex::Print() << "Periodic coordinates are " << hi[0]-1-lo[0] << hi[0] << std::endl;
       
   }
   
