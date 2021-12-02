@@ -56,8 +56,14 @@ void TortuosityHypre::setupGrids()
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
     
     // 3 - Set grid to be periodic
-    int periodic[3] = {hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]};
-    HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    /*int periodic[3] = {hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]};
+    HYPRE_StructGridSetPeriodic(m_grid, periodic);*/
+    amrex::Print() << "X high: " << hi[0] << std::endl
+                   << "X low: " << lo[0] << std::endl
+                   << "Y high: " << hi[1] << std::endl
+                   << "Y low: " << lo[1] << std::endl
+                   << "Z high: " << hi[2] << std::endl
+                   << "Z low: " << lo[2] << std::endl;
       
   }
   
