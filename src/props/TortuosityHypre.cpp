@@ -59,15 +59,9 @@ void TortuosityHypre::setupGrids()
     const amrex::Box domain = m_geom.Domain();
     auto domainlo = TortuosityHypre::loV(domain);
     auto domainhi = TortuosityHypre::hiV(domain);
-    //int periodic[3] = {domainhi[2]-domainlo[2], domainhi[0]-domainlo[0], domainhi[1]-domainlo[1]};
-    int periodic[3] = {33,32,33};
+    int periodic[3] = {domainhi[0]-domainlo[0], domainhi[1]-domainlo[1], domainhi[2]-domainlo[2]};
+
     HYPRE_StructGridSetPeriodic(m_grid, periodic);
-    amrex::Print() << "dom x high" << domainhi[0] << std::endl
-      << "dom x low" << domainlo[0] << std::endl
-      << "dom y high" << domainhi[1] << std::endl
-      << "dom y low" << domainlo[1] << std::endl
-      << "dom z high" << domainhi[2] << std::endl
-      << "dom z low" << domainlo[2] << std::endl;
     
   }
   
