@@ -426,6 +426,20 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     auto num_cell_x = length_x/dx;
     auto num_cell_y = length_y/dy;
     auto num_cell_z = length_z/dz;
+  
+    // Add unit vector to phisum values for diagonal terms
+    if ( m_dir==0)
+    {
+      phisumx = phisumx + num_phase_cells_0;
+    }
+    else if ( m_dir==1)
+    {
+      phisumy = phisumy + num_phase_cells_1;
+    }
+    else if ( m_dir==2)
+    {
+      phisumz = phisumz + num_phase_cells_2;
+    }
 
     // Compute flux between adjacent slices
     fluxx = phisumx * (dx*dy*dz);
