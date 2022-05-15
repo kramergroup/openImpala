@@ -44,7 +44,7 @@ int main (int argc, char* argv[])
 
   // Parameters
   amrex::ParmParse pp;
-  amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
+  amrex::Array<int,AMREX_SPACEDIM> is_periodic{true, true, true};
   amrex::Print() << AMREX_SPACEDIM << "D test" << std::endl;
 
   std::string FILENAME;
@@ -97,7 +97,7 @@ int main (int argc, char* argv[])
     amrex::Real fx;
     amrex::Real fy;
     amrex::Real fz;
-    amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
+    amrex::Array<int,AMREX_SPACEDIM> is_periodic{true, true, true};
     
     // Reading the file
     // The Reader potentially holds significant data in memory (the full voxel set).
