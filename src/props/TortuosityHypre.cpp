@@ -299,7 +299,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
       // Sum all concentration values for each slice in x direction
       const auto domain_min_x = m_geom.Domain().loVect()[0];      
-      for (int x = lo.x+1; x < hi.x; ++x) {
+      for (int x = lo.x; x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) == m_phase) {
@@ -317,7 +317,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       }
       
       // Sum all concentration values for each slice in y direction    
-      for (int y = lo.y+1; y < hi.y; ++y) {
+      for (int y = lo.y; y <= hi.y; ++y) {
             for (int x = lo.x; x <= hi.x; ++x) {
               for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) == m_phase) {
@@ -335,7 +335,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       }
 
       // Sum all concentration values for each slice in z direction     
-      for (int z = lo.z+1; z < hi.z; ++z) {
+      for (int z = lo.z; z <= hi.z; ++z) {
             for (int x = lo.x; x <= hi.x; ++x) {
               for (int y = lo.y; y <= hi.y; ++y) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) == m_phase) {
