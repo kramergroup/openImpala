@@ -128,7 +128,8 @@ int main (int argc, char* argv[])
           
     // We have used a fab with one ghost cell to allow for stencil-type operations
     // over the fab. This requires to distribute the ghost cells
-    mf_phase.FillBoundary(geom.periodicity());
+    //mf_phase.FillBoundary(geom.periodicity());
+    mf_phase.FillBoundary();
                                                              
 }
     else if (FILENAME.substr (FILENAME.length() - 3) == "dat")
