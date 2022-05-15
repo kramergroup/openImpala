@@ -202,7 +202,7 @@ int main (int argc, char* argv[])
     ba.maxSize(BOX_SIZE);
       
     dm.define(ba);
-    mf_phase.define(ba,dm,1,1);
+    mf_phase.define(ba,dm,2,1);
       
     // Threshold image data
     reader.threshold(1,mf_phase);
