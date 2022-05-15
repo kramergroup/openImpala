@@ -479,7 +479,9 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     amrex::Print() << std::endl << " Phi Sum X: "
                     << phisumx << std::endl << " Phi Sum Y: "
                     << phisumy << std::endl << " Phi Sum Z: "
-                    << phisumz << std::endl;  
+                    << phisumz << std::endl << " Domain low: "
+                    << domainlo << std::endl << " Domain high: "
+                    << domainhi << std::endl;  
 
     amrex::Print() << std::endl << " Flux Sum X: "
                     << fluxx << std::endl << " Flux Sum Y: "
