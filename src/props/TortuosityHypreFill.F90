@@ -193,13 +193,13 @@ contains
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
-          if ( ( dir .eq. direction_z ) .and. (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. bxlo(3)) .and. (k .ne. bxi(3)) &
+          if ( ( dir .eq. direction_z ) .and. (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. bxlo(3)) .and. (k .ne. bxhi(3)) &
             .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxlo(3)+1)) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
           if ( ( dir .eq. direction_z ) .and. (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. bxhi(3)) .and. (k .ne. bxlo(3))  &
-            .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxo(3)+1)) then
+            .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxlo(3)+1)) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
