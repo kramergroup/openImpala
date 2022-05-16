@@ -192,30 +192,31 @@ contains
             rhs(m) = vlo
           end if
           
-          if ( ( dir .eq. direction_x ) .and. (i .eq. domlo(1)) .and. (p(i,j,k) .ne. p(domhi(1),j,k))  )  then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
-          end if
-          if ( ( dir .eq. direction_x ) .and. (i .eq. domhi(1)) .and. (p(i,j,k) .ne. p(domlo(1),j,k))  )  then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
-          end if
-          if ( ( dir .eq. direction_y ) .and. (j .eq. domlo(2)) .and. (p(i,j,k) .ne. p(i,domhi(2),k))  )  then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
-          end if
-          if ( ( dir .eq. direction_y ) .and. (j .eq. domhi(2)) .and. (p(i,j,k) .ne. p(i,domlo(2),k))  )  then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
-          end if
-          if ( ( dir .eq. direction_z ) .and. (k .eq. domlo(3)) .and. (p(i,j,k) .ne. p(i,j,domhi(3)))  )  then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
-          end if
-          if ( ( dir .eq. direction_z ) .and. (k .eq. domhi(3)) .and. (p(i,j,k) .ne. p(i,j,domlo(3)))  )  then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
-          end if
+!          if ( ( dir .eq. direction_x ) .and. (i .eq. domlo(1)) .and. (p(i,j,k) .ne. p(domhi(1),j,k))  )  then
+!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+!            rhs(m) = vhi
+!          end if
+!          if ( ( dir .eq. direction_x ) .and. (i .eq. domhi(1)) .and. (p(i,j,k) .ne. p(domlo(1),j,k))  )  then
+!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+!            rhs(m) = vlo
+!          end if
+ !         if ( ( dir .eq. direction_y ) .and. (j .eq. domlo(2)) .and. (p(i,j,k) .ne. p(i,domhi(2),k))  )  then
+  !          a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+   !         rhs(m) = vhi
+    !      end if
+     !     if ( ( dir .eq. direction_y ) .and. (j .eq. domhi(2)) .and. (p(i,j,k) .ne. p(i,domlo(2),k))  )  then
+      !      a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+       !     rhs(m) = vlo
+        !  end if
+         ! if ( ( dir .eq. direction_z ) .and. (k .eq. domlo(3)) .and. (p(i,j,k) .ne. p(i,j,domhi(3)))  )  then
+          !  a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+           ! rhs(m) = vhi
+!          end if
+ !         if ( ( dir .eq. direction_z ) .and. (k .eq. domhi(3)) .and. (p(i,j,k) .ne. p(i,j,domlo(3)))  )  then
+  !          a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
+   !         rhs(m) = vlo
+    !      end if
+          
         end if
           
           ! Initial guess
