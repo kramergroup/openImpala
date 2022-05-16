@@ -175,37 +175,37 @@ contains
          if ( p(i,j,k) .eq. phase) then
           if ( ( dir .eq. direction_x ) .and. (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. bxlo(1)) .and. (i .ne. bxhi(1)) &
             .and. (i .ne. bxlo(1)+1) .and. (i .ne. bxhi(1)-1) .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) ) then
+            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (i .ne. bxlo(1)-1) .and. (i .ne. bxhi(1)+1) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
           if ( ( dir .eq. direction_x ) .and. (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. bxhi(1)) .and. (i .ne. bxlo(1)) &
             .and. (i .ne. bxlo(1)+1) .and. (i .ne. bxhi(1)-1) .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) ) then
+            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (i .ne. bxlo(1)-1) .and. (i .ne. bxhi(1)+1) ) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
           if ( ( dir .eq. direction_y ) .and. (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. bxlo(2)) .and. (j .ne. bxhi(2)) &
             .and. (j .ne. bxlo(2)+1) .and. (j .ne. bxhi(2)-1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) ) then
+            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (j .ne. bxlo(2)-1) .and. (j .ne. bxhi(2)+1)) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
           if ( ( dir .eq. direction_y ) .and. (p(i,j+1,k) .ne. p(i,j,k)) .and. (j .ne. bxhi(2)) .and. (j .ne. bxlo(2)) &
             .and. (j .ne. bxlo(2)+1) .and. (j .ne. bxhi(2)-1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) ) then
+            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (j .ne. bxlo(2)-1) .and. (j .ne. bxhi(2)+1)) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
           if ( ( dir .eq. direction_z ) .and. (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. bxlo(3)) .and. (k .ne. bxhi(3)) &
             .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxlo(3)+1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) ) then
+            .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) .and. (k .ne. bxhi(3)+1) .and. (k .ne. bxlo(3)-1)) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vhi
           end if
           if ( ( dir .eq. direction_z ) .and. (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. bxhi(3)) .and. (k .ne. bxlo(3))  &
             .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxlo(3)+1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) ) then
+            .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) .and. (k .ne. bxhi(3)+1) .and. (k .ne. bxlo(3)-1)) then
             a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
             rhs(m) = vlo
           end if
