@@ -55,6 +55,10 @@ void TortuosityHypre::setupGrids()
 
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
     
+    int periodic[3] = {hi-lo, hi-lo, hi-lo};
+
+    HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    
   }
   
    // 3 - Set grid to be periodic
