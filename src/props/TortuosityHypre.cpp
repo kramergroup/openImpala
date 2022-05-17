@@ -84,10 +84,7 @@ void TortuosityHypre::setupGrids()
   amrex::Print() << std::endl << " Domain low: "
                     << domainlo << std::endl << " Domain high: "
                     << domainhi << std::endl;  
-  int ghost=1;
-  int *pset=&ghost;
   
-  HYPRE_StructGridSetNumGhost(m_grid, pset);
   HYPRE_StructGridSetPeriodic(m_grid, periodic);
 
   // 4 - Finish setup 
