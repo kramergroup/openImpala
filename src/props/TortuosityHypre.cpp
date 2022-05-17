@@ -235,15 +235,15 @@ bool TortuosityHypre::solve()
       HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &res);
       break;
       
-    case PMFG:
-      HYPRE_StructPMFGCreate(MPI_COMM_WORLD, &solver);
-      HYPRE_StructPMFGSetTol(solver, m_eps);
-      HYPRE_StructPMFGSetMaxIter(solver, m_maxiter);
-      HYPRE_StructPMFGSetup(solver, m_A, m_b, m_x);
-      ierr = HYPRE_StructPMFGSolve(solver, m_A, m_b, m_x);
-      HYPRE_StructPMFGDestroy(solver);
-      HYPRE_StructPMFGGetNumIterations(solver, &num_iterations);
-      HYPRE_StructPMFGGetFinalRelativeResidualNorm(solver, &res);
+    case PFMG:
+      HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &solver);
+      HYPRE_StructPFMGSetTol(solver, m_eps);
+      HYPRE_StructPFMGSetMaxIter(solver, m_maxiter);
+      HYPRE_StructPFMGSetup(solver, m_A, m_b, m_x);
+      ierr = HYPRE_StructPFMGSolve(solver, m_A, m_b, m_x);
+      HYPRE_StructPFMGDestroy(solver);
+      HYPRE_StructPFMGGetNumIterations(solver, &num_iterations);
+      HYPRE_StructPFMGGetFinalRelativeResidualNorm(solver, &res);
       break;
 
     default:
