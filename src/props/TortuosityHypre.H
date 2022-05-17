@@ -29,7 +29,8 @@ class TortuosityHypre : public Tortuosity
     enum SolverType {
       Jacobi,
       GMRES,
-      FlexGMRES
+      FlexGMRES,
+      PMFG
     };
 
     /** Construct new Tortuosity solver
