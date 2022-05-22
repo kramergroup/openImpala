@@ -90,9 +90,15 @@ void TortuosityHypre::setupGrids()
                     << domainlo << std::endl << " Domain high: "
                     << domainhi << std::endl;
                     */
+  int global_proc_id;
+  MPI_Comm_rank(MPI_COMM_WORLD, &global_proc_id);
   int periodic[3] = {63, 63, 63};
-  MPI_Barrier(MPI_COMM_WORLD);                  
-  HYPRE_StructGridSetPeriodic(m_grid, periodic);
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (global_proc_id==0)
+  {
+    HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    }
+  
 
   // 4 - Finish setup 
   HYPRE_StructGridAssemble(m_grid);
