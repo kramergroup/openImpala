@@ -73,6 +73,9 @@ void TortuosityHypre::setupGrids()
                     
   HYPRE_StructGridSetPeriodic(m_grid, periodic);
     
+  hypre_BoxArray  *boxes = hypre_StructGridBoxes(m_grid);
+  hypre_StructGridSetBoxes(m_grid, boxes);
+    
   }
   
    // 3 - Set grid to be periodic
