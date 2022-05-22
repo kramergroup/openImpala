@@ -97,11 +97,10 @@ void TortuosityHypre::setupGrids()
   if (global_proc_id==0)
   {
     HYPRE_StructGridSetPeriodic(m_grid, periodic);
+      // 4 - Finish setup 
+  HYPRE_StructGridAssemble(m_grid);
     }
   
-
-  // 4 - Finish setup 
-  HYPRE_StructGridAssemble(m_grid);
 }
 
 /**
