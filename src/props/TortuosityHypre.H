@@ -30,7 +30,6 @@ class TortuosityHypre : public Tortuosity
       Jacobi,
       GMRES,
       FlexGMRES,
-      PFMG
     };
 
     /** Construct new Tortuosity solver
