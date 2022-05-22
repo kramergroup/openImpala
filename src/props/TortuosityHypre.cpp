@@ -76,6 +76,7 @@ void TortuosityHypre::setupGrids()
   }
   
    // 3 - Set grid to be periodic
+  /*
   const amrex::Box domain = m_geom.Domain();
   auto domainlo = TortuosityHypre::loV(domain);
   auto domainhi = TortuosityHypre::hiV(domain);    
@@ -84,7 +85,8 @@ void TortuosityHypre::setupGrids()
   amrex::Print() << std::endl << " Domain low: "
                     << domainlo << std::endl << " Domain high: "
                     << domainhi << std::endl;  
-  
+                    */
+  int periodic[3] = {81, 81, 81};
   HYPRE_StructGridSetPeriodic(m_grid, periodic);
 
   // 4 - Finish setup 
