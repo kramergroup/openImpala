@@ -64,6 +64,7 @@ void TortuosityHypre::setupGrids()
     
     */
        // 3 - Set grid to be periodic
+    /*
   const amrex::Box domain = m_geom.Domain();
   auto domainlo = TortuosityHypre::loV(domain);
   auto domainhi = TortuosityHypre::hiV(domain);    
@@ -74,6 +75,7 @@ void TortuosityHypre::setupGrids()
                     << domainhi[0] << std::endl;  
                     
   HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    */
   //hypre_StructGridSetBoxes(m_grid, boxes);
   }
 
@@ -225,17 +227,6 @@ bool TortuosityHypre::solve()
       HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &res);
       break;
       
-    case PFMG:
-      HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &solver);
-      HYPRE_StructPFMGSetTol(solver, m_eps);
-      HYPRE_StructPFMGSetMaxIter(solver, m_maxiter);
-      HYPRE_StructPFMGSetup(solver, m_A, m_b, m_x);
-      ierr = HYPRE_StructPFMGSolve(solver, m_A, m_b, m_x);
-      HYPRE_StructPFMGDestroy(solver);
-      HYPRE_StructPFMGGetNumIterations(solver, &num_iterations);
-      HYPRE_StructPFMGGetFinalRelativeResidualNorm(solver, &res);
-      break;
-
     default:
       HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver);
       HYPRE_StructGMRESSetTol(solver, m_eps);
