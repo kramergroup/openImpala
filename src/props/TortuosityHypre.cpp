@@ -86,7 +86,7 @@ void TortuosityHypre::setupGrids()
                     << domainlo << std::endl << " Domain high: "
                     << domainhi << std::endl;  
                     */
-  int periodic[3] = {81, 81, 81};
+  int periodic[3] = {80, 80, 80};
   HYPRE_StructGridSetPeriodic(m_grid, periodic);
 
   // 4 - Finish setup 
