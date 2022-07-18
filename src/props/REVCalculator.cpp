@@ -264,6 +264,14 @@ int main (int argc, char* argv[])
 
   amrex::Real tau_value_x = tortuosityx.value();
   amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
+    
+  amrex::Print() << std::endl << " Direction: Y" << std::endl;
+
+  // Compute tortuosity in y direction
+  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_y = tortuosityy.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;  
 }
 
   else if (DIRECTION==1)
