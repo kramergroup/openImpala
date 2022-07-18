@@ -217,6 +217,15 @@ int main (int argc, char* argv[])
     // We have used a fab with one ghost cell to allow for stencil-type operations
     // over the fab. This requires to distribute the ghost cells
     mf_phase.FillBoundary(geom.periodicity());
+    
+    // Generate randomised seed point for first cube
+      
+    srand(time(0));
+    int x_1 = rand() % 100 + 50;
+    int y_1 = rand() % 100 + 50;  
+    int z_1 = rand() % 100 + 50;
+      
+    amrex::Print() << " Random box coords: " << x_1 << y_1 << z_1 << std::endl;  
       
     const amrex::Box bx_11 = reader.box();
     fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
