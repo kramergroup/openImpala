@@ -108,7 +108,32 @@ int main (int argc, char* argv[])
     {   
     amrex::Print() << "tTiffReader - Reading file " << DATA_PATH + FILENAME << std::endl;
     TiffReader reader(DATA_PATH + FILENAME);
+      
+}
+    else if (FILENAME.substr (FILENAME.length() - 3) == "dat")
+    {   
+    amrex::Print() << "tDatReader - Reading file " << DATA_PATH + FILENAME << std::endl;
+    DatReader reader(DATA_PATH + FILENAME); 
+      
+}
+    else if (FILENAME.substr (FILENAME.length() - 2) == "h5" || FILENAME.substr (FILENAME.length() - 4) == "hdf5")
+    {   
+    amrex::Print() << "tHDF5Reader - Reading file " << DATA_PATH + FILENAME << std::endl;
+    HDF5Reader reader(DATA_PATH + FILENAME, HDF5_DATASET);
+      
+}
+    else if (FILENAME.at(FILENAME.length() - 3) != '.' || FILENAME.at(FILENAME.length() - 4) != '.' || FILENAME.at(FILENAME.length() - 5) != '.')
+    {   
+    amrex::Print() << "tTiffStackReader - Reading file " << DATA_PATH + FILENAME << std::endl;
+    TiffStackReader reader(DATA_PATH + FILENAME, TIFF_STACK);      
 
+}
+    else
+    {
+    amrex::Print() << std::endl << "File format not recognised." << std::endl; 
+    
+}       
+      
     const amrex::Box bx = reader.box();
     fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
     fy = 1.0*bx.size()[1]/bx.size()[DIRECTION];
@@ -130,95 +155,7 @@ int main (int argc, char* argv[])
     // over the fab. This requires to distribute the ghost cells
     //mf_phase.FillBoundary(geom.periodicity());
     mf_phase.FillBoundary();
-                                                             
-}
-    else if (FILENAME.substr (FILENAME.length() - 3) == "dat")
-    {   
-    amrex::Print() << "tDatReader - Reading file " << DATA_PATH + FILENAME << std::endl;
-    DatReader reader(DATA_PATH + FILENAME);
-
-    const amrex::Box bx = reader.box();
-    fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
-    fy = 1.0*bx.size()[1]/bx.size()[DIRECTION];
-    fz = 1.0*bx.size()[2]/bx.size()[DIRECTION];
-    amrex::RealBox rb({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
-    geom.define(bx, &rb, 0, is_periodic.data());
-
-    // Define computational domain and index space
-    ba.define(geom.Domain());
-    ba.maxSize(BOX_SIZE);
-      
-    dm.define(ba);
-    mf_phase.define(ba,dm,1,1);
-      
-    // Threshold image data
-    reader.threshold(1,mf_phase);
-          
-    // We have used a fab with one ghost cell to allow for stencil-type operations
-    // over the fab. This requires to distribute the ghost cells
-    mf_phase.FillBoundary(geom.periodicity());
-                                                             
-}
-    else if (FILENAME.substr (FILENAME.length() - 2) == "h5" || FILENAME.substr (FILENAME.length() - 4) == "hdf5")
-    {   
-    amrex::Print() << "tHDF5Reader - Reading file " << DATA_PATH + FILENAME << std::endl;
-    HDF5Reader reader(DATA_PATH + FILENAME, HDF5_DATASET);
-
-    const amrex::Box bx = reader.box();
-    fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
-    fy = 1.0*bx.size()[1]/bx.size()[DIRECTION];
-    fz = 1.0*bx.size()[2]/bx.size()[DIRECTION];
-    amrex::RealBox rb({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
-    geom.define(bx, &rb, 0, is_periodic.data());
-
-    // Define computational domain and index space
-    ba.define(geom.Domain());
-    ba.maxSize(BOX_SIZE);
-      
-    dm.define(ba);
-    mf_phase.define(ba,dm,1,1);
-      
-    // Threshold image data
-    reader.threshold(1,mf_phase);
-          
-    // We have used a fab with one ghost cell to allow for stencil-type operations
-    // over the fab. This requires to distribute the ghost cells
-    mf_phase.FillBoundary(geom.periodicity());
-                                                             
-}
-    else if (FILENAME.at(FILENAME.length() - 3) != '.' || FILENAME.at(FILENAME.length() - 4) != '.' || FILENAME.at(FILENAME.length() - 5) != '.')
-    {   
-    amrex::Print() << "tTiffStackReader - Reading file " << DATA_PATH + FILENAME << std::endl;
-    TiffStackReader reader(DATA_PATH + FILENAME, TIFF_STACK);
-
-    const amrex::Box bx = reader.box();
-    fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
-    fy = 1.0*bx.size()[1]/bx.size()[DIRECTION];
-    fz = 1.0*bx.size()[2]/bx.size()[DIRECTION];
-    amrex::RealBox rb({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
-    geom.define(bx, &rb, 0, is_periodic.data());
-
-    // Define computational domain and index space
-    ba.define(geom.Domain());
-    ba.maxSize(BOX_SIZE);
-      
-    dm.define(ba);
-    mf_phase.define(ba,dm,1,1);
-      
-    // Threshold image data
-    reader.threshold(1,mf_phase);
-          
-    // We have used a fab with one ghost cell to allow for stencil-type operations
-    // over the fab. This requires to distribute the ghost cells
-    mf_phase.FillBoundary(geom.periodicity());
-                                                             
-}
-    else
-    {
-    amrex::Print() << std::endl << "File format not recognised." << std::endl; 
-    
-} 
- 
+                                                                                                                         
   }
 
   VolumeFraction vf(mf_phase, 1);
