@@ -284,7 +284,40 @@ int main (int argc, char* argv[])
   TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
   amrex::Real tau_value_z = tortuosityz.value();
-  amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;    
+  amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;  
+
+  amrex::Print() << std::endl << " Box 1 Size 1 "
+                   << std::endl;    
+    
+  VolumeFraction vf_11(mf_phase_11, 1);
+
+  // Print volume fraction value
+  amrex::Print() << std::endl << " Volume Fraction: "
+                  << amrex::Real(vf_11.value()) << std::endl;
+
+  amrex::Print() << std::endl << " Direction: X" << std::endl;
+
+  // Compute tortuosity in x direction
+  TortuosityHypre tortuosityx(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_x = tortuosityx.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
+    
+  amrex::Print() << std::endl << " Direction: Y" << std::endl;
+
+  // Compute tortuosity in y direction
+  TortuosityHypre tortuosityy(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_y = tortuosityy.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl; 
+    
+  amrex::Print() << std::endl << " Direction: Z" << std::endl;
+
+  // Compute tortuosity in z direction
+  TortuosityHypre tortuosityz(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_z = tortuosityz.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;        
 
 
   // Call the timer again and compute the maximum difference between the start time and stop time
