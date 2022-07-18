@@ -225,9 +225,7 @@ int main (int argc, char* argv[])
     int y_1 = rand() % 100 + 50;  
     int z_1 = rand() % 100 + 50;
       
-    amrex::Print() << " Random box coords: " << x_1 << y_1 << z_1 << std::endl;  
-      
-    const amrex::Box bx_11 = reader.box();
+    const amrex::Box bx_11 = box(amrex::IntVect{x_1-16,y_1-16,z_1-16}, amrex::IntVect{x_1+15,y_1+15,z_1+15});
     fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
     fy = 1.0*bx_11.size()[1]/bx_11.size()[DIRECTION];
     fz = 1.0*bx_11.size()[2]/bx_11.size()[DIRECTION];
