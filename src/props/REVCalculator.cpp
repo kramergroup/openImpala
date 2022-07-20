@@ -228,8 +228,9 @@ int main (int argc, char* argv[])
         int x_1 = rand() % 100 + 50;
         int y_1 = rand() % 100 + 50;  
         int z_1 = rand() % 100 + 50;
-
-    while ( int i = 0 < 2){  
+      
+    int i = 0;
+    while ( i < 2){  
       
         // Perform check to see if edge of REV box exceeds domain size
         // and correct if necessary  
