@@ -218,56 +218,64 @@ int main (int argc, char* argv[])
     // over the fab. This requires to distribute the ghost cells
     mf_phase.FillBoundary(geom.periodicity());
     
+    // Specify REV cube sizes  
     int rev_size [8] = { 32, 40, 50, 62, 80, 100, 126, 158 };       
-      
-    // Generate randomised seed point for first cube
-      
-    srand(time(0));
-    int x_1 = rand() % 100 + 50;
-    int y_1 = rand() % 100 + 50;  
-    int z_1 = rand() % 100 + 50;
     
-      
-    if ((x_1 - (rev_size[0]/2)) <= 0){
-      x_1 = (rev_size[0]/2) + 1;
-    }
-    if ((x_1 + (rev_size[0]/2) - 1) > bx.size()[0]){
-      x_1 = bx.size()[0] - (rev_size[0]/2) + 1;
-    }
-    if ((y_1 - (rev_size[0]/2)) <= 0){
-      y_1 = (rev_size[0]/2) + 1;
-    }
-    if ((y_1 + (rev_size[0]/2) - 1) > bx.size()[1]){
-      y_1 = bx.size()[1] - (rev_size[0]/2) + 1;
-    }
-    if ((z_1 - (rev_size[0]/2)) <= 0){
-      z_1 = (rev_size[0]/2) + 1;
-    }
-    if ((z_1 + (rev_size[0]/2) - 1) > bx.size()[2]){
-      z_1 = bx.size()[2] - (rev_size[0]/2) + 1;
-    }  
-      
-    const amrex::Box bx_11 ({x_1-16,y_1-16,z_1-16}, {x_1+15,y_1+15,z_1+15});
-    fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
-    fy = 1.0*bx_11.size()[1]/bx_11.size()[DIRECTION];
-    fz = 1.0*bx_11.size()[2]/bx_11.size()[DIRECTION];
-    amrex::RealBox rb_11({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
-    geom_11.define(bx_11, &rb_11, 0, is_periodic.data());
+    
 
-    // Define computational domain and index space
-    ba_11.define(geom_11.Domain());
-    ba_11.maxSize(BOX_SIZE);
+        // Generate randomised seed point centre of REV      
+        srand(time(0));
+        int x_1 = rand() % 100 + 50;
+        int y_1 = rand() % 100 + 50;  
+        int z_1 = rand() % 100 + 50;
+
+    while ( int i = 0 < 2){  
       
-    dm_11.define(ba_11);
-    mf_phase_11.define(ba_11,dm_11,1,2);
-      
-    // Threshold image data
-    reader.threshold(1,mf_phase_11);
-          
-    // We have used a fab with one ghost cell to allow for stencil-type operations
-    // over the fab. This requires to distribute the ghost cells
-    //mf_phase.FillBoundary(geom.periodicity());
-    mf_phase_11.FillBoundary();    
+        // Perform check to see if edge of REV box exceeds domain size
+        // and correct if necessary  
+        if ((x_1 - (rev_size[0]/2)) <= 0){
+          x_1 = (rev_size[0]/2) + 1;
+        }
+        if ((x_1 + (rev_size[0]/2) - 1) > bx.size()[0]){
+          x_1 = bx.size()[0] - (rev_size[0]/2) + 1;
+        }
+        if ((y_1 - (rev_size[0]/2)) <= 0){
+          y_1 = (rev_size[0]/2) + 1;
+        }
+        if ((y_1 + (rev_size[0]/2) - 1) > bx.size()[1]){
+          y_1 = bx.size()[1] - (rev_size[0]/2) + 1;
+        }
+        if ((z_1 - (rev_size[0]/2)) <= 0){
+          z_1 = (rev_size[0]/2) + 1;
+        }
+        if ((z_1 + (rev_size[0]/2) - 1) > bx.size()[2]){
+          z_1 = bx.size()[2] - (rev_size[0]/2) + 1;
+        }  
+
+        const amrex::Box bx_11 ({x_1-16,y_1-16,z_1-16}, {x_1+15,y_1+15,z_1+15});
+        fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
+        fy = 1.0*bx_11.size()[1]/bx_11.size()[DIRECTION];
+        fz = 1.0*bx_11.size()[2]/bx_11.size()[DIRECTION];
+        amrex::RealBox rb_11({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
+        geom_11.define(bx_11, &rb_11, 0, is_periodic.data());
+
+        // Define computational domain and index space
+        ba_11.define(geom_11.Domain());
+        ba_11.maxSize(BOX_SIZE);
+
+        dm_11.define(ba_11);
+        mf_phase_11.define(ba_11,dm_11,1,2);
+
+        // Threshold image data
+        reader.threshold(1,mf_phase_11);
+
+        // We have used a fab with one ghost cell to allow for stencil-type operations
+        // over the fab. This requires to distribute the ghost cells
+        //mf_phase.FillBoundary(geom.periodicity());
+        mf_phase_11.FillBoundary();  
+
+        i++;  
+    }
                                                              
 }
     else
