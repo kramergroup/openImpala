@@ -218,6 +218,8 @@ int main (int argc, char* argv[])
     // over the fab. This requires to distribute the ghost cells
     mf_phase.FillBoundary(geom.periodicity());
     
+    int rev_size [8] = { 32, 40, 50, 62, 80, 100, 126, 158 };       
+      
     // Generate randomised seed point for first cube
       
     srand(time(0));
@@ -226,13 +228,24 @@ int main (int argc, char* argv[])
     int z_1 = rand() % 100 + 50;
     
       
-    if ((x_1 - 16) < 0){
-      x_1 = 16;
+    if ((x_1 - (rev_size[0]/2)) <= 0){
+      x_1 = (rev_size[0]/2) + 1;
     }
-    if ((x_1 + 15) > bx.size()[0]){
-      x_1 = bx.size()[0] - 15;
+    if ((x_1 + (rev_size[0]/2) - 1) > bx.size()[0]){
+      x_1 = bx.size()[0] - (rev_size[0]/2) + 1;
     }
-    amrex::Print() << "Domain Size in x is: " << bx.size()[0] << std::endl;  
+    if ((y_1 - (rev_size[0]/2)) <= 0){
+      y_1 = (rev_size[0]/2) + 1;
+    }
+    if ((y_1 + (rev_size[0]/2) - 1) > bx.size()[1]){
+      y_1 = bx.size()[1] - (rev_size[0]/2) + 1;
+    }
+    if ((z_1 - (rev_size[0]/2)) <= 0){
+      z_1 = (rev_size[0]/2) + 1;
+    }
+    if ((z_1 + (rev_size[0]/2) - 1) > bx.size()[2]){
+      z_1 = bx.size()[2] - (rev_size[0]/2) + 1;
+    }  
       
     const amrex::Box bx_11 ({x_1-16,y_1-16,z_1-16}, {x_1+15,y_1+15,z_1+15});
     fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
