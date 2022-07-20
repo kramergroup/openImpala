@@ -224,6 +224,15 @@ int main (int argc, char* argv[])
     int x_1 = rand() % 100 + 50;
     int y_1 = rand() % 100 + 50;  
     int z_1 = rand() % 100 + 50;
+    
+      
+    if ((x_1 - 16) < 0){
+      x_1 = 16;
+    }
+    if ((x_1 + 15) > bx.size()[0]){
+      x_1 = bx.size()[0] - 15;
+    }
+    amrex::Print() << "Domain Size in x is: " << bx.size()[0] << std::endl;  
       
     const amrex::Box bx_11 ({x_1-16,y_1-16,z_1-16}, {x_1+15,y_1+15,z_1+15});
     fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
