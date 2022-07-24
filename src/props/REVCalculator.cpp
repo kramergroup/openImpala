@@ -225,12 +225,9 @@ int main (int argc, char* argv[])
 
     // Generate randomised seed point centre of REV      
     srand(time(0));
-    int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, 
-                      rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
-    int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, 
-                      rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
-    int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, 
-                      rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
+    int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
+    int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
+    int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
       
     const amrex::Box bx_array [8]; 
       
@@ -258,8 +255,7 @@ int main (int argc, char* argv[])
           z_seed[i] = bx.size()[2] - (rev_size[i]/2) + 1;
         }  
 
-        bx_array[i] = ({x_seed[i]-(rev_size[i]/2),y_seed[i]-(rev_size[i]/2),z_seed[i]-(rev_size[i]/2)}, 
-                                {x_seed[i]+(rev_size[i]/2)-1,y_seed[i]+(rev_size[i]/2)-1,z_seed[i]+(rev_size[i]/2)-1});
+        bx_array[i] = ({x_seed[i]-(rev_size[i]/2),y_seed[i]-(rev_size[i]/2),z_seed[i]-(rev_size[i]/2)}, {x_seed[i]+(rev_size[i]/2)-1,y_seed[i]+(rev_size[i]/2)-1,z_seed[i]+(rev_size[i]/2)-1});
         fx = 1.0*bx_array[i].size()[0]/bx_array[i].size()[DIRECTION];
         fy = 1.0*bx_array[i].size()[1]/bx_array[i].size()[DIRECTION];
         fz = 1.0*bx_array[i].size()[2]/bx_array[i].size()[DIRECTION];
