@@ -283,7 +283,12 @@ int main (int argc, char* argv[])
         mf_phase_11.FillBoundary();  
       
         amrex::Print() << std::endl << " Box 1 Size " << i
-                   << std::endl;    
+                   << std::endl << " Coordinates: (" << x_seed_low 
+                   << " , " << y_seed_low
+                   << " , " << z_seed_low
+                   << ")  (" << x_seed_high
+                   << " , " << y_seed_high
+                   << " , " << z_seed_high << " ) " << std::endl;    
     
         VolumeFraction vf_11(mf_phase_11, 1);
 
@@ -338,15 +343,23 @@ int main (int argc, char* argv[])
   // Compute tortuosity in x direction
   TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
     
+  
+  amrex::Real tau_value_x = tortuosityx.value();  
+    
   amrex::Print() << std::endl << " Direction: Y" << std::endl;
 
   // Compute tortuosity in y direction
   TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
     
+  
+  amrex::Real tau_value_y = tortuosityy.value();    
+    
   amrex::Print() << std::endl << " Direction: Z" << std::endl;
 
   // Compute tortuosity in z direction
   TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+    
+  amrex::Real tau_value_z = tortuosityz.value();   
 
 
   // Call the timer again and compute the maximum difference between the start time and stop time
