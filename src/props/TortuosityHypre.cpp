@@ -485,10 +485,8 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
-    amrex::Print() << std::endl << " Num_cells_x "
-                    << num_cell_x << std::endl << " Num_cells_y "
-                    << num_cell_y << std::endl << " Num_cells_z "
-                    << num_cell_z << std::endl;
+    amrex::Print() << std::endl << " Number of Cells in 1D "
+                    << num_cell_x << std::endl;
 
     amrex::Print() << std::endl << " Flux Sum X: "
                     << fluxx << std::endl << " Flux Sum Y: "
