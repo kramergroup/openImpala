@@ -219,42 +219,21 @@ int main (int argc, char* argv[])
     mf_phase.FillBoundary(geom.periodicity());
     
     // Specify REV cube sizes  
-    int rev_size [8] = { 32, 40, 50, 62, 80, 100, 126, 158 };       
-    
-    // Iterate through random seed points  
-    int j = 0;
-    while ( j < 2){  
+    int rev_size [8] = { 32, 40, 50, 62, 80, 100, 126, 158 };        
 
     // Generate randomised seed point centre of REV      
     srand(time(0));
     int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
     int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
     int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
-    
+
+    // Iterate through random seed points  
+    int j = 0;
+    while ( j < 2){   
+      
     // Iterate through box sizes  
     int i = 0;
-    while ( i < 2){  
-      
-        // Perform check to see if edge of REV box exceeds domain size
-        // and correct if necessary  
-        if ((x_seed[j] - (rev_size[i]/2)) <= 0){
-          x_seed[j] = (rev_size[i]/2) + 1;
-        }
-        if ((x_seed[j] + (rev_size[i]/2) - 1) > bx.size()[0]){
-          x_seed[j] = bx.size()[0] - (rev_size[i]/2) + 1;
-        }
-        if ((y_seed[j] - (rev_size[i]/2)) <= 0){
-          y_seed[j] = (rev_size[i]/2) + 1;
-        }
-        if ((y_seed[j] + (rev_size[i]/2) - 1) > bx.size()[1]){
-          y_seed[j] = bx.size()[1] - (rev_size[i]/2) + 1;
-        }
-        if ((z_seed[j] - (rev_size[i]/2)) <= 0){
-          z_seed[j] = (rev_size[i]/2) + 1;
-        }
-        if ((z_seed[j] + (rev_size[i]/2) - 1) > bx.size()[2]){
-          z_seed[j] = bx.size()[2] - (rev_size[i]/2) + 1;
-        }
+    while ( i < 2){        
       
         int x_seed_low = x_seed[j] - (rev_size[i]/2);
         int x_seed_high = x_seed[j] + (rev_size[i]/2) - 1;
@@ -262,6 +241,27 @@ int main (int argc, char* argv[])
         int y_seed_high = y_seed[j] + (rev_size[i]/2) - 1;
         int z_seed_low = z_seed[j] - (rev_size[i]/2);
         int z_seed_high = z_seed[j] + (rev_size[i]/2) - 1;
+      
+        // Perform check to see if edge of REV box exceeds domain size
+        // and correct if necessary  
+        if (x_seed_low) <= 0){
+          x_seed_low = (rev_size[i]/2) + 1;
+        }
+        if (x_seed_high) > bx.size()[0]){
+          x_seed_high = bx.size()[0] - (rev_size[i]/2) + 1;
+        }
+        if (y_seed_low) <= 0){
+          y_seed_low = (rev_size[i]/2) + 1;
+        }
+        if (y_seed_high) > bx.size()[1]){
+          y_seed_high = bx.size()[1] - (rev_size[i]/2) + 1;
+        }
+        if (z_seed_low) <= 0){
+          z_seed_low = (rev_size[i]/2) + 1;
+        }
+        if (z_seed_high) > bx.size()[2]){
+          z_seed_high = bx.size()[2] - (rev_size[i]/2) + 1;
+        }      
 
         const amrex::Box bx_11 ({x_seed_low,y_seed_low,z_seed_low}, {x_seed_high,y_seed_high,z_seed_high});
         fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
