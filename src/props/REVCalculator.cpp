@@ -234,23 +234,23 @@ int main (int argc, char* argv[])
       
         // Perform check to see if edge of REV box exceeds domain size
         // and correct if necessary  
-        if ((x_seed[i] - (rev_size[0]/2)) <= 0){
-          x_seed[i] = (rev_size[0]/2) + 1;
+        if ((x_seed[i] - (rev_size[i]/2)) <= 0){
+          x_seed[i] = (rev_size[i]/2) + 1;
         }
-        if ((x_seed[i] + (rev_size[0]/2) - 1) > bx.size()[0]){
-          x_seed[i] = bx.size()[0] - (rev_size[0]/2) + 1;
+        if ((x_seed[i] + (rev_size[i]/2) - 1) > bx.size()[0]){
+          x_seed[i] = bx.size()[0] - (rev_size[i]/2) + 1;
         }
-        if ((y_seed[i] - (rev_size[0]/2)) <= 0){
-          y_seed[i] = (rev_size[0]/2) + 1;
+        if ((y_seed[i] - (rev_size[i]/2)) <= 0){
+          y_seed[i] = (rev_size[i]/2) + 1;
         }
-        if ((y_seed[i] + (rev_size[0]/2) - 1) > bx.size()[1]){
-          y_seed[i] = bx.size()[1] - (rev_size[0]/2) + 1;
+        if ((y_seed[i] + (rev_size[i]/2) - 1) > bx.size()[1]){
+          y_seed[i] = bx.size()[1] - (rev_size[i]/2) + 1;
         }
-        if ((z_seed[i] - (rev_size[0]/2)) <= 0){
-          z_seed[i] = (rev_size[0]/2) + 1;
+        if ((z_seed[i] - (rev_size[i]/2)) <= 0){
+          z_seed[i] = (rev_size[i]/2) + 1;
         }
-        if ((z_seed[i] + (rev_size[0]/2) - 1) > bx.size()[2]){
-          z_seed[i] = bx.size()[2] - (rev_size[0]/2) + 1;
+        if ((z_seed[i] + (rev_size[i]/2) - 1) > bx.size()[2]){
+          z_seed[i] = bx.size()[2] - (rev_size[i]/2) + 1;
         }  
 
         const amrex::Box bx_11 ({x_seed[i]-16,y_seed[i]-16,z_seed[i]-16}, {x_seed[i]+15,y_seed[i]+15,z_seed[i]+15});
