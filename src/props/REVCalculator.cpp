@@ -223,42 +223,40 @@ int main (int argc, char* argv[])
     
     
 
-    // Generate randomised seed point centre of REV      
-    srand(time(0));
-    int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
-    int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
-    int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
-      
-    const amrex::Box bx_array [8]; 
+        // Generate randomised seed point centre of REV      
+        srand(time(0));
+        int x_1 = rand() % 100 + 50;
+        int y_1 = rand() % 100 + 50;  
+        int z_1 = rand() % 100 + 50;
       
     int i = 0;
-    for (i=0; i<2; i++)  
+    while ( i < 2){  
       
         // Perform check to see if edge of REV box exceeds domain size
         // and correct if necessary  
-        if ((x_seed[i] - (rev_size[i]/2)) <= 0){
-          x_seed[i] = (rev_size[i]/2) + 1;
+        if ((x_1 - (rev_size[0]/2)) <= 0){
+          x_1 = (rev_size[0]/2) + 1;
         }
-        if ((x_seed[i] + (rev_size[i]/2) - 1) > bx.size()[0]){
-          x_seed[i] = bx.size()[0] - (rev_size[i]/2) + 1;
+        if ((x_1 + (rev_size[0]/2) - 1) > bx.size()[0]){
+          x_1 = bx.size()[0] - (rev_size[0]/2) + 1;
         }
-        if ((y_seed[i] - (rev_size[i]/2)) <= 0){
-          y_seed[i] = (rev_size[i]/2) + 1;
+        if ((y_1 - (rev_size[0]/2)) <= 0){
+          y_1 = (rev_size[0]/2) + 1;
         }
-        if ((y_seed[i] + (rev_size[i]/2) - 1) > bx.size()[1]){
-          y_seed[i] = bx.size()[1] - (rev_size[i]/2) + 1;
+        if ((y_1 + (rev_size[0]/2) - 1) > bx.size()[1]){
+          y_1 = bx.size()[1] - (rev_size[0]/2) + 1;
         }
-        if ((z_seed[i] - (rev_size[i]/2)) <= 0){
-          z_seed[i] = (rev_size[i]/2) + 1;
+        if ((z_1 - (rev_size[0]/2)) <= 0){
+          z_1 = (rev_size[0]/2) + 1;
         }
-        if ((z_seed[i] + (rev_size[i]/2) - 1) > bx.size()[2]){
-          z_seed[i] = bx.size()[2] - (rev_size[i]/2) + 1;
+        if ((z_1 + (rev_size[0]/2) - 1) > bx.size()[2]){
+          z_1 = bx.size()[2] - (rev_size[0]/2) + 1;
         }  
 
-        bx_11 = ({x_seed[i]-(rev_size[i]/2),y_seed[i]-(rev_size[i]/2),z_seed[i]-(rev_size[i]/2)}, {x_seed[i]+(rev_size[i]/2)-1,y_seed[i]+(rev_size[i]/2)-1,z_seed[i]+(rev_size[i]/2)-1});
-        fx = 1.0*bx_11.size()[0]/bx_array[i].size()[DIRECTION];
-        fy = 1.0*bx_11.size()[1]/bx_array[i].size()[DIRECTION];
-        fz = 1.0*bx_11.size()[2]/bx_array[i].size()[DIRECTION];
+        const amrex::Box bx_11 ({x_1-16,y_1-16,z_1-16}, {x_1+15,y_1+15,z_1+15});
+        fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
+        fy = 1.0*bx_11.size()[1]/bx_11.size()[DIRECTION];
+        fz = 1.0*bx_11.size()[2]/bx_11.size()[DIRECTION];
         amrex::RealBox rb_11({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
         geom_11.define(bx_11, &rb_11, 0, is_periodic.data());
 
@@ -275,41 +273,9 @@ int main (int argc, char* argv[])
         // We have used a fab with one ghost cell to allow for stencil-type operations
         // over the fab. This requires to distribute the ghost cells
         //mf_phase.FillBoundary(geom.periodicity());
-        mf_phase_11.FillBoundary(); 
-      
-        amrex::Print() << std::endl << " Box 1 Size " << i 
-                   << std::endl;    
-    
-        VolumeFraction vf_11(mf_phase_11, 1);
+        mf_phase_11.FillBoundary();  
 
-        // Print volume fraction value
-        amrex::Print() << std::endl << " Volume Fraction: "
-                        << amrex::Real(vf_11.value()) << std::endl;
-
-        amrex::Print() << std::endl << " Direction: X" << std::endl;
-
-        // Compute tortuosity in x direction
-        TortuosityHypre tortuosityx_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
-
-        amrex::Real tau_value_x_11 = tortuosityx_11.value();
-        amrex::Print() << " Tortuosity value: " << tau_value_x_11 << std::endl;
-
-        amrex::Print() << std::endl << " Direction: Y" << std::endl;
-
-        // Compute tortuosity in y direction
-        TortuosityHypre tortuosityy_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
-
-        amrex::Real tau_value_y_11 = tortuosityy_11.value();
-        amrex::Print() << " Tortuosity value: " << tau_value_y_11 << std::endl; 
-
-        amrex::Print() << std::endl << " Direction: Z" << std::endl;
-
-        // Compute tortuosity in z direction
-        TortuosityHypre tortuosityz_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
-
-        amrex::Real tau_value_z_11 = tortuosityz_11.value();
-        amrex::Print() << " Tortuosity value: " << tau_value_z_11 << std::endl;    
- 
+        i++;  
     }
                                                              
 }
@@ -349,7 +315,40 @@ int main (int argc, char* argv[])
   TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
   amrex::Real tau_value_z = tortuosityz.value();
-  amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;      
+  amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;  
+
+  amrex::Print() << std::endl << " Box 1 Size 1 "
+                   << std::endl;    
+    
+  VolumeFraction vf_11(mf_phase_11, 1);
+
+  // Print volume fraction value
+  amrex::Print() << std::endl << " Volume Fraction: "
+                  << amrex::Real(vf_11.value()) << std::endl;
+
+  amrex::Print() << std::endl << " Direction: X" << std::endl;
+
+  // Compute tortuosity in x direction
+  TortuosityHypre tortuosityx_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_x_11 = tortuosityx_11.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_x_11 << std::endl;
+    
+  amrex::Print() << std::endl << " Direction: Y" << std::endl;
+
+  // Compute tortuosity in y direction
+  TortuosityHypre tortuosityy_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_y_11 = tortuosityy_11.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_y_11 << std::endl; 
+    
+  amrex::Print() << std::endl << " Direction: Z" << std::endl;
+
+  // Compute tortuosity in z direction
+  TortuosityHypre tortuosityz_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
+
+  amrex::Real tau_value_z_11 = tortuosityz_11.value();
+  amrex::Print() << " Tortuosity value: " << tau_value_z_11 << std::endl;        
 
 
   // Call the timer again and compute the maximum difference between the start time and stop time
