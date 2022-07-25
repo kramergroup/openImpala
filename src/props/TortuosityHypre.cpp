@@ -485,10 +485,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
-    amrex::Print() << std::endl << " Number phase cells 0: "
-                    << num_phase_cells_0  << std::endl << " Number phase cells 1: "
-                    << num_phase_cells_1  << std::endl << " Number phase cells 2: "
-                    << num_phase_cells_2  << std::endl << " Vhi "
+    amrex::Print() << std::endl << " Vhi "
                     << m_vhi << std::endl << " Vlo "
                     << m_vlo << std::endl << " Length_x "
                     << length_x << std::endl << " Length_y "
@@ -496,13 +493,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
                     << length_z << std::endl << " Num_cells_x "
                     << num_cell_x << std::endl << " Num_cells_y "
                     << num_cell_y << std::endl << " Num_cells_z "
-                    << num_cell_z << std::endl << " Source_cells_x "
-                    << source_cells_x << std::endl << " Sink_cells_x "
-                    << sink_cells_x << std::endl << " Source_cells_y "
-                    << source_cells_y << std::endl << " Sink_cells_y "
-                    << sink_cells_y << std::endl << " Source_cells_z "
-                    << source_cells_z << std::endl << " Sink_cells_z "
-                    << sink_cells_z << std::endl;
+                    << num_cell_z << std::endl;
 
     amrex::Print() << std::endl << " Phi Sum X: "
                     << phisumx << std::endl << " Phi Sum Y: "
@@ -520,12 +511,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     amrex::Real rel_diffusivity = fluxx/flux_max;
 
     amrex::Real tau = m_vf / rel_diffusivity;
-
-    // Print all of fluxvect values
-    amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
-                    << rel_diffusivity << std::endl ;
-
-    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxx) << std::endl;
 
     return tau;
 
