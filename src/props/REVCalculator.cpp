@@ -297,7 +297,6 @@ int main (int argc, char* argv[])
         TortuosityHypre tortuosityx_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
         amrex::Real tau_value_x_11 = tortuosityx_11.value();
-        amrex::Print() << " Tortuosity value: " << tau_value_x_11 << std::endl;
 
         amrex::Print() << std::endl << " Direction: Y" << std::endl;
 
@@ -305,15 +304,13 @@ int main (int argc, char* argv[])
         TortuosityHypre tortuosityy_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
         amrex::Real tau_value_y_11 = tortuosityy_11.value();
-        amrex::Print() << " Tortuosity value: " << tau_value_y_11 << std::endl; 
 
         amrex::Print() << std::endl << " Direction: Z" << std::endl;
 
         // Compute tortuosity in z direction
         TortuosityHypre tortuosityz_11(geom_11,ba_11,dm_11,mf_phase_11,vf_11.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
-        amrex::Real tau_value_z_11 = tortuosityz_11.value();
-        amrex::Print() << " Tortuosity value: " << tau_value_z_11 << std::endl;        
+        amrex::Real tau_value_z_11 = tortuosityz_11.value(); 
 
         i++;  
     }
