@@ -253,7 +253,7 @@ int main (int argc, char* argv[])
           z_seed[j] = (rev_size[i]/2) + 1;
         }
         if ((z_seed[j] + (rev_size[i]/2) - 1) > bx.size()[2]){
-          z_seed[ij] = bx.size()[2] - (rev_size[i]/2) + 1;
+          z_seed[j] = bx.size()[2] - (rev_size[i]/2) + 1;
         }
       
         int x_seed_low = x_seed[j] - (rev_size[i]/2);
