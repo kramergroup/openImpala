@@ -251,9 +251,16 @@ int main (int argc, char* argv[])
         }
         if ((z_seed[i] + (rev_size[i]/2) - 1) > bx.size()[2]){
           z_seed[i] = bx.size()[2] - (rev_size[i]/2) + 1;
-        }  
+        }
+      
+        int x_seed_low = x_seed[i] - (rev_size[i]/2);
+        int x_seed_high = x_seed[i] + (rev_size[i]/2) - 1;
+        int y_seed_low = y_seed[i] - (rev_size[i]/2);
+        int y_seed_high = y_seed[i] + (rev_size[i]/2) - 1;
+        int z_seed_low = z_seed[i] - (rev_size[i]/2);
+        int z_seed_high = z_seed[i] + (rev_size[i]/2) - 1;
 
-        const amrex::Box bx_11 ({x_seed[i]-16,y_seed[i]-16,z_seed[i]-16}, {x_seed[i]+15,y_seed[i]+15,z_seed[i]+15});
+        const amrex::Box bx_11 ({x_seed_low,y_seed_low,z_seed_low}, {x_seed_high,y_seed_high,z_seed_high});
         fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
         fy = 1.0*bx_11.size()[1]/bx_11.size()[DIRECTION];
         fz = 1.0*bx_11.size()[2]/bx_11.size()[DIRECTION];
