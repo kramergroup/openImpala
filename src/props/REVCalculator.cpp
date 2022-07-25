@@ -244,22 +244,22 @@ int main (int argc, char* argv[])
       
         // Perform check to see if edge of REV box exceeds domain size
         // and correct if necessary  
-        if (x_seed_low) <= 0){
+        if (x_seed_low <= 0){
           x_seed_low = (rev_size[i]/2) + 1;
         }
-        if (x_seed_high) > bx.size()[0]){
+        if (x_seed_high > bx.size()[0]){
           x_seed_high = bx.size()[0] - (rev_size[i]/2) + 1;
         }
-        if (y_seed_low) <= 0){
+        if (y_seed_low <= 0){
           y_seed_low = (rev_size[i]/2) + 1;
         }
-        if (y_seed_high) > bx.size()[1]){
+        if (y_seed_high > bx.size()[1]){
           y_seed_high = bx.size()[1] - (rev_size[i]/2) + 1;
         }
-        if (z_seed_low) <= 0){
+        if (z_seed_low <= 0){
           z_seed_low = (rev_size[i]/2) + 1;
         }
-        if (z_seed_high) > bx.size()[2]){
+        if (z_seed_high > bx.size()[2]){
           z_seed_high = bx.size()[2] - (rev_size[i]/2) + 1;
         }      
 
