@@ -223,37 +223,37 @@ int main (int argc, char* argv[])
     
     
 
-        // Generate randomised seed point centre of REV      
-        srand(time(0));
-        int x_1 = rand() % 100 + 50;
-        int y_1 = rand() % 100 + 50;  
-        int z_1 = rand() % 100 + 50;
+    // Generate randomised seed point centre of REV      
+    srand(time(0));
+    int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
+    int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
+    int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
       
     int i = 0;
     while ( i < 2){  
       
         // Perform check to see if edge of REV box exceeds domain size
         // and correct if necessary  
-        if ((x_1 - (rev_size[0]/2)) <= 0){
-          x_1 = (rev_size[0]/2) + 1;
+        if ((x_seed[i] - (rev_size[0]/2)) <= 0){
+          x_seed[i] = (rev_size[0]/2) + 1;
         }
-        if ((x_1 + (rev_size[0]/2) - 1) > bx.size()[0]){
-          x_1 = bx.size()[0] - (rev_size[0]/2) + 1;
+        if ((x_seed[i] + (rev_size[0]/2) - 1) > bx.size()[0]){
+          x_seed[i] = bx.size()[0] - (rev_size[0]/2) + 1;
         }
-        if ((y_1 - (rev_size[0]/2)) <= 0){
-          y_1 = (rev_size[0]/2) + 1;
+        if ((y_seed[i] - (rev_size[0]/2)) <= 0){
+          y_seed[i] = (rev_size[0]/2) + 1;
         }
-        if ((y_1 + (rev_size[0]/2) - 1) > bx.size()[1]){
-          y_1 = bx.size()[1] - (rev_size[0]/2) + 1;
+        if ((y_seed[i] + (rev_size[0]/2) - 1) > bx.size()[1]){
+          y_seed[i] = bx.size()[1] - (rev_size[0]/2) + 1;
         }
-        if ((z_1 - (rev_size[0]/2)) <= 0){
-          z_1 = (rev_size[0]/2) + 1;
+        if ((z_seed[i] - (rev_size[0]/2)) <= 0){
+          z_seed[i] = (rev_size[0]/2) + 1;
         }
-        if ((z_1 + (rev_size[0]/2) - 1) > bx.size()[2]){
-          z_1 = bx.size()[2] - (rev_size[0]/2) + 1;
+        if ((z_seed[i] + (rev_size[0]/2) - 1) > bx.size()[2]){
+          z_seed[i] = bx.size()[2] - (rev_size[0]/2) + 1;
         }  
 
-        const amrex::Box bx_11 ({x_1-16,y_1-16,z_1-16}, {x_1+15,y_1+15,z_1+15});
+        const amrex::Box bx_11 ({x_seed[i]-16,y_seed[i]-16,z_seed[i]-16}, {x_seed[i]+15,y_seed[i]+15,z_seed[i]+15});
         fx = 1.0*bx_11.size()[0]/bx_11.size()[DIRECTION];
         fy = 1.0*bx_11.size()[1]/bx_11.size()[DIRECTION];
         fz = 1.0*bx_11.size()[2]/bx_11.size()[DIRECTION];
