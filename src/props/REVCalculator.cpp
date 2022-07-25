@@ -221,14 +221,17 @@ int main (int argc, char* argv[])
     // Specify REV cube sizes  
     int rev_size [8] = { 32, 40, 50, 62, 80, 100, 126, 158 };       
     
-    
+    // Iterate through random seed points  
+    int j = 0;
+    while ( j < 2){  
 
     // Generate randomised seed point centre of REV      
     srand(time(0));
     int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
     int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
     int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
-      
+    
+    // Iterate through box sizes  
     int i = 0;
     while ( i < 2){  
       
@@ -282,7 +285,7 @@ int main (int argc, char* argv[])
         //mf_phase.FillBoundary(geom.periodicity());
         mf_phase_11.FillBoundary();  
       
-        amrex::Print() << std::endl << " Box 1 Size " << i
+        amrex::Print() << std::endl << " Box " << j << " Size " << i
                    << std::endl << " Coordinates: (" << x_seed_low 
                    << " , " << y_seed_low
                    << " , " << z_seed_low
@@ -318,6 +321,9 @@ int main (int argc, char* argv[])
         amrex::Real tau_value_z_11 = tortuosityz_11.value(); 
 
         i++;  
+    }
+      
+      j++;
     }
                                                              
 }
