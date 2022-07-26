@@ -242,6 +242,14 @@ int main (int argc, char* argv[])
         int z_seed_low = z_seed[j] - (rev_size[i]/2);
         int z_seed_high = z_seed[j] + (rev_size[i]/2) - 1;
       
+                amrex::Print() << std::endl << " Pre Box " << j << " Size " << i
+                   << std::endl << " Coordinates: (" << x_seed_low 
+                   << " , " << y_seed_low
+                   << " , " << z_seed_low
+                   << ")  (" << x_seed_high
+                   << " , " << y_seed_high
+                   << " , " << z_seed_high << " ) " << std::endl;    
+      
         // Perform check to see if edge of REV box exceeds domain size
         // and correct if necessary  
         if (x_seed_low <= 0){
