@@ -249,27 +249,27 @@ int main (int argc, char* argv[])
         // and correct if necessary  
         if (x_seed_low <= 0){
           x_seed_low = 1;
-          x_seed_high = rev_size[i];
+          x_seed_high = rev_size[i] - 1;
         }
         if (x_seed_high > bx.size()[0]){
           x_seed_high = bx.size()[0] ;
-          x_seed_low = bx.size()[0] - rev_size[i] ;
+          x_seed_low = bx.size()[0] - rev_size[i] + 1 ;
         }
         if (y_seed_low <= 0){
           y_seed_low = 1;
-          y_seed_high = rev_size[i];
+          y_seed_high = rev_size[i] - 1;
         }
         if (y_seed_high > bx.size()[1]){
           y_seed_high = bx.size()[1] ;
-          y_seed_low = bx.size()[1] - rev_size[i] ;
+          y_seed_low = bx.size()[1] - rev_size[i] + 1 ;
         }
         if (z_seed_low <= 0){
           z_seed_low = 1;
-          z_seed_high = rev_size[i];
+          z_seed_high = rev_size[i] - 1;
         }
         if (z_seed_high > bx.size()[2]){
           z_seed_high = bx.size()[2] ;
-          z_seed_low = bx.size()[2] - rev_size[i] ;
+          z_seed_low = bx.size()[2] - rev_size[i] + 1 ;
         }      
 
         const amrex::Box bx_11 ({x_seed_low,y_seed_low,z_seed_low}, {x_seed_high,y_seed_high,z_seed_high});
