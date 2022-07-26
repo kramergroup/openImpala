@@ -225,7 +225,7 @@ int main (int argc, char* argv[])
     // Generate randomised seed point centre of REV      
     std::random_device rd; // obtain a random number from hardware
     std::mt19937 gen(rd()); // seed the generator
-    std::uniform_int_distribution<> distr(50, 150); // define the range
+    std::uniform_int_distribution<> distr(17, 22); // define the range
     int x_seed [8] = {distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen)};
     int y_seed [8] = {distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen)};  
     int z_seed [8] = {distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen)};
