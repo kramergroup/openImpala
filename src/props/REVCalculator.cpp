@@ -34,6 +34,7 @@
 #include <iostream>
 #include <string>
 #include <stdlib.h>
+#include <random>
 
 int main (int argc, char* argv[])
 {
@@ -222,10 +223,12 @@ int main (int argc, char* argv[])
     int rev_size [8] = { 32, 40, 50, 62, 80, 100, 126, 158 };        
 
     // Generate randomised seed point centre of REV      
-    srand(time(0));
-    int x_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
-    int y_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};  
-    int z_seed [8] = {rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50, rand() % 100 + 50};
+    std::random_device rd; // obtain a random number from hardware
+    std::mt19937 gen(rd()); // seed the generator
+    std::uniform_int_distribution<> distr(50, 150); // define the range
+    int x_seed [8] = {distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen)};
+    int y_seed [8] = {distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen)};  
+    int z_seed [8] = {distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen), distr(gen)};
 
     // Iterate through random seed points  
     int j = 0;
