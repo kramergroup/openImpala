@@ -228,8 +228,8 @@ int main (int argc, char* argv[])
     std::uniform_int_distribution<> distr(50, 150); // define the range
 
     // Iterate through random seed points  
-    int j = 0;
-    while ( j < 3){
+    int sample_no = 0;
+    while ( sample_no < 3){
       int x_seed = distr(gen);
       int y_seed = distr(gen);
       int z_seed = distr(gen);
@@ -294,7 +294,7 @@ int main (int argc, char* argv[])
           //mf_phase.FillBoundary(geom.periodicity());
           mf_phase_11.FillBoundary();  
 
-          amrex::Print() << std::endl << " Box " << j << " Size " << i
+          amrex::Print() << std::endl << " Box " << sample_no << " Size " << i
                      << std::endl << " Coordinates: (" << x_seed_low 
                      << " , " << y_seed_low
                      << " , " << z_seed_low
@@ -332,7 +332,7 @@ int main (int argc, char* argv[])
           i++;  
       }
       
-      j++;
+      sample_no++;
     }
                                                              
 }
