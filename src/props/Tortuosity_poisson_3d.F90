@@ -7,17 +7,17 @@ module tortuosity_poisson_3d_module
   integer, parameter :: direction_y = 1
   integer, parameter :: direction_z = 2
 
-  integer, parameter :: cell_type_blocked       = b'00000000'
-  integer, parameter :: cell_type_free          = b'00000001'
+  integer, parameter :: cell_type_blocked       = int(b'00000000')
+  integer, parameter :: cell_type_free          = int(b'00000001')
       
-  integer, parameter :: cell_type_boundary_x_lo = b'00000010'
-  integer, parameter :: cell_type_boundary_x_hi = b'00000100'
-  integer, parameter :: cell_type_boundary_y_lo = b'00001000'
-  integer, parameter :: cell_type_boundary_y_hi = b'00010000'
-  integer, parameter :: cell_type_boundary_z_lo = b'00100000'
-  integer, parameter :: cell_type_boundary_z_hi = b'01000000'
+  integer, parameter :: cell_type_boundary_x_lo = int(b'00000010')
+  integer, parameter :: cell_type_boundary_x_hi = int(b'00000100')
+  integer, parameter :: cell_type_boundary_y_lo = int(b'00001000')
+  integer, parameter :: cell_type_boundary_y_hi = int(b'00010000')
+  integer, parameter :: cell_type_boundary_z_lo = int(b'00100000')
+  integer, parameter :: cell_type_boundary_z_hi = int(b'01000000')
 
-  integer, parameter :: cell_type_boundary_cell = b'01111110' 
+  integer, parameter :: cell_type_boundary_cell = int(b'01111110') 
 
   integer, parameter :: comp_phi = 1  ! fab component for concentration field 
   integer, parameter :: comp_ct  = 2  ! fab component for cell type

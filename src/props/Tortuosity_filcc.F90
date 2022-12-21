@@ -17,8 +17,8 @@ module tortuosity_filcc_module
   integer, parameter :: direction_y = 1
   integer, parameter :: direction_z = 2
 
-  integer, parameter :: cell_type_blocked       = b'00000000'
-  integer, parameter :: cell_type_free          = b'00000001'
+  integer, parameter :: cell_type_blocked       = int(b'00000000')
+  integer, parameter :: cell_type_free          = int(b'00000001')
 
   integer, parameter :: comp_phi = 1  ! fab component for concentration field 
   integer, parameter :: comp_ct  = 2  ! fab component for cell type
