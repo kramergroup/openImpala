@@ -32,7 +32,7 @@
 
 int main (int argc, char* argv[])
 {
-  amrex::Initialize(argc, argv);
+  amrex::Initialize(argc, argv, false);
   {
   // What time is it now?  We'll use this to compute total run time.
   amrex::Real strt_time = amrex::second();
@@ -53,8 +53,9 @@ int main (int argc, char* argv[])
     // The code is not parallelised, potentially creating a large memory burden per node.
     // It's best to let the reader go out of scope as soon as it is not needed anymore
     // to free up memory before further computations.
-    amrex::Print() << "tTiffReader - Reading file " << SAMPLE_TIFF_FILENAME << std::endl;
-    TiffReader reader(SAMPLE_TIFF_FILENAME);
+    std::string tiffFileName = (argc > 1) ? argv[1] : SAMPLE_TIFF_FILENAME;
+    amrex::Print() << "tTiffReader - Reading file " << tiffFileName << std::endl;
+    TiffReader reader(tiffFileName);
 
     const amrex::Box bx = reader.box();
     amrex::Real fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];

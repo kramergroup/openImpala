@@ -28,7 +28,7 @@
 
 int main (int argc, char* argv[])
 {
-  amrex::Initialize(argc, argv);
+  amrex::Initialize(argc, argv, false);
   {
   // Parameters
   amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
@@ -46,8 +46,9 @@ int main (int argc, char* argv[])
     // The code is not parallelised, potentially creating a large memory burden per node.
     // It's best to let the reader go out of scope as soon as it is not needed anymore
     // to free up memory before further computations.
-    std::cout << "tTiffReader - Reading file " << SAMPLE_TIFF_FILENAME << std::endl;
-    TiffReader reader(SAMPLE_TIFF_FILENAME);
+    std::string tiffFileName = (argc > 1) ? argv[1] : SAMPLE_TIFF_FILENAME;
+    std::cout << "tTiffReader - Reading file " << tiffFileName << std::endl;
+    TiffReader reader(tiffFileName);
 
     amrex::RealBox rb({-1.0,-1.0,-1.0}, {1.0,1.0,1.0}); // physical domain
     amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
