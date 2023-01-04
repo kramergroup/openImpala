@@ -28,3 +28,6 @@ add_subdirectory(src/props)
 
 # Filter
 add_subdirectory(src/filter)
+
+# Python bindings
+add_subdirectory(src/python)
