@@ -36,7 +36,7 @@ public:
     BoxCropFilter(const amrex::BoxArray& cropBox, const amrex::DistributionMapping& dm) : m_cropBox(cropBox), m_dm(dm), m_nvar(1) { };
     BoxCropFilter(const amrex::BoxArray& cropBox, int nvar) : m_cropBox(cropBox), m_nvar(nvar) { };
 
-    MultiFab filter(const MultiFab& source);
+    void filter(const MultiFab& source, MultiFab& target);
 
 };
 

@@ -1,0 +1,19 @@
+tasks:
+- name: read
+  type: readtiff
+  parameters:
+    filename: xxx
+- name: crop
+  type: crop
+  parametes:
+    lo: (0,0,0)
+    hi: (100,100,100)
+- name: write
+  type: writehdf5
+  parameters:
+    filename: testfile.hdf5
+dependencies:
+- crop:
+  - read
+- write:
+  - crop

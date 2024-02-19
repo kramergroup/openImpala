@@ -86,7 +86,8 @@ int main (int argc, char* argv[])
   BoxCropFilter<amrex::iMultiFab> crop(t_ba, t_dm);
   
   // Filter the phase
-  amrex::iMultiFab mf_target = crop.filter(mf_phase);
+  amrex::iMultiFab mf_target;
+  crop.filter(mf_phase, mf_target);
 
   // Plot the result
   // - First copy the data into a amrex::MultiFab, because the plotting routines cannot deal with amrex:iMultiFab

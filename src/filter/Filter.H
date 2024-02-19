@@ -14,7 +14,7 @@ class Filter {
 
 public:
 
-    virtual T filter(const S& source) = 0;
+    virtual void filter(const S& source, T& target) = 0;
     
 };
 

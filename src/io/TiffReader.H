@@ -39,9 +39,20 @@ class TiffReader
      * @param threshold the threshold value
      * @param mf amrex::iMultiFab reference for holding the data.
      * 
-     * @return IArrayBox with threshold values
      */
     void threshold(const uint32_t threshold, amrex::iMultiFab& mf);
+
+    /** Fill an iMultiFab 
+     * 
+     * This function fills an iMultiFabArrayBox 
+     * with the voxel values of the TIFF image stack
+     * It is the responsibility of the caller to ensure that the dimension
+     * of the iMultiFab do not exceed to dimensions of the TIFF image.
+     * 
+     * @param mf amrex::iMultiFab reference for holding the data.
+     * 
+     */
+    void fill(amrex::iMultiFab& mf);
 
     /** Index space covering the image
      * 

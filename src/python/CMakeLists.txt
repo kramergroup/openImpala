@@ -13,7 +13,7 @@ find_package(TIFF)
 
 # Add a shared module - modules are intended to be imported at runtime.
 # - This is where you add the source files
-add_library(pyoimp MODULE pyoimp.cpp)
+add_library(pyoimp MODULE pyoimp.cpp ../io/TiffReader.cpp ../props/VolumeFraction.cpp ../filter/Threshold.cpp)
 
 target_compile_options(pyoimp PUBLIC -fPIC)
 

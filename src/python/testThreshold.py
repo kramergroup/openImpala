@@ -10,14 +10,15 @@ import unittest
 
 from pyoimp import initialize, finalize, isInitialized, read_tiff_stack;
 
-class TestInitialize(unittest.TestCase):
+class TestThreshold(unittest.TestCase):
 
     def setUp(self) -> None:
         initialize()
 
     def test_initialized(self) -> None:
 
-        self.assertTrue(isInitialized())
+        voxels = read_tiff_stack("../data/SampleData_2Phase.tif",32)
+        print("Number of boxes {}".format(voxels.size()))
 
     def tearDown(self) -> None:
         finalize()

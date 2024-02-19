@@ -3,7 +3,7 @@ find_package(AMReX REQUIRED)
 find_package(TIFF)
 
 # BoxCrop Test
-add_executable(testBoxCrop tBoxCrop.cpp  BoxCrop.cpp ../io/TiffReader.cpp) 
+add_executable(testBoxCrop tBoxCrop.cpp  BoxCrop.cpp Threshold.cpp ../io/TiffReader.cpp) 
 target_link_libraries(testBoxCrop PUBLIC AMReX::amrex )
 target_link_libraries(testBoxCrop PUBLIC tiff)
 
