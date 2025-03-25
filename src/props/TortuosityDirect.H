@@ -1,172 +1,196 @@
-#ifndef TortuosityDirect_H
-#define TortuosityDirect_H
+#ifndef TORTUOSITYDIRECT_H
+#define TORTUOSITYDIRECT_H
 
-#include <AMReX.H>
+#include <AMReX.H> // Includes REAL, IntVect, Box, etc.
 #include <AMReX_iMultiFab.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_BCRec.H>
 #include <AMReX_BoxArray.H>
+#include <AMReX_Geometry.H> // Include Geometry explicitly
 #include <AMReX_DistributionMapping.H>
-#include "Tortuosity.H"
+#include <AMReX_Array.H>    // For amrex::Array
+#include "Tortuosity.H"   // Includes base class and enums under OpenImpala namespace
 
- 
-/** Computes the tortuosity of a porous structure
- * 
- * This class solved the Poisson equation on a porous structure and extracts
- * the tortuosity factor using a simple Finite Volume iterative solver.
- * 
- * The implementation is parallel but not very efficient. It mainly serves as
- * a test basis for more advanced solver.
- * 
+#include <string>       // For std::string if needed (result paths etc.)
+#include <limits>       // For numeric_limits if using error codes like infinity
+
+// Forward declaration if needed, although includes seem sufficient
+// namespace amrex { class MultiFab; class iMultiFab; ... }
+
+namespace OpenImpala {
+
+/**
+ * @brief Computes tortuosity using a simple iterative Finite Volume solver for the Poisson equation.
+ *
+ * This class implements the Tortuosity interface by solving the Laplace/Poisson equation
+ * on the specified phase within the domain using a basic, parallel iterative method.
+ * Boundary conditions are applied to drive a flux in the specified direction.
+ *
+ * Note: The implementation aims for correctness but prioritizes simplicity over
+ * high performance compared to specialized solvers (like HYPRE). It serves
+ * well as a baseline or for smaller problems.
+ *
+ * Note: This class stores references to geometry and input data. The caller must
+ * ensure these referenced objects remain valid for the lifetime of any
+ * TortuosityDirect instance.
+ *
+ * Note: This class manages internal state (cached value, solver residuals). It is
+ * not designed for concurrent access from multiple threads within the same
+ * MPI rank. Ensure each instance is used sequentially.
  */
-class TortuosityDirect : public Tortuosity
+class TortuosityDirect : public OpenImpala::Tortuosity
 {
 
-  public: 
+public:
 
-    /** Construct new Tortuosity solver 
-     * 
-     * This Tortuosity solver calculates the tortuosity of a phase solving the Laplace equation on the space occupied by the phase
-     * with a flow in the given direction.
-     * 
-     * @param mf the amrex::iMultiFab describing the phase space
-     * @param phase the index of the phase for which the tortuosity should be calculated
-     * @param dir the principal direction of the flow
-     * 
+    /**
+     * @brief Construct a new TortuosityDirect solver instance.
+     *
+     * @param geom Reference to the problem domain geometry. Must remain valid.
+     * @param ba Reference to the BoxArray defining the domain decomposition. Must remain valid.
+     * @param dm Reference to the DistributionMapping for parallel distribution. Must remain valid.
+     * @param mf_phase Reference to the iMultiFab containing phase identifiers. Requires at least 1 ghost cell. Must remain valid.
+     * @param phase The integer identifier of the phase for which tortuosity is calculated.
+     * @param dir The principal direction (X, Y, or Z) for applying boundary conditions to drive flux.
+     * @param eps Convergence criterion (e.g., relative residual norm) for the iterative solver.
+     * @param max_steps Maximum number of iterations allowed for the solver.
+     * @param vlo Potential value applied at the low boundary in the specified direction.
+     * @param vhi Potential value applied at the high boundary in the specified direction.
      */
-    TortuosityDirect(const amrex::Geometry& geom, 
-                     const amrex::BoxArray& ba, 
-                     const amrex::DistributionMapping& dm, 
-                     const amrex::iMultiFab& mf, 
-                     const int phase, 
-                     const Direction dir);
+    TortuosityDirect(const amrex::Geometry& geom,
+                     const amrex::BoxArray& ba,
+                     const amrex::DistributionMapping& dm,
+                     const amrex::iMultiFab& mf_phase, // Phase data input requires >= 1 ghost cell (verify!)
+                     const int phase,
+                     const OpenImpala::Direction dir,
+                     const amrex::Real eps,
+                     const size_t max_steps,
+                     const amrex::Real vlo,
+                     const amrex::Real vhi);
 
-    
+    // Override the virtual destructor from the base class
+    ~TortuosityDirect() override = default; // Default is sufficient if no raw resources owned
+
+    // Delete copy constructor and assignment operator (managing state/references makes copying complex/unsafe)
+    TortuosityDirect(const TortuosityDirect&) = delete;
+    TortuosityDirect& operator=(const TortuosityDirect&) = delete;
+
+    /**
+     * @brief Calculate and return the tortuosity value. Overrides base class method.
+     *
+     * Computes or retrieves the cached tortuosity. Calls the internal solver if needed.
+     *
+     * @param refresh If true, forces a recalculation. If false (default), returns cached value if available.
+     * @return The calculated tortuosity. Returns cached value if refresh=false and calculation was already done.
+     */
     amrex::Real value(const bool refresh = false) override;
-    
-  private: 
 
-    /** Compute solution
-     * 
-     * This function computes the tortuosity value from a solution of Laplace's equation
-     * on the multi-phase domain.
-     * 
+    // --- Solver Diagnostics ---
+
+    /**
+     * @brief Returns the number of iterations performed during the last call to solve().
+     * @return Number of iterations, or 0 if solve() hasn't been called.
      */
+    int getNumIterations() const { return m_last_iterations; }
+
+    /**
+     * @brief Returns the final residual norm achieved during the last call to solve().
+     * @return Final residual norm, or a negative value if solve() hasn't been called.
+     */
+    amrex::Real getFinalResidual() const { return m_last_residual; }
+
+
+private:
+
+    /** @brief Executes the iterative solver loop until convergence or max iterations. */
     bool solve();
 
-    /** Compute global fluxes
-     * 
-     * This function computes the global fluxes in and out of the domain.
-     * A call to solve() is expected before this funcition is called.
-     * 
-     * @param the flux into the domain
-     * @param the flux out of the domain
+    /**
+     * @brief Computes the global fluxes entering and exiting the domain boundaries.
+     * Expected to be called after solve() has successfully completed.
+     * @param fxin Output: Total flux entering the domain through the low boundary face.
+     * @param fxout Output: Total flux exiting the domain through the high boundary face.
      */
     void global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const;
 
-    /** Compute the change residual between iterations
-     * 
-     * This functions sums the change in potential to determine a stop criterium
-     * for the iterative solution.
-     * 
-     * @param old scalar field MultiFab
-     * @param new scalar field MultiFab
-     *
+    /**
+     * @brief Computes a residual norm (e.g., L2 norm of change) between two solution states.
+     * Used as a convergence check in the iterative solver.
+     * @param phiold MultiFab containing the solution from the previous iteration.
+     * @param phinew MultiFab containing the solution from the current iteration.
+     * @return The calculated residual norm.
      */
     amrex::Real residual(const amrex::MultiFab& phiold, const amrex::MultiFab& phinew) const;
 
-    /** Create boundary condition description of the domain 
-     * 
-     * This function creates a BCRec describing the boundary condition type.
-     * 
-     */
-    void initialiseBoundaryConditions() ;
+    /** @brief Sets up the m_bc member variable describing boundary condition types (e.g., Dirichlet, Neumann). */
+    void initializeBoundaryConditions() ;
 
-    /** Create data structures to hold fluxes during the computation
-     * 
-     * This function initialises an AMREX_SPACEDIM sized array of MultiFabs 
-     * to hold fluxes during the computation. Each Multifab is nodal in the
-     * direction of the flux and cell centered in the other directions.
-     */
-    void initialiseFluxMultiFabs();
+    /** @brief Creates and initializes the m_flux MultiFab array for storing face fluxes. */
+    void initializeFluxMultiFabs();
 
-    /** Fill domain boundary values
-     * 
-     * This method fills the domain boundary values. It will add ghost cells for every non-periodic 
-     * direction and use these to express the boundary condition
-     * 
-     * @param amrex::MultiFab holding the values
-     * 
+    /**
+     * @brief Applies boundary conditions to the ghost cells of the potential MultiFab.
+     * Uses the geometry and m_bc settings.
+     * @param phi The MultiFab whose ghost cells need filling based on BCs.
      */
     void fillDomainBoundary(amrex::MultiFab& phi);
 
-    /** Fill Cell Types
-     * 
-     * This method fills a iMultiFab with cell type information. This will be passed to the 
-     * operator kernel to implement different kernels depending on cell type.
-     * 
-     * @param amrex::MultiFab holding the values
-     * 
+    /**
+     * @brief Fills a component of a MultiFab with CellType information.
+     * This data can be used by kernels (like in advance()) to apply different logic
+     * based on cell location (e.g., near boundary, blocked, free).
+     * @param phi The MultiFab to fill (typically fills component PhaseComp).
+     * Requires at least numComponents components.
      */
-    void fillCellTypes(amrex::MultiFab& phi);
+    void fillCellTypes(amrex::MultiFab& phi); // Typically fills component PhaseComp
 
-    /** Fill initial state
-     * 
-     * This methods linearly interpolates between inlet and outlet values
-     * 
-     * @param amrex::MultiFab holding the values
-     * 
+    /**
+     * @brief Sets the initial guess for the potential field (phi).
+     * Often a linear interpolation between boundary values (m_vlo, m_vhi).
+     * @param phi The MultiFab to fill with the initial state.
      */
     void fillInitialState(amrex::MultiFab& phi);
 
 
-    /** Advance solution 
-     * 
-     * This routine is the core routine advancing the iterative solution
-     * 
-     * @param last MultiFab with current solution
-     * @param new MultiFab with advanced solution
+    /**
+     * @brief Performs one iteration of the Finite Volume solver (e.g., Jacobi, SOR).
+     * Calculates face fluxes and updates the potential field based on conservation laws.
+     * @param phi_old Input: Potential field from the previous iteration (requires ghost cells).
+     * @param phi_new Output: Updated potential field for the current iteration.
      */
     void advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_new);
 
-    /** Reference to the multifab with phase data */
-    const amrex::iMultiFab& m_mf_phase;
+    // --- Member Variables ---
 
-    /** flux multifab arrays **/
-    amrex::Array<amrex::MultiFab, AMREX_SPACEDIM> m_flux;
-    
+    // References to external data (caller must ensure lifetime)
     const amrex::Geometry& m_geom;
-
     const amrex::BoxArray& m_ba;
-
     const amrex::DistributionMapping& m_dm;
+    const amrex::iMultiFab& m_mf_phase; // Input phase data (needs ghost cells)
 
-    /** Index of the phase of interest */
-    const int m_phase;
-    
-    /** Principal direction of the flow */
-    const Direction m_dir;
-    
-    /** Data structure describing the boundary condition type */
-    amrex::BCRec m_bc;
+    // Internal data structures
+    amrex::Array<amrex::MultiFab, AMREX_SPACEDIM> m_flux; // Stores face fluxes
+    amrex::BCRec m_bc; // Describes boundary condition types
 
-    /** Maximum Number of iterative steps */
-    size_t m_n_steps = 100000;
+    // Phase and Direction info
+    const int m_phase;                      // Phase ID to compute tortuosity for
+    const OpenImpala::Direction m_dir; // Principal direction for flux
 
-    /** Convergence criterium for change of phi */
-    amrex::Real m_eps = 1e-4;
+    // Solver Control Parameters (set via constructor)
+    const size_t m_n_steps;             // Max iterations
+    const amrex::Real m_eps;            // Convergence tolerance
 
-    /** Value buffer */
-    amrex::Real m_value;
-    
-    /** Flags repeated call of value() */
-    bool m_first_call;
+    // Boundary Condition Values (set via constructor)
+    const amrex::Real m_vlo; // Potential at low boundary face in m_dir
+    const amrex::Real m_vhi; // Potential at high boundary face in m_dir
 
-    /** Inlet concentration value */
-    const amrex::Real m_vlo = -1.0;
-
-    /** Outlet concentration value */
-    const amrex::Real m_vhi = +1.0;
+    // Caching and Diagnostics
+    amrex::Real m_value;            // Cached tortuosity value
+    bool m_first_call;              // Flag for caching logic
+    int m_last_iterations;          // Iterations used in last solve
+    amrex::Real m_last_residual;    // Residual achieved in last solve
 };
 
-#endif
+} // namespace OpenImpala
+
+#endif // TORTUOSITYDIRECT_H
