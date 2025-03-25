@@ -1,125 +1,230 @@
-/** Test Tortuosity class
- *
- * This test tests the Tortuosity class. It requires the SAMPLE_TIFF_FILENAME file
- * as test data.
- *
- * The test will open the sample tiff file, read its data, and then asset the
- * following conditions:
- *
- *  1) volume fractions of the phase of intereste
- *  2) tortuosity of sample data in x direction
- *
- */
-
-#include "../io/TiffReader.H"
-#include "TortuosityHypre.H"
-#include "VolumeFraction.H"
+#include "../io/TiffReader.H" // Assuming TiffReader is in OpenImpala namespace
+#include "TortuosityHypre.H"  // Assuming TortuosityHypre is in OpenImpala namespace
+#include "VolumeFraction.H"   // Assuming VolumeFraction is in OpenImpala namespace
 
 #include <AMReX.H>
+#include <AMReX_ParmParse.H>      // For reading parameters
+#include <AMReX_Utility.H>        // For amrex::UtilCreateDirectory
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
+#include <AMReX_Print.H>
 
-#include <sstream>
+#include <cstdlib>     // For getenv
+#include <string>      // For std::string
+#include <stdexcept>   // For std::runtime_error (optional error handling)
+#include <cmath>       // For std::abs
+#include <limits>      // For numeric_limits
 
-#define SAMPLE_TIFF_FILENAME "/openImpala/data/SampleData_3Phase.tif"
-#define BOX_SIZE 32
-#define EPS 1e-10
+// Helper function to convert string to Direction enum
+// (Assumes Direction enum exists in OpenImpala namespace)
+OpenImpala::Direction stringToDirection(const std::string& dir_str) {
+    if (dir_str == "X" || dir_str == "x") {
+        return OpenImpala::Direction::X;
+    } else if (dir_str == "Y" || dir_str == "y") {
+        return OpenImpala::Direction::Y;
+    } else if (dir_str == "Z" || dir_str == "z") {
+        return OpenImpala::Direction::Z;
+    } else {
+        amrex::Abort("Invalid direction string: " + dir_str + ". Use X, Y, or Z.");
+        return OpenImpala::Direction::X; // Avoid compiler warning
+    }
+}
 
-#define DIRECTION Direction::X
+// Helper function to convert string to SolverType enum
+// (Assumes SolverType enum exists in OpenImpala::TortuosityHypre)
+OpenImpala::TortuosityHypre::SolverType stringToSolverType(const std::string& solver_str) {
+    if (solver_str == "Jacobi") {
+        return OpenImpala::TortuosityHypre::SolverType::Jacobi;
+    } else if (solver_str == "GMRES") {
+        return OpenImpala::TortuosityHypre::SolverType::GMRES;
+    } else if (solver_str == "FlexGMRES") {
+        return OpenImpala::TortuosityHypre::SolverType::FlexGMRES;
+    } else if (solver_str == "PCG") {
+        return OpenImpala::TortuosityHypre::SolverType::PCG;
+    }
+    // Add other supported solvers here
+    else {
+        amrex::Abort("Invalid solver string: " + solver_str + ". Supported: Jacobi, GMRES, FlexGMRES, PCG, ...");
+        return OpenImpala::TortuosityHypre::SolverType::GMRES; // Avoid compiler warning
+    }
+}
+
 
 int main (int argc, char* argv[])
 {
-  amrex::Initialize(argc, argv);
-  {
-  // What time is it now?  We'll use this to compute total run time.
-  amrex::Real strt_time = amrex::second();
+    amrex::Initialize(argc, argv);
+    {
+        amrex::Real strt_time = amrex::second();
 
-  // Parameters
-  amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
-  amrex::Print() << AMREX_SPACEDIM << "D test" << std::endl;
+        // --- Configuration via ParmParse ---
+        std::string tifffile;
+        std::string resultsdir;
+        int phase_id = 0;
+        std::string direction_str = "X";
+        std::string solver_str = "GMRES";
+        int box_size = 32;
+        int verbose = 1; // Print more details by default
+        int write_plotfile = 0; // Default to no plotfile writing in test
+        amrex::Real expected_vf = -1.0; // Use -1 to indicate not set
+        amrex::Real expected_tau = -1.0;
+        amrex::Real tolerance = 1e-9; // Default tolerance for comparisons
 
-  // Define physical geometry, index space, and multifab
-  amrex::Geometry geom;
-  amrex::BoxArray ba;
-  amrex::DistributionMapping dm;
-  amrex::iMultiFab mf_phase;
+        {
+            amrex::ParmParse pp; // Default scope
+            pp.get("tifffile", tifffile); // Mandatory: Test file path
 
-  {
-    // Reading the tiff file
-    // The TiffReader potentially holds significant data in memory (the full voxel set).
-    // The code is not parallelised, potentially creating a large memory burden per node.
-    // It's best to let the reader go out of scope as soon as it is not needed anymore
-    // to free up memory before further computations.
-    amrex::Print() << "tTiffReader - Reading file " << SAMPLE_TIFF_FILENAME << std::endl;
-    TiffReader reader(SAMPLE_TIFF_FILENAME);
+            // Results directory: Try ParmParse first, then default to $HOME/openimpalaresults
+            if (!pp.query("resultsdir", resultsdir)) {
+                const char* homeDir_cstr = getenv("HOME");
+                if (!homeDir_cstr) {
+                    amrex::Abort("Cannot determine results directory: 'resultsdir' not in inputs and $HOME not set.");
+                }
+                std::string homeDir = homeDir_cstr;
+                resultsdir = homeDir + "/openimpalaresults"; // Assumes Unix '/' separator
+                amrex::Print() << " Parameter 'resultsdir' not specified, using default: " << resultsdir << "\n";
+            }
 
-    const amrex::Box bx = reader.box();
-    amrex::Real fx = 1.0*bx.size()[0]/bx.size()[DIRECTION];
-    amrex::Real fy = 1.0*bx.size()[1]/bx.size()[DIRECTION];
-    amrex::Real fz = 1.0*bx.size()[2]/bx.size()[DIRECTION];
-    amrex::RealBox rb({-1.0*fx,-1.0*fy,-1.0*fz}, {1.0*fx,1.0*fy,1.0*fz}); // physical domain
-    amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
-    geom.define(bx, &rb, 0, is_periodic.data());
+            pp.query("phase", phase_id);
+            pp.query("direction", direction_str);
+            pp.query("solver", solver_str);
+            pp.query("box_size", box_size);
+            pp.query("verbose", verbose);
+            pp.query("write_plotfile", write_plotfile); // Control plotfile generation
+            pp.query("expected_vf", expected_vf);
+            pp.query("expected_tau", expected_tau);
+            pp.query("tolerance", tolerance);
+        }
 
-    // Define computational domain and index space
-    ba.define(geom.Domain());
-    ba.maxSize(BOX_SIZE);
+        // Convert string parameters to enums
+        OpenImpala::Direction direction = stringToDirection(direction_str);
+        OpenImpala::TortuosityHypre::SolverType solver_type = stringToSolverType(solver_str);
 
-    dm.define(ba);
-    mf_phase.define(ba,dm,1,1);
+        if (verbose > 0) {
+            amrex::Print() << "\n--- Tortuosity Test Configuration ---\n";
+            amrex::Print() << " TIF File:           " << tifffile << "\n";
+            amrex::Print() << " Results Directory:  " << resultsdir << "\n";
+            amrex::Print() << " Phase ID:           " << phase_id << "\n";
+            amrex::Print() << " Direction:          " << direction_str << "\n";
+            amrex::Print() << " Solver:             " << solver_str << "\n";
+            amrex::Print() << " Box Size:           " << box_size << "\n";
+            amrex::Print() << " Verbose:            " << verbose << "\n";
+            amrex::Print() << " Write Plotfile:     " << write_plotfile << "\n";
+            amrex::Print() << " Tolerance:          " << tolerance << "\n";
+            if (expected_vf >= 0.0) amrex::Print() << " Expected VF:        " << expected_vf << "\n";
+            if (expected_tau >= 0.0) amrex::Print() << " Expected Tortuosity:" << expected_tau << "\n";
+            amrex::Print() << "------------------------------------\n\n";
+        }
 
-    // Threshold image data
-    reader.threshold(1,mf_phase);
+        // Define AMReX objects
+        amrex::Geometry geom;
+        amrex::BoxArray ba;
+        amrex::DistributionMapping dm;
+        amrex::iMultiFab mf_phase; // Phase data MultiFab
 
-    // We have used a fab with one ghost cell to allow for stencil-type operations
-    // over the fab. This requires to distribute the ghost cells
-    mf_phase.FillBoundary(geom.periodicity());
-  }
+        // --- Read TIFF and Setup Grids/Geometry ---
+        try {
+            // Limit TiffReader scope to release memory early
+            if (verbose > 0) amrex::Print() << " Reading file " << tifffile << "...\n";
+            OpenImpala::TiffReader reader(tifffile);
 
-  VolumeFraction vf(mf_phase, 0);
+            const amrex::Box domain_box = reader.box();
 
-  // Print volume fraction value
-  amrex::Print() << std::endl << " Volume Fraction: "
-                  << amrex::Real(vf.value()) << std::endl;
+            // Define physical domain size - using simple {0,0,0} to {Lx,Ly,Lz}
+            // Assumes voxel size is implicitly 1 unit. Adjust if voxel size is known.
+            amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)},
+                              {AMREX_D_DECL(amrex::Real(domain_box.length(0)),
+                                            amrex::Real(domain_box.length(1)),
+                                            amrex::Real(domain_box.length(2)))});
 
-  // Print diffusion direction
-  if (DIRECTION==0) {
-  amrex::Print() << std::endl << " Direction: X" << std::endl;
-  }
-  else if (DIRECTION==1) {
-  amrex::Print() << std::endl << " Direction: Y" << std::endl;
-  }
-  else if (DIRECTION==2) {
-  amrex::Print() << std::endl << " Direction: Z" << std::endl;
-  }
-  else {
-  amrex::Print() << std::endl << " Direction ERROR" << std::endl;
-  }
+            amrex::Array<int,AMREX_SPACEDIM> is_periodic{AMREX_D_DECL(0, 0, 0)}; // Non-periodic
+            geom.define(domain_box, &rb, 0, is_periodic.data());
 
-  // Define results path directory
-  // Get the users home directory to write plot file to right place
-  const char* homeDir = getenv("HOME");
-  std::string resultsdir = homeDir + std::string("/openimpalaresults");
+            // Build BoxArray and DistributionMapping
+            ba.define(domain_box);
+            ba.maxSize(box_size);
+            dm.define(ba);
 
-  // Compute tortuosity
-  TortuosityHypre tortuosity(geom,ba,dm,mf_phase,vf.value(),0,DIRECTION,TortuosityHypre::SolverType::FlexGMRES, resultsdir);
+            // Define the phase MultiFab with 1 component and 1 ghost cell layer
+            mf_phase.define(ba, dm, 1, 1);
 
-  amrex::Real tau_value = tortuosity.value();
-  amrex::Print() << " Tortuosity value: " << tau_value << std::endl;
+            // Read/threshold phase data into the valid regions of mf_phase
+            if (verbose > 0) amrex::Print() << " Thresholding phase data for phase " << phase_id << "...\n";
+            reader.threshold(phase_id, mf_phase); // Assuming this puts 1 for phase_id, 0 otherwise? Or phase IDs directly? Adjust VF/Tortuosity phase param accordingly.
+                                                  // Let's assume it fills with actual phase IDs from file.
 
-  // Call the timer again and compute the maximum difference between the start time and stop time
-  //   over all processors
-  amrex::Real stop_time = amrex::second() - strt_time;
-  const int IOProc = amrex::ParallelDescriptor::IOProcessorNumber();
-  amrex::ParallelDescriptor::ReduceRealMax(stop_time,IOProc);
+            // Fill ghost cells based on neighboring valid data
+            mf_phase.FillBoundary(geom.periodicity());
 
-  // Tell the I/O Processor to write out the "run time"
-  amrex::Print() << " Run time = " << stop_time << std::endl;
+            if (verbose > 0) amrex::Print() << " Grid and phase data setup complete.\n";
 
-  } // Ensure amrex related destructors have been called before tearing down the whole thing
-    // by putting everything in curly brackets.
-  amrex::Finalize();
+        } catch (const std::exception& e) {
+            amrex::Abort("Error during TiffReader processing or grid setup: " + std::string(e.what()));
+        }
+
+        // --- Calculate and Verify Volume Fraction ---
+        if (verbose > 0) amrex::Print() << " Calculating Volume Fraction for phase " << phase_id << "...\n";
+        OpenImpala::VolumeFraction vf(mf_phase, phase_id); // Assumes VF calculates for phase `phase_id` vs others. Check component index if needed.
+        amrex::Real actual_vf = vf.value(false); // Get global value
+
+        amrex::Print() << " Calculated Volume Fraction: " << actual_vf << "\n";
+        if (expected_vf >= 0.0) { // Check only if an expected value was provided
+            amrex::Print() << " Expected Volume Fraction:   " << expected_vf << "\n";
+            if (std::abs(actual_vf - expected_vf) > tolerance) {
+                amrex::Abort("FAIL: Volume Fraction mismatch. Diff: " + std::to_string(std::abs(actual_vf - expected_vf)));
+            }
+             amrex::Print() << " Volume Fraction Check:      PASS\n";
+        } else {
+             amrex::Print() << " Volume Fraction Check:      SKIPPED (no expected value provided)\n";
+        }
+
+
+        // --- Calculate and Verify Tortuosity ---
+
+        // Ensure results directory exists
+        if (!amrex::UtilCreateDirectory(resultsdir, 0755)) {
+            amrex::Warning("Could not create results directory: " + resultsdir);
+            // Depending on TortuosityHypre implementation, this might be non-fatal if plotfiles are disabled
+        }
+
+        if (verbose > 0) amrex::Print() << " Calculating Tortuosity for phase " << phase_id << " in direction " << direction_str << " using " << solver_str << "...\n";
+
+        // Create Tortuosity object
+        // Note: Assumes TortuosityHypre constructor takes: geom, ba, dm, phase_mf, vf_value, phase_id, direction, solver_type, results_dir, [optional: plot_flag]
+        // Adjust parameters based on the actual TortuosityHypre constructor signature.
+        OpenImpala::TortuosityHypre tortuosity(geom, ba, dm, mf_phase, actual_vf, phase_id, direction, solver_type, resultsdir /*, maybe write_plotfile flag? */);
+
+        amrex::Real actual_tau = tortuosity.value(); // Calculate tortuosity
+
+        amrex::Print() << " Calculated Tortuosity:      " << actual_tau << "\n";
+        if (expected_tau >= 0.0) { // Check only if an expected value was provided
+             amrex::Print() << " Expected Tortuosity:      " << expected_tau << "\n";
+            if (!std::isnan(actual_tau) && !std::isinf(actual_tau) && // Check for valid number before comparison
+                 std::abs(actual_tau - expected_tau) > tolerance) {
+                 amrex::Abort("FAIL: Tortuosity mismatch. Diff: " + std::to_string(std::abs(actual_tau - expected_tau)));
+             }
+             // Handle expected NaN/Inf cases if necessary for specific tests
+             else if ((std::isnan(actual_tau) || std::isinf(actual_tau)) && !(std::isnan(expected_tau) || std::isinf(expected_tau))) {
+                 amrex::Abort("FAIL: Tortuosity mismatch. Calculated NaN/Inf, expected finite.");
+             }
+             else if (!(std::isnan(actual_tau) || std::isinf(actual_tau)) && (std::isnan(expected_tau) || std::isinf(expected_tau))) {
+                 amrex::Abort("FAIL: Tortuosity mismatch. Calculated finite, expected NaN/Inf.");
+             }
+             amrex::Print() << " Tortuosity Check:         PASS\n";
+        } else {
+             amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
+        }
+
+        // --- Success & Timing ---
+        amrex::Print() << "\n Test Completed Successfully.\n";
+
+        amrex::Real stop_time = amrex::second() - strt_time;
+        amrex::ParallelDescriptor::ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber());
+        amrex::Print() << " Run time = " << stop_time << " sec\n";
+
+    } // End of scope for AMReX objects
+    amrex::Finalize();
+    return 0; // Indicate success
 }
