@@ -5,53 +5,59 @@
 #include <string>
 #include <cstdint>   // For uint16_t, uint32_t etc.
 #include <stdexcept> // For exceptions
+#include <map>       // For attribute map
+
+#include <AMReX_REAL.H>
+#include <AMReX_Box.H>
 
 // Forward declarations for AMReX types
 namespace amrex {
-    class Box;
     class iMultiFab;
 }
+// Forward declaration for HDF5 types (If including H5Cpp.h causes issues here)
+// namespace H5 { class H5File; class DataSet; ... }
+// Best practice if possible: include <H5Cpp.h> if needed by header declarations,
+// otherwise only include it in the .cpp file. Here, it seems only needed in .cpp.
 
 namespace OpenImpala {
 
 /**
  * @brief Reads image data from TIFF files using libtiff.
  *
- * This class reads image data from single or multi-page (directory) TIFF files,
- * assuming each directory represents a Z-slice. It attempts to decompress
- * the data and stores it internally as raw bytes. Metadata (dimensions,
- * data type) is read from the TIFF tags. The implementation relies on the
- * libtiff library.
+ * Can read single multi-directory TIFF files or a sequence of single-directory TIFF files.
+ * Assumes each directory (in multi-dir file) or each file (in sequence) represents a Z-slice.
+ * Attempts to decompress data and stores it internally as raw bytes.
+ * Metadata (dimensions, data type) is read from the TIFF tags. Implementation relies on libtiff.
  *
  * Currently supports common scalar data types (uint, int, float) and assumes
  * SAMPLEFORMAT_UINT, SAMPLEFORMAT_INT, or SAMPLEFORMAT_IEEEFP.
  * Assumes PlanarConfiguration = PLANARCONFIG_CONTIG for multi-sample images.
  * Handles multiple directories as Z-slices. Does not handle complex layouts like
- * sub-IFDs beyond the basic multi-directory stack.
+ * sub-IFDs beyond the basic multi-directory stack. Tiled TIFFs are not supported.
+ *
+ * @warning This implementation reads the *entire* 3D volume into memory (`m_raw_bytes`).
+ * It is unsuitable for datasets that exceed available RAM.
+ * @warning Assumes serial I/O. In parallel runs, typically only Rank 0 should interact
+ * with the file(s).
+ * @warning Copy operations are disabled. Move operations are enabled.
  */
 class TiffReader
 {
 public:
-    /**
-     * @brief Default constructor. Creates an empty reader.
-     */
+    // Define internal storage type for raw bytes
+    using ByteType = unsigned char;
+
+    /** @brief Default constructor. Creates an empty reader. */
     TiffReader();
 
-    /**
-     * @brief Creates a new TiffReader and attempts to read the specified file.
-     *
-     * Reads metadata and pixel data using libtiff. Throws std::runtime_error
-     * on failure (e.g., file not found, libtiff error, unsupported format).
-     *
-     * @param filename Path to the TIFF file.
+    /** @brief Creates TiffReader & reads single multi-directory TIFF or first file of a sequence.
+     * @param filename Path to the single multi-directory TIFF file.
      * @throws std::runtime_error If reading fails.
      */
     explicit TiffReader(const std::string& filename);
 
-    /**
-     * @brief Virtual destructor. (Implementation might need to clean up libtiff resources if PIMPL isn't used).
-     */
-    virtual ~TiffReader() = default; // Or implement if needed for resource cleanup
+    /** @brief Virtual default destructor. */
+    virtual ~TiffReader() = default;
 
     // --- Resource Management ---
     TiffReader(const TiffReader&) = delete; // Disable copying
@@ -60,20 +66,36 @@ public:
     TiffReader& operator=(TiffReader&&) = default;
 
     /**
-     * @brief Attempts to read data from the specified TIFF file.
-     *
-     * Clears any existing data. Reads metadata and pixel data using libtiff.
-     * Returns true on success, false on failure. Detailed errors printed via amrex::Print.
-     *
-     * @param filename Path to the TIFF file.
-     * @return true if the file was read successfully, false otherwise.
+     * @brief Attempts to read data from a single multi-directory TIFF file.
+     * Resets state. Reads metadata and pixel data using libtiff.
+     * @param filename Path to the single multi-directory TIFF file.
+     * @return true if successful, false otherwise (errors printed).
      */
     bool readFile(const std::string& filename);
 
     /**
-     * @brief Checks if data has been successfully read.
-     * @return true if readFile or the constructor succeeded, false otherwise.
+     * @brief Reads a sequence of individual TIFF files as a 3D stack.
+     *
+     * Assumes files are named according to a base pattern and sequential numbering
+     * (e.g., base_pattern + zero_padded_number + suffix).
+     * Reads metadata from the first file and expects subsequent files to be consistent.
+     * Resets any previously read data.
+     *
+     * @param base_pattern The base filename pattern (e.g., "/path/to/data/slice_").
+     * @param num_files The total number of files/slices in the sequence (determines depth).
+     * @param start_index The starting number for the sequence (default: 0).
+     * @param digits The number of digits used for zero-padding the sequence number (default: 4).
+     * @param suffix The file extension including the dot (default: ".tif").
+     * @return true if the entire sequence was read successfully, false otherwise (errors printed).
      */
+    bool readFileSequence(
+        const std::string& base_pattern,
+        int num_files,
+        int start_index = 0,
+        int digits = 4,
+        const std::string& suffix = ".tif");
+
+    /** @brief Checks if data has been successfully read. */
     bool isRead() const;
 
     // --- Metadata Getters (const) ---
@@ -81,93 +103,46 @@ public:
     int height() const;         ///< Image height (Y dimension) in pixels.
     int depth() const;          ///< Number of slices/directories (Z dimension).
     uint16_t bitsPerSample() const; ///< Bits per sample (e.g., 8, 16, 32).
-    uint16_t sampleFormat() const;  ///< Sample format (e.g., SAMPLEFORMAT_UINT, _INT, _IEEEFP). Use libtiff constants.
-    uint16_t samplesPerPixel() const; ///< Number of samples per pixel (e.g., 1 for grayscale, 3 for RGB).
+    uint16_t sampleFormat() const;  ///< Sample format (e.g., SAMPLEFORMAT_UINT). Use libtiff constants.
+    uint16_t samplesPerPixel() const; ///< Number of samples per pixel (e.g., 1 for grayscale).
 
-    /**
-     * @brief Gets the index space (bounding box) covering the dataset.
-     * @return An amrex::Box covering [0,0,0] to [width-1, height-1, depth-1],
-     * or an empty box if data is not read.
-     */
+    /** @brief Gets the index space (bounding box) covering the dataset. */
     amrex::Box box() const;
 
-    /**
-     * @brief Retrieves the value at a specific voxel/sample, converted to double.
-     *
-     * Reads the raw bytes for the voxel (i, j, k), reconstructs the value
-     * based on the stored bitsPerSample and sampleFormat, handling potential
-     * endianness issues (usually handled by libtiff), and converts it to double.
-     * Assumes XYZ layout (k index varies slowest).
-     *
-     * @param i X-index (0 <= i < width).
-     * @param j Y-index (0 <= j < height).
-     * @param k Z-index/Slice index (0 <= k < depth).
-     * @param sample The sample index (default 0). For multi-sample images.
-     * @return The voxel value converted to double.
-     * @throws std::out_of_range If indices are out of bounds.
-     * @throws std::runtime_error If data type is unsupported or conversion fails.
-     */
+    /** @brief Retrieves value at (i,j,k) [sample 0], converted to double. */
     double getValue(int i, int j, int k, int sample = 0) const;
 
-    /**
-     * @brief Thresholds the image data (first sample) and fills an iMultiFab.
-     *
-     * Iterates over the cells (i, j, k) in the iMultiFab. Retrieves the voxel
-     * value for sample 0 (converted to double), compares it to `threshold_value`,
-     * and sets the cell in mf to `value_if_true` (if value > threshold) or
-     * `value_if_false`. Cells outside the raw data bounds are set to `value_if_false`.
-     *
-     * @param threshold_value The threshold value (comparison is raw_value > threshold_value).
-     * @param value_if_true The integer value to set in mf if the condition is true.
-     * @param value_if_false The integer value to set in mf if the condition is false.
-     * @param mf The amrex::iMultiFab to fill (must have 1 component).
-     */
-    void threshold(double threshold_value, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const;
-
-    /**
-     * @brief Thresholds the image data (first sample) and fills an iMultiFab (outputting 1 or 0).
-     *
-     * Convenience overload for threshold(threshold_value, 1, 0, mf).
-     *
-     * @param threshold_value The threshold value (comparison is raw_value > threshold_value).
-     * @param mf The amrex::iMultiFab to fill (must have 1 component).
-     */
+    /** @brief Thresholds image (sample 0) and fills iMultiFab (1 if > threshold, 0 otherwise). */
     void threshold(double threshold_value, amrex::iMultiFab& mf) const;
+
+    /** @brief Thresholds image (sample 0) and fills iMultiFab (custom values). */
+    void threshold(double threshold_value, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const;
 
 
 private:
-    /**
-     * @brief Internal implementation using libtiff to read the file.
-     * @return true on success, false on failure.
-     */
+    /** @brief Internal implementation using libtiff to read a single file (multi-directory). */
     bool readTiffInternal();
 
-    /**
-     * @brief Helper to calculate bytes per voxel based on read metadata.
-     * @return Bytes per voxel per sample, or 0 if invalid.
-    */
+    /** @brief Helper to calculate bytes per voxel based on read metadata. */
     size_t getBytesPerVoxelSample() const;
 
-
     // --- Member Variables ---
-    std::string m_filename;         ///< Filename of the source TIFF file.
-    bool m_is_read = false;         ///< Flag indicating if data was successfully read.
+    std::string m_filename;         ///< Filename (or base pattern for sequence)
+    bool m_is_read = false;         ///< Flag indicating successful read
 
     // --- Metadata read from TIFF ---
-    int m_width = 0;                ///< Image width (pixels)
-    int m_height = 0;               ///< Image height (pixels)
-    int m_depth = 0;                ///< Number of directories/slices
-    uint16_t m_bits_per_sample = 0; ///< Bits per sample
-    uint16_t m_sample_format = 0;   ///< SAMPLEFORMAT tag value
-    uint16_t m_samples_per_pixel = 0; ///< Samples per pixel
-    // Could add more metadata members if needed (e.g., compression type)
+    int m_width = 0;
+    int m_height = 0;
+    int m_depth = 0;
+    uint16_t m_bits_per_sample = 0;
+    uint16_t m_sample_format = 0;
+    uint16_t m_samples_per_pixel = 0;
+    // Add more metadata if needed (compression, planar config stored if logic differs)
 
-    // Store decompressed data as raw bytes. Use unsigned char for compatibility.
-    using ByteType = unsigned char;
-    std::vector<ByteType> m_raw_bytes; ///< Vector containing the raw, decompressed pixel data (interleaved)
+    // Internal storage for decompressed pixel data
+    std::vector<ByteType> m_raw_bytes;
 
-    // Note: TIFF* handle is intentionally omitted here. It should be managed
-    // within the .cpp file (e.g., inside readFile/readTiffInternal) or using PIMPL.
+    // TIFF* handle is managed within .cpp methods using RAII or careful closing.
 };
 
 } // namespace OpenImpala
