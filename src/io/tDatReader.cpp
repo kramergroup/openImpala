@@ -1,118 +1,197 @@
-#include "DatReader.H"
-#include <iostream>
+#include "DatReader.H" // Assuming this defines OpenImpala::DatReader
+
+#include <cstdlib>   // For std::exit (if needed), prefer amrex::Abort
+#include <string>
 #include <vector>
-#include <stdlib.h>
+#include <stdexcept> // For std::runtime_error
+#include <fstream>   // For std::ifstream check
+#include <iomanip>   // For std::setw, std::setfill
 #include <ctime>
-#include <chrono>
+
 #include <AMReX.H>
+#include <AMReX_ParmParse.H> // For reading command-line arguments
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
+#include <AMReX_Box.H>
+#include <AMReX_IntVect.H>
 #include <AMReX_IArrayBox.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_MultiFab.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_CoordSys.H>
 #include <AMReX_DistributionMapping.H>
-
 #include <AMReX_PlotFileUtil.H>
+#include <AMReX_Utility.H> // For amrex::UtilCreateDirectory
 
-/** Test DatReader class
- *
- * This test test the DatReader class. It requires the SAMPLE_DAT_FILENAME file
- * as test data.
- *
- * The test will open the sample dat file, read its data, and then asset the
- * following conditions:
- *
- *  1) Image width, height, and depth
- *
- */
-
-#define SAMPLE_DAT_FILENAME "/openImpala/data/SampleData_2Phase.dat"
-#define SAMPLE_THRESHOLD_FILENAME "/openImpala/data/SampleData_Threshold"
-#define BOX_SIZE 32
+// Default relative path to the sample DAT file
+const std::string default_dat_filename = "data/SampleData_2Phase.dat";
+// Output directory relative to executable location
+const std::string test_output_dir = "tDatReader_output";
 
 int main (int argc, char* argv[])
 {
+    amrex::Initialize(argc, argv);
 
-  amrex::Initialize(argc, argv);
-  {
-  // What time is it now?
-  std::time_t strt_time;
-  std::tm* timeinfo;
-  char datetime [80];
-  
-  std::time(&strt_time);
-  timeinfo = std::localtime(&strt_time);
-             
-  std::strftime(datetime,80,"%Y%m%d%H%M",timeinfo);
-
-  // Parameters
-  amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
-  std::cout << AMREX_SPACEDIM << "D test" << std::endl;
-
-  // Reading the tiff file
-  std::cout << "tDatReader - Reading file " << SAMPLE_DAT_FILENAME << std::endl;
-  DatReader reader(SAMPLE_DAT_FILENAME);
-
-  std::cout << "Image dimensions: " << reader.width() << "x" << reader.height() << "x" << reader.depth() << std::endl;
-  assert(reader.width() == 100);
-  assert(reader.height() == 100);
-  assert(reader.depth() == 100);
-  std::cout << "Image dimensions as expected." << std::endl;
-
-  // Thresholding the data
-
-  // We only have one component holding the data
-  int ncomp = 1;
-
-  amrex::Geometry geom;
-  {
-    amrex::RealBox rb({-1.0,-1.0,-1.0}, {1.0,1.0,1.0}); // physical domain
-    amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
-    amrex::Geometry::Setup(&rb, 0, is_periodic.data());
-    geom.define(reader.box());
-  }
-
-  amrex::BoxArray ba(geom.Domain());
-  ba.maxSize(BOX_SIZE);
-  std::cout << ba;
-  amrex::DistributionMapping dm(ba);
-  amrex::iMultiFab mf(ba,dm,1,0);
-
-  reader.threshold(1,mf);
-
-  std::cout << "Maximum threshold value: " << mf.max(0,0,false) << std::endl;
-  std::cout << "Minumum threshold value: " << mf.min(0,0,false) << std::endl;
-  assert( mf.max(0,0,false) == 1);
-  assert( mf.min(0,0,false) == 0);
-  std::cout << "Threshold value range as expected." << std::endl;
-
-  // Write the data to disk
-  // Note: The writing routines only work with float-valued MultiFab.
-  //       Therefore, we first copy over the threshold values into a
-  //       MultiFab and then write the results.
-  amrex::MultiFab mfv(ba,dm,1,0);
-  for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) // Loop over grids
-  {
-    const amrex::Box& box = mfi.validbox();
-    const amrex::IArrayBox& fab1 = mf[mfi];
-    amrex::FArrayBox& fab2 = mfv[mfi];
-
-    // Iterate over all cells in Box and threshold
-    for (amrex::BoxIterator bit(box); bit.ok(); ++bit)
+    // Use a block for AMReX object lifetimes
     {
-      // bit() returns IntVect
-      fab2(bit(),0) = fab1(bit(),0);
-    }
-  }
-  // Get the users home directory to write plot file to right place
-  const char* homeDir = getenv("HOME");
-  // Write plot file to home dir with datetime in YYmmDDHHMM format appended
-  amrex::WriteSingleLevelPlotfile(homeDir + std::string("/openimpalaresults/datreadertest") += datetime, mfv, {"phase"}, geom, 0.0, 0);
+        // --- Input Parameters ---
+        std::string dat_filename = default_dat_filename;
+        bool write_plotfile = false; // Default: don't write plotfile
 
-  } // Ensure amrex related destructors have been called before tearing down the whole thing
-  // by putting everything in curly brackets.
-  amrex::Finalize();
-  
+        { // Use ParmParse to read parameters from command line
+          // Example: ./executable datfile=path/to/file.dat write_plotfile=1
+            amrex::ParmParse pp;
+            pp.query("datfile", dat_filename);
+            pp.query("write_plotfile", write_plotfile);
+        }
+
+        // Check if input file exists before attempting to read
+        {
+            std::ifstream test_ifs(dat_filename);
+            if (!test_ifs) {
+                 amrex::Abort("Error: Cannot open input datfile: " + dat_filename + "\n"
+                              "       Specify path using 'datfile=/path/to/file.dat'");
+            }
+        }
+
+        amrex::Print() << "Starting tDatReader Test (Oxford, " << __DATE__ << " " << __TIME__ << ")\n";
+        amrex::Print() << "Input DAT file: " << dat_filename << "\n";
+        amrex::Print() << "Write plot file: " << (write_plotfile ? "Yes" : "No") << "\n";
+
+        // --- Test DatReader ---
+        std::unique_ptr<OpenImpala::DatReader> reader_ptr;
+        int expected_width = 100; // Based on SampleData_2Phase.dat
+        int expected_height = 100;
+        int expected_depth = 100;
+        // Assuming threshold '1' yields a non-empty mask for this specific file
+        const OpenImpala::DatReader::DataType threshold_value = 1;
+
+        try {
+            // Assuming constructor reads file and throws std::runtime_error on failure
+            // Also assuming constructor requires metadata if RawReader design is used
+            // Reverting to simpler DatReader constructor call for this example
+            reader_ptr = std::make_unique<OpenImpala::DatReader>(dat_filename);
+
+            // Optional: Check isRead() if constructor doesn't throw but sets flag
+            // if (!reader_ptr->isRead()) {
+            //    amrex::Abort("DatReader failed to read file (isRead() is false).");
+            // }
+
+        } catch (const std::exception& e) {
+            amrex::Abort("Error creating DatReader: " + std::string(e.what()));
+        }
+
+        // --- Check Dimensions ---
+        amrex::Print() << "Checking dimensions...\n";
+        int actual_width = reader_ptr->width();
+        int actual_height = reader_ptr->height();
+        int actual_depth = reader_ptr->depth();
+
+        amrex::Print() << "  Read dimensions: " << actual_width << "x" << actual_height << "x" << actual_depth << "\n";
+
+        if (actual_width != expected_width || actual_height != expected_height || actual_depth != expected_depth) {
+            amrex::Abort("FAIL: Read dimensions do not match expected dimensions (100x100x100).");
+        }
+        amrex::Print() << "  Dimensions match expected values.\n";
+
+        // --- Setup AMReX Data Structures ---
+        amrex::Geometry geom;
+        amrex::Box domain_box = reader_ptr->box(); // Use reader's box
+        {
+            amrex::RealBox rb({0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}); // Dummy physical domain
+            amrex::Array<int,AMREX_SPACEDIM> is_periodic{0, 0, 0}; // Non-periodic
+            // Set up coord system and define geometry on the index space box
+            amrex::Geometry::Setup(&rb, 0, is_periodic.data());
+            geom.define(domain_box);
+        }
+
+        amrex::BoxArray ba(domain_box);
+        ba.maxSize(BOX_SIZE); // Break into boxes of max size BOX_SIZE^3
+        amrex::DistributionMapping dm(ba);
+
+        // Create iMultiFab to hold thresholded data (1 component, 0 ghost cells)
+        amrex::iMultiFab mf(ba, dm, 1, 0);
+        mf.setVal(0); // Initialize just in case
+
+        // --- Test Thresholding ---
+        amrex::Print() << "Performing threshold > " << threshold_value << "...\n";
+        try {
+            // Assuming threshold takes DataType and iMultiFab&, and is const
+            reader_ptr->threshold(threshold_value, mf); // Use 1/0 overload
+        } catch (const std::exception& e) {
+            amrex::Abort("Error during threshold operation: " + std::string(e.what()));
+        }
+
+        // Check results (min/max across all processors)
+        int min_val = mf.min(0); // Component 0
+        int max_val = mf.max(0); // Component 0
+
+        amrex::Print() << "  Threshold result min value: " << min_val << "\n";
+        amrex::Print() << "  Threshold result max value: " << max_val << "\n";
+
+        // Expect only 0s and 1s if thresholding works and data spans the threshold
+        if (min_val != 0 || max_val != 1) {
+             amrex::Print() << "Warning: Thresholded data min/max (" << min_val << "/" << max_val
+                           << ") not the expected 0/1. Check threshold value or sample data.\n";
+             // Decide if this is a fatal error for the test
+             // amrex::Abort("FAIL: Threshold result unexpected.");
+        } else {
+             amrex::Print() << "  Threshold value range looks plausible (0 and 1 found).\n";
+        }
+
+        // --- Optional: Write Plotfile ---
+        if (write_plotfile) {
+            amrex::Print() << "Writing plot file...\n";
+
+            // Create output directory relative to executable location
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                 if (!amrex::UtilCreateDirectory(test_output_dir, 0755)) {
+                      amrex::Warning("Could not create output directory: " + test_output_dir);
+                      // Decide whether to proceed or abort
+                 }
+            }
+            // Barrier to make sure directory exists before writing
+            amrex::ParallelDescriptor::Barrier();
+
+            // Get datetime string for filename
+            std::string datetime_str;
+            { // Scope for time variables
+                std::time_t strt_time;
+                std::tm* timeinfo;
+                char datetime_buf [80];
+                std::time(&strt_time);
+                timeinfo = std::localtime(&strt_time);
+                std::strftime(datetime_buf, sizeof(datetime_buf),"%Y%m%d%H%M", timeinfo);
+                datetime_str = datetime_buf;
+            }
+
+            // Construct filename
+            std::string plotfilename = test_output_dir + "/datreadertest_" + datetime_str;
+
+            // Copy integer data to float MultiFab for plotting
+            amrex::MultiFab mfv(ba, dm, 1, 0); // 1 component, 0 ghost cells
+            // Using ParallelFor is more modern AMReX than explicit MFIter loop for simple copy
+            for (amrex::MFIter mfi(mfv, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                const amrex::Box& box = mfi.tilebox();
+                auto const& int_fab = mf.const_array(mfi); // Read from iMultiFab
+                auto&       real_fab = mfv.array(mfi);     // Write to MultiFab
+
+                amrex::ParallelFor(box, [&] (int i, int j, int k) noexcept // Use ParallelFor if possible
+                {
+                    real_fab(i, j, k) = static_cast<amrex::Real>(int_fab(i, j, k));
+                });
+            }
+
+            // Write plot file
+            amrex::WriteSingleLevelPlotfile(plotfilename, mfv, {"phase_threshold"}, geom, 0.0, 0);
+            amrex::Print() << "  Plot file written to: " << plotfilename << "\n";
+        }
+
+        amrex::Print() << "tDatReader Test Completed Successfully.\n";
+
+    } // End AMReX scope block
+
+    amrex::Finalize();
+    return 0;
 }
