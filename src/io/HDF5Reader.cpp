@@ -1,81 +1,433 @@
 #include "HDF5Reader.H"
-#include <h5cpp/hdf5.hpp>
-#include <boost/filesystem.hpp>
+
+#include <fstream>   // Not strictly needed now, using HDF5 API
+#include <vector>
+#include <string>
+#include <stdexcept> // For std::runtime_error, std::out_of_range
+#include <limits>    // For std::numeric_limits
+#include <cmath>     // For std::abs (though amrex::Math::abs is better)
+#include <cstdint>   // For type conversion checks if needed
+#include <numeric>   // For std::accumulate if used
+#include <algorithm> // For std::copy, std::transform
+#include <map>       // For attribute map
 
 #include <AMReX.H>
+#include <AMReX_Print.H> // For amrex::Print, amrex::Warning
+#include <AMReX_Box.H>
 #include <AMReX_IntVect.H>
 #include <AMReX_iMultiFab.H>
+#include <AMReX_GpuContainers.H> // For amrex::LoopOnCpu
+#include <AMReX_Utility.H>     // Maybe needed?
 
-using namespace hdf5;
-using namespace boost::filesystem;
+// --- HDF5 C++ API Include ---
+#include <H5Cpp.h>
 
-HDF5Reader::HDF5Reader( std::string const& filename, 
-                        std::string const& hdf5dataset) : m_filename(filename), m_hdf5dataset(hdf5dataset)
+namespace OpenImpala {
+
+//-----------------------------------------------------------------------
+// Helper function for reading/converting data
+//-----------------------------------------------------------------------
+namespace { // Anonymous namespace for internal helper
+
+// Reads data from dataset, converting known types to double.
+// Returns true on success, false on failure (and prints error).
+bool readAndConvert(H5::DataSet& dataset, const H5::DataType& dtype, std::vector<double>& target_vector)
 {
-  readHDF5File();
+    const size_t num_elements = target_vector.size();
+    if (num_elements == 0) return true; // Nothing to read
+
+    try {
+        // Check common native types and read/convert
+        if (dtype == H5::PredType::NATIVE_DOUBLE) {
+            dataset.read(target_vector.data(), H5::PredType::NATIVE_DOUBLE);
+        } else if (dtype == H5::PredType::NATIVE_FLOAT) {
+            std::vector<float> temp_raw(num_elements);
+            dataset.read(temp_raw.data(), H5::PredType::NATIVE_FLOAT);
+            std::copy(temp_raw.begin(), temp_raw.end(), target_vector.begin()); // float -> double
+        } else if (dtype == H5::PredType::NATIVE_INT) { // System 'int'
+            std::vector<int> temp_raw(num_elements);
+            dataset.read(temp_raw.data(), H5::PredType::NATIVE_INT);
+            std::copy(temp_raw.begin(), temp_raw.end(), target_vector.begin()); // int -> double
+        } else if (dtype == H5::PredType::NATIVE_UINT16) {
+            std::vector<uint16_t> temp_raw(num_elements);
+            dataset.read(temp_raw.data(), H5::PredType::NATIVE_UINT16);
+            std::copy(temp_raw.begin(), temp_raw.end(), target_vector.begin()); // uint16 -> double
+        } else if (dtype == H5::PredType::NATIVE_INT16) {
+            std::vector<int16_t> temp_raw(num_elements);
+            dataset.read(temp_raw.data(), H5::PredType::NATIVE_INT16);
+            std::copy(temp_raw.begin(), temp_raw.end(), target_vector.begin()); // int16 -> double
+        } else if (dtype == H5::PredType::NATIVE_UINT8) {
+            std::vector<uint8_t> temp_raw(num_elements);
+            dataset.read(temp_raw.data(), H5::PredType::NATIVE_UINT8);
+            std::copy(temp_raw.begin(), temp_raw.end(), target_vector.begin()); // uint8 -> double
+        } else if (dtype == H5::PredType::NATIVE_INT8) {
+            std::vector<int8_t> temp_raw(num_elements);
+            dataset.read(temp_raw.data(), H5::PredType::NATIVE_INT8);
+            std::copy(temp_raw.begin(), temp_raw.end(), target_vector.begin()); // int8 -> double
+        }
+        // Add other types as needed (NATIVE_LONG, NATIVE_UINT, NATIVE_UINT32, etc.)
+        // Beware of potential precision loss when converting large 64-bit integers to double.
+        else {
+            amrex::Print() << "Error: [HDF5Reader] Unsupported HDF5 data type encountered. Class: "
+                           << dtype.getClass() << "\n"; // Optionally print more details
+            // You could try getting H5T_class_t and checking H5T_INTEGER, H5T_FLOAT etc.
+            return false;
+        }
+    } catch (H5::Exception& error) {
+         amrex::Print() << "HDF5 Error during data read/convert:\n";
+         amrex::Print() << "  " << error.getDetailMsg() << "\n";
+         return false;
+    }
+    return true;
 }
 
-void HDF5Reader::readHDF5File() 
-{
-  //open file
-  path file_path(m_filename);
-  file::File f1 = file::open(file_path);
-  node::Group root_group = f1.root();
-  auto Dataset = root_group.get_dataset(m_hdf5dataset);
-  dataspace::Simple Dataspace(Dataset.dataspace());
-  auto Dimensions = Dataspace.current_dimensions();
-  m_width  = Dimensions[0];
-  m_height = Dimensions[1];
-  m_depth  = Dimensions[2];
+// Helper to read attribute value as string (example)
+std::string readAttributeAsString(const H5::H5Object& obj, const std::string& attr_name) {
+    std::string value = "";
+    try {
+        H5::Attribute attr = obj.openAttribute(attr_name);
+        H5::DataType type = attr.getDataType();
 
-  //populate m_raw with values
-  std::vector<int> AllElements(Dataspace.size());
-  Dataset.read(AllElements);
-  for (auto Value : AllElements) {
-    m_raw.push_back(Value);
-  }
-
-  
-
+        // Best effort to read as string, might need more robust type handling
+        if (H5Tequal(type.getId(), H5::PredType::STD_STRING_UTF8.getId()) ||
+            H5Tequal(type.getId(), H5::PredType::STD_STRING_ASCII.getId()))
+        {
+             attr.read(type, value);
+        } else {
+            // For numeric types, read into a buffer then convert to string
+            // This part needs more work for general types
+            hsize_t size = attr.getStorageSize();
+            if (size > 0 && size < 1024) { // Avoid huge reads for non-string data
+                char buffer[1024];
+                // Need to know the actual numeric type to read correctly
+                // For simplicity, skipping robust numeric->string conversion here
+                // attr.read(type, buffer); // This would depend on actual type
+                // value = std::string(buffer, size); // Not reliable for numeric
+                 value = "<Numeric Attribute: Type info needed for string conversion>";
+            } else {
+                 value = "<Non-string or Large Attribute>";
+            }
+        }
+    } catch (H5::Exception& error) {
+        // Attribute might not exist, treat as non-fatal here
+        // amrex::Warning() << "HDF5 Warning: Could not read attribute '" << attr_name << "': " << error.getDetailMsg() << "\n";
+        value = "<Attribute not found or read error>";
+    }
+    return value;
 }
 
-uint32_t HDF5Reader::depth()
+
+} // end anonymous namespace
+
+//-----------------------------------------------------------------------
+// Constructor Implementations
+//-----------------------------------------------------------------------
+
+HDF5Reader::HDF5Reader() :
+    m_width(0), m_height(0), m_depth(0), m_is_read(false)
 {
-  return m_depth;
+    // Default constructor: initializes members to default state.
 }
 
-uint32_t HDF5Reader::height()
+// Constructor that reads file and throws on error
+HDF5Reader::HDF5Reader(const std::string& filename, const std::string& hdf5dataset) :
+    HDF5Reader() // Delegate for default member initialization
 {
-  return m_height;
+    // Try reading the file; rely on readFile to set members and print errors.
+    if (!readFile(filename, hdf5dataset)) {
+        // Construct a meaningful error message
+        throw std::runtime_error("HDF5Reader: Failed to read dataset '" + hdf5dataset +
+                                 "' from file '" + filename + "' during construction.");
+    }
 }
 
-uint32_t HDF5Reader::width()
+//-----------------------------------------------------------------------
+// File Reading Implementation
+//-----------------------------------------------------------------------
+
+bool HDF5Reader::readFile(const std::string& filename, const std::string& hdf5dataset)
 {
-  return m_width;
+    m_filename = filename;
+    m_hdf5dataset = hdf5dataset;
+    return readHDF5FileInternal(); // Delegate to internal implementation
 }
 
-amrex::Box HDF5Reader::box() 
+// Internal implementation using HDF5 C++ API
+bool HDF5Reader::readHDF5FileInternal()
 {
-  amrex::Box box(amrex::IntVect{0,0,0}, amrex::IntVect{m_width-1,m_height-1,m_depth-1});
-  return box;
+    // Reset state before reading
+    m_raw.clear();
+    m_width = 0;
+    m_height = 0;
+    m_depth = 0;
+    m_is_read = false;
+
+    try {
+        // Disable automatic HDF5 error printing stack if desired
+        // H5::Exception::dontPrint();
+
+        // Open the HDF5 file read-only
+        H5::H5File file(m_filename, H5F_ACC_RDONLY);
+
+        // Open the specified dataset
+        H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
+
+        // --- Get Dataspace and Dimensions ---
+        H5::DataSpace dataspace = dataset.getSpace();
+        int rank = dataspace.getSimpleExtentNdims();
+
+        if (rank != 3) {
+            amrex::Print() << "Error: [HDF5Reader] Dataset '" << m_hdf5dataset << "' in file '"
+                           << m_filename << "' has rank " << rank << ", expected 3.\n";
+            return false; // H5::* objects auto-closed by RAII here and on exit
+        }
+
+        hsize_t file_dims[3];
+        dataspace.getSimpleExtentDims(file_dims);
+
+        // Store dimensions as int, check for potential overflow from hsize_t (usually 64-bit unsigned)
+        // Check before casting to avoid truncation issues if hsize_t > max(int)
+        if (file_dims[0] > static_cast<hsize_t>(std::numeric_limits<int>::max()) ||
+            file_dims[1] > static_cast<hsize_t>(std::numeric_limits<int>::max()) ||
+            file_dims[2] > static_cast<hsize_t>(std::numeric_limits<int>::max()))
+        {
+            amrex::Print() << "Error: [HDF5Reader] Dataset dimensions exceed integer limits.\n";
+            return false;
+        }
+        m_width  = static_cast<int>(file_dims[0]);
+        m_height = static_cast<int>(file_dims[1]);
+        m_depth  = static_cast<int>(file_dims[2]);
+
+        if (m_width <= 0 || m_height <= 0 || m_depth <= 0) {
+            amrex::Print() << "Error: [HDF5Reader] Invalid dimensions read from dataset in " << m_filename
+                           << " (W=" << m_width << ", H=" << m_height << ", D=" << m_depth << ")\n";
+            return false;
+        }
+
+        amrex::Long num_elements = static_cast<amrex::Long>(m_width) * m_height * m_depth;
+
+        // --- Get Data Type and Read/Convert Data ---
+        H5::DataType dtype = dataset.getDataType();
+
+        // Resize internal storage vector (double)
+        try {
+             if (num_elements > static_cast<amrex::Long>(std::numeric_limits<size_t>::max())) {
+                 throw std::overflow_error("Number of elements exceeds vector size limit.");
+             }
+             m_raw.resize(static_cast<size_t>(num_elements));
+        } catch (const std::exception& e) {
+             amrex::Print() << "Error: [HDF5Reader] Failed to allocate memory for " << num_elements
+                            << " elements: " << e.what() << "\n";
+             return false;
+        }
+
+        // Read data, converting supported types to double
+        if (!readAndConvert(dataset, dtype, m_raw)) {
+            // readAndConvert should print details
+            m_raw.clear(); // Clear potentially partial data
+            return false;
+        }
+
+        // H5::DataSet, H5::DataSpace, H5::DataType, H5::H5File automatically closed by RAII
+
+        m_is_read = true;
+        if (m_width > 0) { // Only print success if dimensions seem valid
+             amrex::Print() << "Successfully read HDF5 Dataset: " << m_filename << " [" << m_hdf5dataset << "]"
+                            << " (Dimensions: " << m_width << "x" << m_height << "x" << m_depth << ")\n";
+        } else {
+             amrex::Warning("HDF5Reader: Read operation completed but resulted in zero dimensions.");
+             m_is_read = false; // Treat as not successfully read if dimensions are zero
+             return false;
+        }
+        return true;
+
+    } catch (H5::Exception& error) {
+        // Catch HDF5 C++ API exceptions
+        amrex::Print() << "HDF5 Error in HDF5Reader processing file '" << m_filename
+                       << "', dataset '" << m_hdf5dataset << "':\n";
+        amrex::Print() << "  " << error.getDetailMsg() << "\n";
+        m_raw.clear(); // Ensure data is cleared on error
+        m_width = m_height = m_depth = 0;
+        m_is_read = false;
+        return false;
+    } catch (std::exception& std_err) {
+        // Catch potential standard exceptions (e.g., from memory allocation)
+        amrex::Print() << "Standard Exception in HDF5Reader: " << std_err.what() << "\n";
+        m_raw.clear();
+        m_width = m_height = m_depth = 0;
+        m_is_read = false;
+        return false;
+    }
 }
 
-void HDF5Reader::threshold(const uint32_t threshold, amrex::iMultiFab& mf)
-{
+//-----------------------------------------------------------------------
+// Getter Implementations
+//-----------------------------------------------------------------------
 
-  for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi) // Loop over grids
-  {
-    const amrex::Box& box = mfi.validbox();
-    amrex::IArrayBox& fab = mf[mfi];
-    
-    size_t idx;
-    // Iterate over all cells in Box and threshold
-    for (amrex::BoxIterator bit(box); bit.ok(); ++bit) 
+int HDF5Reader::width() const {
+    return m_width;
+}
+
+int HDF5Reader::height() const {
+    return m_height;
+}
+
+int HDF5Reader::depth() const {
+    return m_depth;
+}
+
+amrex::Box HDF5Reader::box() const {
+    if (!m_is_read) {
+        return amrex::Box(); // Return default (empty) box
+    }
+    // Box is cell-centered, index from 0 to dim-1
+    return amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(m_width - 1, m_height - 1, m_depth - 1));
+}
+
+const std::vector<HDF5Reader::InternalDataType>& HDF5Reader::getRawData() const {
+    return m_raw;
+}
+
+HDF5Reader::InternalDataType HDF5Reader::getRawValue(int i, int j, int k) const {
+    if (!m_is_read) {
+        throw std::out_of_range("[HDF5Reader::getRawValue] Data not read yet.");
+    }
+    // Check indices against stored dimensions
+    if (i < 0 || i >= m_width || j < 0 || j >= m_height || k < 0 || k >= m_depth) {
+        throw std::out_of_range("[HDF5Reader::getRawValue] Index ("
+                                + std::to_string(i) + "," + std::to_string(j) + "," + std::to_string(k)
+                                + ") out of bounds (W:" + std::to_string(m_width)
+                                + ", H:" + std::to_string(m_height) + ", D:" + std::to_string(m_depth) + ").");
+    }
+
+    // Calculate 1D index (assuming XYZ layout where Z varies slowest)
+    amrex::Long idx = static_cast<amrex::Long>(k) * m_width * m_height +
+                      static_cast<amrex::Long>(j) * m_width +
+                      static_cast<amrex::Long>(i);
+
+    // Bounds check for calculated index (safety)
+    if (idx >= static_cast<amrex::Long>(m_raw.size())) {
+         throw std::out_of_range("[HDF5Reader::getRawValue] Calculated index (" + std::to_string(idx)
+                               + ") exceeds raw data vector size (" + std::to_string(m_raw.size()) + ").");
+    }
+
+    return m_raw[static_cast<size_t>(idx)];
+}
+
+//-----------------------------------------------------------------------
+// Attribute Reading Implementations (Examples)
+//-----------------------------------------------------------------------
+
+std::string HDF5Reader::getAttribute(const std::string& attr_name) const {
+    if (!m_is_read) {
+        throw std::runtime_error("[HDF5Reader::getAttribute] Cannot read attribute, file/dataset not successfully read.");
+    }
+    std::string value = "<Attribute Error>"; // Default error value
+    try {
+        H5::H5File file(m_filename, H5F_ACC_RDONLY);
+        H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
+        value = readAttributeAsString(dataset, attr_name); // Use helper
+    } catch (H5::Exception& error) {
+         // Make slightly less noisy - return error string instead of printing/throwing again
+         value = "<HDF5 Error reading attr '" + attr_name + "'>";
+    } catch (std::exception& std_err) {
+         value = "<Error reading attr '" + attr_name + "': " + std_err.what() + ">";
+    }
+    return value;
+}
+
+
+std::map<std::string, std::string> HDF5Reader::getAllAttributes() const {
+     std::map<std::string, std::string> attributes;
+     if (!m_is_read) {
+         return attributes; // Return empty map
+     }
+
+     try {
+        H5::H5File file(m_filename, H5F_ACC_RDONLY);
+        H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
+        int num_attrs = dataset.getNumAttrs();
+
+        for (int i = 0; i < num_attrs; ++i) {
+             H5::Attribute attr = dataset.openAttribute(static_cast<unsigned int>(i));
+             std::string name = attr.getName();
+             attributes[name] = readAttributeAsString(dataset, name); // Reuse helper
+        }
+    } catch (H5::Exception& error) {
+        amrex::Warning() << "HDF5 Warning in HDF5Reader::getAllAttributes for file '" << m_filename
+                         << "', dataset '" << m_hdf5dataset << "':\n"
+                         << "  " << error.getDetailMsg() << "\n";
+        // Return potentially partially filled map or empty map? Clearing might be safer.
+        attributes.clear();
+    } catch (std::exception& std_err) {
+         amrex::Warning() << "Standard Exception in HDF5Reader::getAllAttributes: " << std_err.what() << "\n";
+         attributes.clear();
+    }
+    return attributes;
+}
+
+//-----------------------------------------------------------------------
+// Threshold Implementation
+//-----------------------------------------------------------------------
+
+// Overload with customizable true/false values
+void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
+{
+    if (!m_is_read) {
+        amrex::Abort("[HDF5Reader::threshold] Cannot threshold, data not read successfully.");
+    }
+
+    // Get raw pointer for potentially faster access inside loop
+    const InternalDataType* const AMREX_RESTRICT data_ptr = m_raw.data();
+    const amrex::Long raw_data_size = static_cast<amrex::Long>(m_raw.size());
+
+    // Capture necessary members by value/reference for the lambda
+    const int current_width = m_width;
+    const int current_height = m_height;
+    const int current_depth = m_depth;
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi)
     {
-      idx = bit()[0] + bit()[1]*m_width + bit()[2]*m_height*m_width;
-      // bit() returns IntVect
-      fab(bit(),0) = (m_raw[idx] < threshold);
-    } 
-  }
+        const amrex::Box& box = mfi.validbox(); // Get the valid box for this FAB
+        amrex::IArrayBox& fab = mf[mfi];        // Get the FAB to write to
 
+        // Use amrex::LoopOnCpu for efficient iteration over the box
+        amrex::LoopOnCpu(box, [&] (int i, int j, int k)
+        {
+            // Perform bounds check against the original image dimensions
+            if (AMREX_LIKELY(i >= 0 && i < current_width && j >= 0 && j < current_height && k >= 0 && k < current_depth))
+            {
+                // Calculate 1D index (assuming XYZ layout where Z varies slowest)
+                amrex::Long idx = static_cast<amrex::Long>(k) * current_width * current_height +
+                                  static_cast<amrex::Long>(j) * current_width +
+                                  static_cast<amrex::Long>(i);
+
+                // Check calculated index against actual data size (safety check)
+                if (AMREX_LIKELY(idx >= 0 && idx < raw_data_size))
+                {
+                    // Apply threshold condition (>) on the internal double data
+                    fab(i, j, k, 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false;
+                } else {
+                    // Should not happen if dimensions/logic are correct, but handle defensively
+                    fab(i, j, k, 0) = value_if_false;
+                }
+            } else {
+                 // If the iMultiFab's valid box extends beyond the HDF5 image dimensions,
+                 // fill the outside region with the 'false' value.
+                 fab(i, j, k, 0) = value_if_false;
+            }
+        });
+    }
 }
+
+// Original overload (output 1/0) - calls the flexible version
+void HDF5Reader::threshold(double raw_threshold, amrex::iMultiFab& mf) const
+{
+    threshold(raw_threshold, 1, 0, mf); // Call the flexible version with 1/0
+}
+
+
+} // namespace OpenImpala
