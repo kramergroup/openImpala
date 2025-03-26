@@ -23,7 +23,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.1 # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 2.2 # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
@@ -43,8 +43,10 @@ From: rockylinux:8
     # Install 'Development Tools' group and other required packages
     # 'Development Tools' includes gcc, g++, make, binutils, glibc-devel etc.
     dnf groupinstall -y 'Development Tools' && \
+    # Install other required packages
     dnf install -y \
-        gcc-gfortran \ # Ensure Fortran compiler is present
+        # Ensure Fortran compiler is present (Needed alongside Development Tools C/C++)
+        gcc-gfortran \
         wget git patch \
         python3 python3-pip \
         hostname \
