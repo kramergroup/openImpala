@@ -14,16 +14,16 @@ From: rockylinux:8
       * HDF5 1.12.3 (Parallel, Fortran, C++)
       * AMReX 23.11 (MPI, OMP, EB)
       * HYPRE v2.30.0 (MPI)
-      * libtiff, boost, python3, hwloc, libevent
+      * libtiff, boost, python3, hwloc, libevent, flex, bison
 
     Usage:
-      singularity build openimpala.sif openimpala.def
+      singularity build openimpala.sif Singularity.def # Use sudo if needed
       singularity exec -B $PWD:/data openimpala.sif Diffusion /data/inputs
       mpirun -np 4 singularity exec -B $PWD:/data openimpala.sif Diffusion /data/inputs
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 1.8 # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 1.9 # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
@@ -41,7 +41,7 @@ From: rockylinux:8
     dnf update -y
 
     # Install compilers, build tools, and base dependencies
-    # Added hwloc-devel and libevent-devel for OpenMPI build
+    # Added flex and bison for OpenMPI build
     dnf install -y \
         gcc gcc-gfortran gcc-c++ make \
         wget git patch \
@@ -50,8 +50,9 @@ From: rockylinux:8
         infiniband-diags libibverbs-devel \
         libtiff-devel boost-devel \
         hwloc-devel libevent-devel \
+        flex bison \
         which ca-certificates && \
-    dnf clean all -y # Add clean here too
+    dnf clean all -y
 
     # Create a temporary directory for building dependencies
     mkdir /tmp/build_src
@@ -71,7 +72,7 @@ From: rockylinux:8
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
-    # Configure should now find hwloc/libevent from system packages
+    # Configure should now find hwloc/libevent/flex/bison from system packages
     ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
