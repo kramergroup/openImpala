@@ -119,10 +119,8 @@ jobs:
       - name: Build OpenImpala using Cached Dependencies
         run: |
           echo "Building OpenImpala inside sandbox environment..."
-          # Execute 'make' inside the sandbox environment
-          # Mount the current checkout directory (containing the Makefile) into /opt/openImpala
-          # The sandbox itself contains the restored /usr/local and /opt directories.
-          apptainer exec --bind $PWD:/opt/openImpala \
+          # Execute 'make' inside the sandbox environment USING SUDO
+          sudo apptainer exec --bind $PWD:/opt/openImpala \
             ./dependency_sandbox \
             bash -c 'cd /opt/openImpala && make clean && make -j$(nproc)'
           # Check make exit status
