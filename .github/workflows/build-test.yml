@@ -2,7 +2,7 @@ name: Test OpenImpala Build (Singularity Cache)
 
 on:
   push:
-    branches: [ main, working, build ] # Trigger on relevant branches
+    branches: [ main, working, build, makefile ] # Trigger on relevant branches
   pull_request:
     branches: [ main ]
   workflow_dispatch:
