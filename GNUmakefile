@@ -1,14 +1,15 @@
 # GNU MakeFile for OpenImpala Diffusion Application and Tests
-# Oxford, UK - Tue Mar 25 2025 10:29 PM GMT
+# Improved version incorporating fixes for make errors.
+# Oxford, UK - Wed Mar 26 2025 10:25 AM GMT
 
 # ============================================================
 # Environment Setup (MUST BE SET OR ADJUSTED)
 # ============================================================
-# Set these variables in your environment or modify defaults here
+# Set these variables in your environment or modify defaults here if paths differ
 AMREX_HOME     ?= /path/to/amrex       # Base AMReX install directory
 HYPRE_HOME     ?= /path/to/hypre       # Base HYPRE install directory
 HDF5_HOME      ?= /usr                # Base HDF5 install directory (often /usr)
-H5CPP_HOME     ?= /usr/local          # Base H5CPP install directory (if not standard)
+H5CPP_HOME     ?= $(HDF5_HOME)         # Base H5CPP install directory (often same as HDF5 if using official bindings)
 TIFF_HOME      ?= /usr                # Base LibTIFF install directory (often /usr)
 # BOOST_HOME     ?= /usr              # Base Boost install directory (if needed & non-std)
 
@@ -18,7 +19,7 @@ TIFF_HOME      ?= /usr                # Base LibTIFF install directory (often /u
 CXX         := mpic++
 F90         := mpif90
 
-# Base Flags (add -MMD -MP for auto C++ dependencies, use C++17)
+# Base Flags + Auto-Dependency Generation for C++ (-MMD -MP) + C++17
 # Add -DOMPI_SKIP_MPICXX if needed by your MPI implementation
 CXXFLAGS    := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
 F90FLAGS    := -g -O3
@@ -36,8 +37,7 @@ INCLUDE     := -I$(AMREX_HOME)/include \
 # List required application libraries
 LDFLAGS     := -L$(AMREX_HOME)/lib -lamrex \
                -L$(HYPRE_HOME)/lib -lHYPRE \
-               -L$(HDF5_HOME)/lib -lhdf5 \
-               -L$(H5CPP_HOME)/lib -lh5cpp \
+               -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
                -L$(TIFF_HOME)/lib -ltiff \
                -lm # Math library usually needed
 
@@ -51,28 +51,28 @@ IO_DIR      := build/io       # Build dir for io module
 PROPS_DIR   := build/props    # Build dir for props module
 
 MODULES     := io props
-SRC_DIR     := $(addprefix src/,$(MODULES))
-BUILD_DIR   := $(addprefix build/,$(MODULES)) # build/io build/props
+SRC_DIRS    := $(addprefix src/,$(MODULES)) # src/io src/props
+BUILD_DIRS  := $(addprefix build/,$(MODULES)) # build/io build/props
 
 # ============================================================
 # Source and Object Files
 # ============================================================
 # Find source files
-SOURCES_CPP := $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.cpp))
-SOURCES_F90 := $(foreach sdir,$(SRC_DIR),$(wildcard $(sdir)/*.F90))
+SOURCES_IO_CPP  := $(wildcard src/io/*.cpp)
+SOURCES_PRP_CPP := $(wildcard src/props/*.cpp)
+SOURCES_PRP_F90 := $(wildcard src/props/*.F90) # Assume F90 only in props
 
 # Define object file targets based on source locations
-OBJECTS_IO_CPP  := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(wildcard src/io/*.cpp))
-OBJECTS_PRP_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(wildcard src/props/*.cpp))
-OBJECTS_PRP_F90 := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(wildcard src/props/*.F90)) # Assume F90 only in props
+OBJECTS_IO_CPP  := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_CPP))
+OBJECTS_PRP_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_CPP))
+OBJECTS_PRP_F90 := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_PRP_F90))
 
 OBJECTS_CPP := $(OBJECTS_IO_CPP) $(OBJECTS_PRP_CPP)
 OBJECTS_F90 := $(OBJECTS_PRP_F90)
 OBJECTS     := $(OBJECTS_CPP) $(OBJECTS_F90)
 
-# Let Make search for source files in src/io and src/props
-vpath %.cpp src/io:src/props
-vpath %.F90 src/props
+# Let Make search for source files in relevant directories
+VPATH := $(subst $(space),:,$(SRC_DIRS))
 
 # ============================================================
 # Main Targets
@@ -88,21 +88,24 @@ tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolume
 # ============================================================
 # Compilation Rules (Using Standard Pattern Rules)
 # ============================================================
+# Note: Added order-only prerequisites (| $(DIR)) to help Make distinguish
+# directory targets from pattern rules, and ensure target dir exists.
+# Added mkdir -p in recipes as extra safety.
 
 # Rule for C++ objects in build/io
-$(IO_DIR)/%.o : %.cpp
+$(IO_DIR)/%.o : %.cpp | $(IO_DIR)
 	@echo "Compiling (IO) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for C++ objects in build/props
-$(PROPS_DIR)/%.o : %.cpp
+$(PROPS_DIR)/%.o : %.cpp | $(PROPS_DIR)
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for F90 objects in build/props
-$(PROPS_DIR)/%.o : %.F90 | $(INC_DIR)
+$(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
 	@echo "Compiling (Props Fortran) $< ..."
 	@mkdir -p $(@D)
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
@@ -114,11 +117,13 @@ $(PROPS_DIR)/%.o : %.F90 | $(INC_DIR)
 # Define object lists for clarity
 APP_OBJS      := $(OBJECTS) # Main app needs all objects
 
+# Specific objects needed for each test
 TEST_OBJS_TIFF    := $(IO_DIR)/TiffReader.o
 TEST_OBJS_DAT     := $(IO_DIR)/DatReader.o
 TEST_OBJS_HDF5    := $(IO_DIR)/HDF5Reader.o
 TEST_OBJS_VF      := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
-TEST_OBJS_TORT    := $(filter-out $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o, $(OBJECTS)) # All except Dat/HDF5 readers
+# Tortuosity depends on Hypre backend, VolumeFraction, Readers, Fortran kernels
+TEST_OBJS_TORT    := $(filter-out $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o, $(OBJECTS))
 
 # Main application
 $(APP_DIR)/Diffusion: Diffusion.cpp $(APP_OBJS)
@@ -156,10 +161,12 @@ $(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT)
 # Supporting Targets
 # ============================================================
 
-builddirs: $(BUILD_DIR) $(APP_DIR) $(TST_DIR) $(INC_DIR)
+# Target to create all necessary build directories
+builddirs: $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR)
 
 # General rule for creating build directories
-$(BUILD_DIR) $(APP_DIR) $(TST_DIR) $(INC_DIR):
+# Uses '|' to make it order-only, prevents directory timestamp issues
+$(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR):
 	@mkdir -p $@
 
 # Build environments (simple examples)
@@ -174,9 +181,19 @@ release: all
 clean:
 	@echo "Cleaning build artifacts..."
 	-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR)
+	# Also remove dependency files generated by C++ compilation
+	-@find src -name '*.d' -delete
 
 # ============================================================
 # Include Auto-Generated Dependencies
 # ============================================================
 # Include the .d files generated by CXXFLAGS -MMD -MP
+# Put this near the end so Make knows all explicit rules first
 -include $(OBJECTS_CPP:.o=.d)
+
+# ============================================================
+# Debugging Help (Uncomment to use)
+# ============================================================
+# print-%:
+# 	@echo '$* = $($*)'
+# Example: make print-OBJECTS_CPP
