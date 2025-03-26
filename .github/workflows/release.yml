@@ -32,7 +32,6 @@ jobs:
       - name: Build Apptainer container
         run: |
           # Get a reference name (branch name or tag name)
-          # For testing on branch, this will be 'build'
           REF_NAME=${{ github.ref_name }}
           # Create a SIF filename based on branch/tag for testing uniqueness
           SIF_FILENAME="openimpala-${REF_NAME//\//_}-testbuild.sif" # Sanitize ref name slightly
@@ -47,10 +46,8 @@ jobs:
 
           echo "Building $SIF_FILENAME from recipe $RECIPE_FILE..."
 
-          # Build the container using the specified recipe path.
-          # Using --fakeroot avoids needing full sudo.
-          # If --fakeroot fails, you might need 'sudo apptainer build ...'
-          apptainer build --fakeroot "$SIF_FILENAME" "$RECIPE_FILE"
+          # Build the container using 'sudo' to grant necessary privileges
+          sudo apptainer build "$SIF_FILENAME" "$RECIPE_FILE" # <-- Changed --fakeroot to sudo
 
           echo "Build complete: $SIF_FILENAME"
 
