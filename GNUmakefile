@@ -129,30 +129,30 @@ $(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
 
 # Main application
 $(APP_DIR)/Diffusion: Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
-@echo "Linking $@ ..."
+	@echo "Linking $@ ..."
 # @mkdir -p $(@D) # Directory created by order-only dependency
-$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
 
 # Test executables
 $(TST_DIR)/tTiffReader: tTiffReader.cpp $(TEST_OBJS_TIFF) | $(TST_DIR)
-@echo "Linking $@ ..."
-$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tDatReader: tDatReader.cpp $(TEST_OBJS_DAT) | $(TST_DIR)
-@echo "Linking $@ ..."
-$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp $(TEST_OBJS_HDF5) | $(TST_DIR)
-@echo "Linking $@ ..."
-$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(TEST_OBJS_VF) | $(TST_DIR)
-@echo "Linking $@ ..."
-$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT) | $(TST_DIR)
-@echo "Linking $@ ..."
-$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 # ============================================================
 # Supporting Targets
