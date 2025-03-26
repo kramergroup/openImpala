@@ -1,150 +1,214 @@
-# .github/workflows/build-test.yml
-name: Build and Test OpenImpala Makefile (Singularity Cache + Debug)
+# GNU MakeFile for OpenImpala Diffusion Application and Tests
+# Improved version incorporating fixes for make errors and portability.
 
-on:
-  push:
-    # Trigger on pushes to these specific branches
-    branches:
-      - main
-      - working
-      - build
-      - 'makefile' # Include makefile branch trigger
-  pull_request:
-    # Trigger on Pull Requests targeting main branch
-    branches: [ main ]
-  workflow_dispatch: # Allows manual triggering
+# ============================================================
+# Environment Setup (MUST BE SET OR ADJUSTED)
+# ============================================================
+# Set these variables in your environment or modify defaults here if paths differ
+AMREX_HOME    ?= /path/to/amrex      # Base AMReX install directory
+HYPRE_HOME    ?= /path/to/hypre      # Base HYPRE install directory
+HDF5_HOME     ?= /usr                # Base HDF5 install directory (often /usr)
+# Assuming official HDF5 C++ bindings are installed with HDF5 C library
+H5CPP_HOME    ?= $(HDF5_HOME)        # Base H5CPP install directory
+TIFF_HOME     ?= /usr                # Base LibTIFF install directory (often /usr)
+# BOOST_HOME    ?= /usr                # Base Boost install directory (if needed & non-std)
 
-jobs:
-  # Job 1: Build dependencies and cache them in a SIF image
-  cache-dependencies:
-    runs-on: ubuntu-latest
-    outputs:
-      cache-key: ${{ steps.cache-key-step.outputs.key }} # Output the key used
+# ============================================================
+# Compilers and Flags
+# ============================================================
+CXX           := mpic++
+F90           := mpif90
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# Base Flags + Auto-Dependency Generation for C++ (-MMD -MP) + C++17
+# Add -DOMPI_SKIP_MPICXX if needed by your MPI implementation
+CXXFLAGS      := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
+F90FLAGS      := -g -O3
 
-      - name: Set up Apptainer
-        uses: eWaterCycle/setup-apptainer@v2
-        with:
-          apptainer-version: 1.2.5 # Use consistent version
+# Include Paths (using variables for portability)
+# --- CORRECTED SECTION START ---
+# Ensure no trailing spaces before backslashes and no leading spaces on next lines (besides indentation)
+INCLUDE       := -I$(AMREX_HOME)/include \
+                 -I$(HYPRE_HOME)/include \
+                 -I$(HDF5_HOME)/include \
+                 -I$(H5CPP_HOME)/include \
+                 -I$(TIFF_HOME)/include
+#                -I$(BOOST_HOME)/include  # If Boost headers are needed and non-standard
+# --- CORRECTED SECTION END ---
 
-      - name: Generate Cache Key
-        id: cache-key-step
-        # Key based on hash of the dependency recipe file + runner OS + date
-        run: |
-          RECIPE_FILE="containers/Singularity.deps.def"
-          CACHE_DATE=$(date +'%Y-%m') # Add month to key to allow periodic refresh
-          # Use literal path string for hashFiles and indicate SIF cache
-          echo "key=deps-sif-cache-${{ runner.os }}-${CACHE_DATE}-$(echo -n ${{ hashFiles('containers/Singularity.deps.def') }} | md5sum | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+# Linker Flags (using variables for portability)
+# Rely on MPI wrappers to link MPI libs and potentially Fortran runtime
+# List required application libraries
+LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
+                 -L$(HYPRE_HOME)/lib -lHYPRE \
+                 -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
+                 -L$(TIFF_HOME)/lib -ltiff \
+                 -lm # Math library usually needed
 
-      - name: Cache Dependency SIF Image
-        id: cache-deps
-        uses: actions/cache@v4
-        with:
-          # Cache the single SIF file
-          path: dependency_image.sif
-          key: ${{ steps.cache-key-step.outputs.key }}
-          # restore-keys: | # Optional: allow restoring slightly older caches
-          #   deps-sif-cache-${{ runner.os }}-
+# ============================================================
+# Project Structure
+# ============================================================
+INC_DIR       := build/include
+APP_DIR       := build/apps
+TST_DIR       := build/tests
+IO_DIR        := build/io
+PROPS_DIR     := build/props
 
-      - name: Build Dependency SIF Image (if cache miss)
-        # This step runs only if the SIF file wasn't found in the cache
-        if: steps.cache-deps.outputs.cache-hit != 'true'
-        run: |
-          RECIPE_FILE="containers/Singularity.deps.def"
-          TARGET_SIF="dependency_image.sif"
-          if [ ! -f "$RECIPE_FILE" ]; then
-            echo "Error: Dependency recipe file $RECIPE_FILE not found!"
-            exit 1
-          fi
-          echo "Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
-          # Build the SIF file directly using sudo
-          sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
-          # Check build exit status IMMEDIATELY
-          if [ $? -ne 0 ]; then
-             echo "Error: Apptainer SIF build failed."
-             exit 1 # Exit if build failed
-          fi
-          echo "Apptainer SIF build successful."
-      # No chown needed for single SIF file caching
+MODULES       := io props
+SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
+BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
 
-  # Job 2: Build OpenImpala using the cached dependency SIF
-  build-openimpala:
-    needs: cache-dependencies # Run after dependencies are cached/restored
-    runs-on: ubuntu-latest
+# ============================================================
+# Source and Object Files
+# ============================================================
+# Find source files
+SOURCES_IO_CPP  := $(wildcard src/io/*.cpp)
+SOURCES_PRP_CPP := $(wildcard src/props/*.cpp)
+SOURCES_PRP_F90 := $(wildcard src/props/*.F90) # Assume F90 only in props
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+# Define object file targets based on source locations
+OBJECTS_IO_CPP  := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_CPP))
+OBJECTS_PRP_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_CPP))
+OBJECTS_PRP_F90 := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_PRP_F90))
 
-      - name: Set up Apptainer
-        uses: eWaterCycle/setup-apptainer@v2
-        with:
-          apptainer-version: 1.2.5 # Use consistent version
+OBJECTS_CPP := $(OBJECTS_IO_CPP) $(OBJECTS_PRP_CPP)
+OBJECTS_F90 := $(OBJECTS_PRP_F90)
+OBJECTS       := $(OBJECTS_CPP) $(OBJECTS_F90)
 
-      - name: Restore Dependency SIF Image
-        id: cache-deps
-        uses: actions/cache@v4
-        with:
-          # Restore the single SIF file
-          path: dependency_image.sif
-          # Use the exact key generated by the first job
-          key: ${{ needs.cache-dependencies.outputs.cache-key }}
-          # Fail job if cache cannot be restored (indicates dependency build failed)
-          fail-on-cache-miss: true
+# Let Make search for source files in relevant directories
+VPATH := $(subst $(space),:,$(SRC_DIRS))
 
-      - name: Check if Dependency SIF exists
-        run: |
-          if [ ! -f "./dependency_image.sif" ]; then
-            echo "Error: Dependency SIF image not found after cache restore."
-            exit 1
-          fi
-          echo "Dependency SIF image restored successfully."
-          ls -lh ./dependency_image.sif # Show file info
+# ============================================================
+# Main Targets
+# ============================================================
+.PHONY: all main tests builddirs clean debug release
 
-      - name: Build OpenImpala using Dependency SIF (with make debug)
-        id: make_build # Give step an id
-        continue-on-error: true # Allow step to fail so logs can be uploaded
-        run: |
-          echo "Building OpenImpala using SIF image environment (with make debug)..."
-          # Execute 'make clean' first
-          sudo apptainer exec --bind $PWD:/src \
-            ./dependency_image.sif \
-            bash -c 'cd /src && make clean'
-          # Execute 'make -d', redirecting all output to log file
-          echo "Running make -d to capture debug output..."
-          sudo apptainer exec --bind $PWD:/src \
-            ./dependency_image.sif \
-            bash -c 'cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1
-          # Capture the exit code of make -d
-          MAKE_EXIT_CODE=$?
-          echo "Make exit code: $MAKE_EXIT_CODE"
-          # Explicitly fail the step if make failed
-          if [ $MAKE_EXIT_CODE -ne 0 ]; then exit $MAKE_EXIT_CODE; fi
-          echo "OpenImpala build command finished (check logs)."
+all: main tests
 
-      - name: Upload Make Debug Log
-        # Run this step always after the make attempt to capture log on success or failure
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: make-debug-log-${{ github.run_id }} # Unique artifact name per run
-          path: make_debug_output.log # Path to the log file generated above
-          retention-days: 5 # Keep logs for 5 days
+main: builddirs $(APP_DIR)/Diffusion
 
-      # Explicitly fail the overall job if the 'make_build' step failed
-      - name: Fail job if make failed
-        if: steps.make_build.outcome == 'failure'
-        run: |
-          echo "Make command failed. See uploaded 'make-debug-log' artifact for details."
-          exit 1
+tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity $(TST_DIR)/tHDF5Reader # Removed tTiffStackReader
 
-      # Optional: Add steps here to run tests using the SIF image IF make succeeded
-      # - name: Run Tests (if build succeeded)
-      #   if: steps.make_build.outcome == 'success'
-      #   run: |
-      #     sudo apptainer exec --bind $PWD:/src \
-      #       ./dependency_image.sif \
-      #       bash -c 'cd /src/build/tests && ./tSomeTest'
+# ============================================================
+# Compilation Rules (Using Standard Pattern Rules)
+# ============================================================
+# Order-only prerequisites (| $(DIR)) ensure directory exists before compiling
+# Added @mkdir -p $(@D) in recipes for extra safety
+
+# Rule for C++ objects in build/io
+$(IO_DIR)/%.o : %.cpp | $(IO_DIR)
+	@echo "Compiling (IO) $< ..."
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+
+# Rule for C++ objects in build/props
+$(PROPS_DIR)/%.o : %.cpp | $(PROPS_DIR)
+	@echo "Compiling (Props) $< ..."
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+
+# Rule for F90 objects in build/props
+$(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
+	@echo "Compiling (Props Fortran) $< ..."
+	@mkdir -p $(@D)
+	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
+
+# ============================================================
+# Linking Executables
+# ============================================================
+
+# Define object lists for clarity
+APP_OBJS       := $(OBJECTS) # Main app needs all objects
+
+# Specific objects needed for each test (adjust based on actual dependencies)
+TEST_OBJS_TIFF    := $(IO_DIR)/TiffReader.o
+TEST_OBJS_DAT     := $(IO_DIR)/DatReader.o
+TEST_OBJS_HDF5    := $(IO_DIR)/HDF5Reader.o
+TEST_OBJS_VF      := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
+# Tortuosity depends on Hypre backend, VolumeFraction, Readers (Tiff?), Fortran kernels
+TEST_OBJS_TORT    := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o \
+                       $(OBJECTS_PRP_F90) \
+                       $(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
+                     # Note: Included all readers here, adjust if tTortuosity only uses one type
+
+
+# Main application
+$(APP_DIR)/Diffusion: Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
+	@echo "Linking $@ ..."
+	# @mkdir -p $(@D) # Directory created by order-only dependency
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
+
+# Test executables
+$(TST_DIR)/tTiffReader: tTiffReader.cpp $(TEST_OBJS_TIFF) | $(TST_DIR)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(TST_DIR)/tDatReader: tDatReader.cpp $(TEST_OBJS_DAT) | $(TST_DIR)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp $(TEST_OBJS_HDF5) | $(TST_DIR)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(TEST_OBJS_VF) | $(TST_DIR)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+$(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT) | $(TST_DIR)
+	@echo "Linking $@ ..."
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+
+# ============================================================
+# Supporting Targets
+# ============================================================
+
+# Target to create all necessary build directories
+builddirs: $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR)
+
+# General rule for creating build directories
+$(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR):
+	@echo "Creating directory $@"
+	@mkdir -p $@
+
+# Build environments (simple examples)
+debug: CXXFLAGS += -DDEBUG
+debug: F90FLAGS += -fbounds-check # Example Fortran debug flag
+debug: all
+
+release: # Using defaults: -O3 defined initially
+release: all
+
+# Clean target (removes objects, module files, executables, dependency files)
+clean:
+	@echo "Cleaning build artifacts..."
+	-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR) build # Remove specific dirs and top build dir
+	# Clean dependency files potentially generated in source dirs if CXXFLAGS didn't handle output dir well
+	-@find src -name '*.d' -delete
+	-@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
+
+# ============================================================
+# Debugging Output (Temporary)
+# ============================================================
+# $(info --- Make Debug Variables ---)
+# $(info IO_DIR       = [${IO_DIR}])
+# $(info PROPS_DIR    = [${PROPS_DIR}])
+# $(info OBJECTS_IO_CPP = [${OBJECTS_IO_CPP}])
+# $(info OBJECTS_PRP_CPP= [${OBJECTS_PRP_CPP}])
+# $(info OBJECTS_CPP = [${OBJECTS_CPP}])
+# $(info DEPS_FILES   = [${OBJECTS_CPP:.o=.d}])
+# $(info --- End Make Debug ---)
+
+
+# ============================================================
+# Include Auto-Generated Dependencies
+# ============================================================
+# Include the .d files generated by CXXFLAGS -MMD -MP
+# Put this near the end so Make knows all explicit rules first
+-include $(OBJECTS_CPP:.o=.d)
+
+# ============================================================
+# Debugging Help (Uncomment to use)
+# ============================================================
+# print-%:
+# 	@echo '$* = $($*)'
+# Example: make print-OBJECTS_CPP
