@@ -4,38 +4,39 @@
 
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![DOI](https://img.shields.io/badge/DOI-10.1016/j.softx.2021.100729-blue)](https://doi.org/10.1016/j.softx.2021.100729)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/kramergroup/openImpala)](https://github.com/kramergroup/openImpala/releases/latest)
+[![GitHub contributors](https://img.shields.io/github/contributors/kramergroup/openImpala)](https://github.com/kramergroup/openImpala/graphs/contributors)
+[![Pipeline Status](https://gitlab.com/JleHoux/openImpala/badges/master/pipeline.svg)](https://gitlab.com/JleHoux/openImpala/commits/master)
+OpenImpala is a high-performance computing framework for image-based modelling, built upon the [AMReX library](https://github.com/AMReX-Codes/amrex) for massive parallelism using MPI. It tackles the challenge posed by large 3D imaging datasets (often billions of voxels) common in materials science and tomography.
 
-A common challenge from image-based modelling is the size of 3D tomography datasets, which can be of the order of several billion voxels. OpenImpala is a data-driven, fully parallelisable, image-based modelling framework designed specifically for these high computational cost problems, built upon the [AMReX library](https://github.com/AMReX-Codes/amrex).
+OpenImpala directly solves physical equations, such as steady-state diffusion or conduction problems, on the voxel grid of the input image using finite differences. This approach bypasses the need for explicit mesh generation, working directly with the acquired image data. From the simulation results, it calculates effective homogenised transport properties (e.g., diffusivity, conductivity, tortuosity) characteristic of the microstructure.
 
-3D datasets are used as the computational domain within a finite-differences-based model to directly solve physical equations (like steady-state diffusion/conduction) on the image dataset, removing the need for additional meshing.
-
-OpenImpala then calculates the equivalent homogenised transport coefficients (e.g., effective diffusivity, tortuosity, conductivity) for the given microstructure. These coefficients can be written into parameterised files for direct compatibility with popular continuum battery models like [PyBamm](https://github.com/pybamm-team/PyBaMM) and [DandeLiion](https://github.com/tinosulzer/DandeLiion), facilitating the link between different computational battery modelling scales.
-
-OpenImpala has been shown to scale well with an increasing number of computational cores on distributed memory architectures using MPI, making it applicable to large datasets typical of modern tomography.
-
----
-
-## Citation
-
-If you've used OpenImpala in the preparation of a publication, please consider citing this publication: https://doi.org/10.1016/j.softx.2021.100729 
+These calculated coefficients can directly parameterize continuum-scale models, notably battery simulators like [PyBamm](https://github.com/pybamm-team/PyBaMM) and [DandeLiion](https://github.com/tinosulzer/DandeLiion). This capability effectively bridges microstructural details obtained from imaging to device-level performance predictions. OpenImpala is designed for excellent scalability on distributed memory systems, making the analysis of large, high-resolution datasets feasible.
 
 ---
 
 ## Table of Contents
 
 * [Features](#features)
-* [Installation](#installation)
+* [Getting Started (Recommended: Singularity)](#getting-started-recommended-singularity)
+    * [Singularity Container](#singularity-container)
+    * [Building with Singularity](#building-with-singularity)
+    * [Running Tests with Singularity](#running-tests-with-singularity)
+    * [Running the Application with Singularity](#running-the-application-with-singularity)
+* [Native Installation (Advanced)](#native-installation-advanced)
     * [Dependencies](#dependencies)
-    * [Building from Source](#building-from-source)
-* [Quick Start / Basic Usage](#quick-start--basic-usage)
-    * [Input Data](#input-data)
-    * [Running a Calculation](#running-a-calculation)
-    * [Example `inputs` File](#example-inputs-file)
-    * [Output](#output)
+    * [Building from Source (CMake)](#building-from-source-cmake)
+* [Batch Processing (HPC)](#batch-processing-hpc)
+* [Example `inputs` File](#example-inputs-file)
+* [Output](#output)
+* [Visualisation](#visualisation)
 * [Applications & Related Publications](#applications--related-publications)
+* [Continuous Integration](#continuous-integration)
 * [Contributing](#contributing)
 * [Citation](#citation)
 * [License](#license)
+* [Acknowledgements](#acknowledgements)
+* [Contact & Support](#contact--support)
 
 ---
 
@@ -50,11 +51,94 @@ If you've used OpenImpala in the preparation of a publication, please consider c
 
 ---
 
-## Installation
+## Getting Started (Recommended: Singularity)
+
+The easiest way to get started is by using the provided Singularity container, which includes all necessary dependencies and a pre-built environment.
+
+### Singularity Container
+
+A containerised build environment providing all dependencies is available on Sylabs Cloud. *(Note: Verify Sylabs link/availability if using the badge above)*.
+
+The container includes: Centos 7, OpenMPI, Hypre, LibTiff, AMReX, HDF5, h5cpp, InfiniBand support, and a pre-built OpenImpala.
+
+1.  **Install Singularity:** Ensure you have Singularity (version 3.x recommended) installed on your Linux system or HPC. See [Singularity documentation](https://sylabs.io/docs/).
+
+2.  **Pull the Image:**
+    ```bash
+    singularity pull library://jameslehoux/default/openimpala:latest
+    ```
+    This downloads the `openimpala_latest.sif` image file to your current directory.
+
+### Building with Singularity
+
+While the container includes a pre-built version, you can also compile your local source code using the container's environment:
+
+1.  **Start an interactive shell** within the container, mounting your local source code directory (replace `/path/to/local/openImpala` with the actual path).
+    ```bash
+    # Mount current directory (.) containing source code to /src inside container
+    singularity shell --bind "$(pwd):/src" openimpala_latest.sif
+    ```
+
+2.  **Navigate and Build:** Inside the Singularity shell, go to your source directory and use `make`.
+    ```bash
+    Singularity> cd /src
+    Singularity> make
+    ```
+    This will create a `build/` directory (relative to `/src`) containing object files and executables compiled using the container's tools.
+
+### Running Tests with Singularity
+
+After building (or using the pre-built version), you can run the tests.
+
+* **Option 1: Inside Singularity Shell:** If you are already inside the shell (`singularity shell ...`):
+    ```bash
+    Singularity> cd /path/to/openImpala/build/tests # Use path to built tests
+    Singularity> ./tTiffReader
+    Singularity> ./tVolumeFraction
+    Singularity> ./tTortuosity
+    ```
+
+* **Option 2: Using `singularity exec`:** Run directly from your host shell:
+    ```bash
+    singularity exec openimpala_latest.sif /openImpala/build/tests/tTiffReader
+    singularity exec openimpala_latest.sif /openImpala/build/apps/Diffusion
+    singularity exec openimpala_latest.sif /openImpala/build/tests/tVolumeFraction
+    singularity exec openimpala_latest.sif /openImpala/build/tests/tTortuosity
+    ```
+    *(Note: Ensure paths like `/openImpala/build/...` correctly point to the executables *inside* the container image).*
+
+### Running the Application with Singularity
+
+The main application is `Diffusion`, configured via an `inputs` file.
+
+1.  **Prepare `inputs` file:** Create or copy an `inputs` file (see [Example `inputs` File](#example-inputs-file) section below) on your *host* machine. Adjust parameters like `filename`, `data_path`, `results_dir` to point to locations accessible *from within the container* (often achieved by mounting host directories).
+
+2.  **Run using `singularity exec`:** Use the `-B` flag (or `--bind`) to mount necessary host directories into the container.
+    ```bash
+    # Example: Mount current host directory to /host_pwd inside container
+    # Assumes 'inputs' file and 'data/' directory are in the current host directory
+    # Assumes results will be written relative to the mounted directory
+
+    # Run sequentially
+    singularity exec -B "$(pwd):/host_pwd" openimpala_latest.sif \
+        /openImpala/build/apps/Diffusion /host_pwd/inputs
+
+    # Run in parallel using MPI (requires MPI inside container + host setup)
+    # Ensure OMP_NUM_THREADS=1 if using multiple MPI ranks
+    export OMP_NUM_THREADS=1
+    mpirun -np 4 singularity exec -B "$(pwd):/host_pwd" openimpala_latest.sif \
+        /openImpala/build/apps/Diffusion /host_pwd/inputs
+    ```
+    *Modify the `-B` mount points (`host_path:container_path`) according to where your data/input/output directories reside on the host.*
+    *Ensure paths used *inside* the `inputs` file (like `data_path`, `results_dir`) correspond to paths *within the container* (e.g., `/host_pwd/data/`, `/host_pwd/results/`).*
+
+---
+
+## Native Installation (Advanced)
+
+Building natively requires manually installing all dependencies.
 
 ### Dependencies
-
-OpenImpala relies on several external libraries. While a containerised environment might be available (see original docs/fork if applicable), building natively requires:
 
 * A modern C++ compiler supporting C++17 (e.g., GCC >= 7, Clang >= 6).
 * A Fortran compiler compatible with your C++ compiler and MPI library (e.g., gfortran).
@@ -64,14 +148,14 @@ OpenImpala relies on several external libraries. While a containerised environme
 * **HYPRE Library:** Required for the default linear solver ([https://github.com/hypre-space/hypre](https://github.com/hypre-space/hypre)). Ensure `HYPRE_HOME` is set or Hypre is findable.
 * **LibTIFF Library:** Required for reading TIFF input files (development package needed, e.g., `libtiff-dev`, `libtiff-devel`).
 * **HDF5 Library:** Required for reading HDF5 input datasets (C and C++ bindings, development package needed). Needed if building with HDF5 support.
-* *(Optional)* **Boost Filesystem:** May be required depending on internal path handling (if `std::filesystem` from C++17 is not fully used).
+* *(Optional)* **Boost Filesystem:** May be required depending on internal path handling.
 * *(Optional)* Other libraries depending on enabled features.
 
-### Building from Source
+### Building from Source (CMake)
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/kramergroup/openImpala.git](https://github.com/kramergroup/openImpala.git) # <-- VERIFY/REPLACE with correct URL
+    git clone [https://github.com/kramergroup/openImpala.git](https://github.com/kramergroup/openImpala.git) # <-- VERIFY/REPLACE URL
     cd openImpala
     ```
 
@@ -79,7 +163,7 @@ OpenImpala relies on several external libraries. While a containerised environme
     ```bash
     mkdir build && cd build
     # Basic configuration (installs to ../install relative to source):
-    cmake .. -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=Release # Example install prefix & type
+    cmake .. -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=Release
     # Or add paths to dependencies if not found automatically:
     # cmake .. -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=Release \
     #       -DAMReX_DIR=/path/to/amrex/lib/cmake/AMReX \
@@ -88,51 +172,67 @@ OpenImpala relies on several external libraries. While a containerised environme
     #       -DLibTIFF_DIR=/path/to/libtiff/lib/cmake/tiff-X.Y
     ```
     * Use `ccmake ..` or `cmake-gui ..` for interactive configuration.
-    * Set `CMAKE_CXX_COMPILER` and `CMAKE_Fortran_COMPILER` environment variables or CMake variables if needed (e.g., to `mpicxx`, `mpif90`).
+    * Set `CMAKE_CXX_COMPILER`/`CMAKE_Fortran_COMPILER` (e.g., to `mpicxx`, `mpif90`).
 
 3.  **Compile the code:**
     ```bash
-    make -j4 # Adjust '-j' number based on your system's cores
+    make -j4 # Adjust job count
     ```
 
-4.  **Install (Optional):**
+4.  **Run Tests (Optional):**
+    ```bash
+    make test # Or ctest
+    # Or run individually: ./tests/tTiffReader etc.
+    ```
+
+5.  **Install (Optional):**
     ```bash
     make install
     ```
-    The executable (e.g., `Diffusion`) will be in `build/apps/` or `../install/bin` if installed. Ensure the location is in your `PATH`.
+    The executable (e.g., `Diffusion`) will be in `build/apps/` or `../install/bin`. Ensure the location is in your `PATH`.
+
+## Batch Processing (HPC)
+
+The `Diffusion` application runs non-interactively, making it suitable for HPC batch jobs. An example SLURM script snippet using Singularity:
+
+```bash
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=20 # Request 20 cores on one node
+#SBATCH --time=01:00:00
+#SBATCH --job-name=openimpala_diffusion
+
+module load singularity/3.2.1 # Load required singularity module on HPC
+
+export OMP_NUM_THREADS=1 # Ensure OpenMP threading is disabled if using pure MPI
+
+# Navigate to directory containing the 'inputs' file
+cd /path/to/your/simulation/directory/
+
+# Define path to singularity image (e.g., absolute path)
+SIF_IMAGE=/path/on/hpc/to/openimpala_latest.sif
+
+# Define path to executable inside the container
+APP=/openImpala/build/apps/Diffusion
+
+# Define path to inputs file (e.g., absolute path or relative to working dir)
+INPUT_FILE=./inputs
+
+# Run the calculation using mpirun and singularity exec
+# Mount necessary directories (e.g., current directory for inputs/outputs)
+mpirun -np <span class="math-inline">SLURM\_NTASKS singularity exec \-B "</span>(pwd)":"$(pwd)" $SIF_IMAGE $APP $INPUT_FILE
+
+echo "Job Finished"
+```
+Note: Adjust module load, paths (`SIF_IMAGE`, `INPUT_FILE`, `cd`), and `mpirun` flags according to your specific HPC environment.
 
 ---
 
-## Quick Start / Basic Usage
+## Example `inputs` File
 
-Here's a minimal example of calculating the effective diffusivity of a porous material from a segmented image using the `Diffusion` application.
+*(This section moved here for better flow after installation)*
 
-### Input Data
-
-* Requires a segmented 3D image stack (e.g., TIFF, DAT, HDF5). Ensure the correct reader class was compiled.
-* The image should represent different material phases with distinct integer voxel values.
-* For the `Diffusion` app using the default setup, typically:
-    * Voxel value representing the non-conducting/inactive phase (e.g., `0`).
-    * Voxel value representing the conducting/active phase (e.g., `1`). Use the `phase_id` parameter in the `inputs` file to specify which phase to analyze.
-* If using RAW/DAT formats, dimensions and data type metadata must be provided in the `inputs` file.
-
-### Running a Calculation
-
-The `Diffusion` application is configured using a text input file (commonly named `inputs`).
-
-```bash
-# Example: Calculate effective diffusivity for phase '1' in a binary TIFF image
-# Run using 8 parallel processes
-
-# Ensure Diffusion executable is in your PATH or use relative/absolute path
-# Assumes 'inputs' file is in the current directory
-mpirun -np 8 Diffusion inputs
-```
-
-* Create an inputs file based on the example below or from `apps/diffusion/inputs` in the `source` tree.
-* Modify parameters within your `inputs` file as needed for your specific case.
-
-### Example `inputs` File
+The `Diffusion` application reads parameters from a text file (commonly named `inputs`). Create one based on this example (also found in `apps/diffusion/inputs` in the source tree):
 
 ```inputs
 # Example input file for Diffusion application
@@ -150,7 +250,7 @@ data_path = "."                         # Path prefix for filename
 # --- Analysis ---
 phase_id = 1                            # Phase to analyze
 threshold_value = 1.0                   # Threshold used by image readers (if applicable)
-direction = "All"                       # Compute for X, Y, Z ("X", "Y", "Z", "All", or "X Z" etc.)
+direction = "X"                         # Compute for X, Y, Z ("X", "Y", "Z", "All", or "X Z" etc.)
 
 # --- Solver ---
 solver_type = "FlexGMRES"               # HYPRE solver (GMRES, FlexGMRES, Jacobi, PCG)
