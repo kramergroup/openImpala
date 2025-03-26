@@ -110,7 +110,8 @@ From: rockylinux:8
         --enable-fortran2003 \
         --enable-cxx \
         --enable-shared \
-        --disable-static
+        --disable-static \
+        --enable-unsupported # <-- Added flag to allow cxx + parallel
     make -j$(nproc) install
     cd ..
     rm -rf hdf5-${HDF5_VERSION}*
