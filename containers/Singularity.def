@@ -1,9 +1,3 @@
-Okay, here is the full Singularity recipe file (Singularity.def) updated to use dnf groupinstall 'Development Tools' to ensure a complete build environment, addressing the "C compiler cannot create executables" error.
-
-(Generated Wednesday, March 26, 2025 at 1:15 AM GMT, Oxford)
-
-Code snippet
-
 Bootstrap: docker
 From: rockylinux:8
 
