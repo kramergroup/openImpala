@@ -24,23 +24,21 @@ F90           := mpif90
 CXXFLAGS      := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
 F90FLAGS      := -g -O3
 
-# Include Paths (using variables for portability)
-# Ensure no trailing spaces before backslashes and no leading spaces on next lines (besides indentation)
 INCLUDE       := -I$(AMREX_HOME)/include\
-                 -I$(HYPRE_HOME)/include\
-                 -I$(HDF5_HOME)/include\
-                 -I$(H5CPP_HOME)/include\
-                 -I$(TIFF_HOME)/include
+-I$(HYPRE_HOME)/include\
+-I$(HDF5_HOME)/include\
+-I$(H5CPP_HOME)/include\
+-I$(TIFF_HOME)/include
 #                -I$(BOOST_HOME)/include  # If Boost headers are needed and non-standard
 
 # Linker Flags (using variables for portability)
 # Rely on MPI wrappers to link MPI libs and potentially Fortran runtime
 # List required application libraries
 LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex\
-                 -L$(HYPRE_HOME)/lib -lHYPRE\
-                 -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp\
-                 -L$(TIFF_HOME)/lib -ltiff\
-                 -lm
+-L$(HYPRE_HOME)/lib -lHYPRE\
+-L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp\
+-L$(TIFF_HOME)/lib -ltiff\
+-lm
 
 # ============================================================
 # Project Structure
@@ -94,21 +92,21 @@ tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolume
 
 # Rule for C++ objects in build/io
 $(IO_DIR)/%.o : %.cpp | $(IO_DIR)
-	@echo "Compiling (IO) $< ..."
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+@echo "Compiling (IO) $< ..."
+@mkdir -p $(@D)
+$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for C++ objects in build/props
 $(PROPS_DIR)/%.o : %.cpp | $(PROPS_DIR)
-	@echo "Compiling (Props) $< ..."
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+@echo "Compiling (Props) $< ..."
+@mkdir -p $(@D)
+$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for F90 objects in build/props
 $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
-	@echo "Compiling (Props Fortran) $< ..."
-	@mkdir -p $(@D)
-	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
+@echo "Compiling (Props Fortran) $< ..."
+@mkdir -p $(@D)
+$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
 
 # ============================================================
 # Linking Executables
@@ -124,37 +122,37 @@ TEST_OBJS_HDF5    := $(IO_DIR)/HDF5Reader.o
 TEST_OBJS_VF      := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
 # Tortuosity depends on Hypre backend, VolumeFraction, Readers (Tiff?), Fortran kernels
 TEST_OBJS_TORT    := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o \
-                       $(OBJECTS_PRP_F90) \
-                       $(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
-                     # Note: Included all readers here, adjust if tTortuosity only uses one type
+$(OBJECTS_PRP_F90) \
+$(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
+# Note: Included all readers here, adjust if tTortuosity only uses one type
 
 
 # Main application
 $(APP_DIR)/Diffusion: Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
-	@echo "Linking $@ ..."
-	# @mkdir -p $(@D) # Directory created by order-only dependency
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
+@echo "Linking $@ ..."
+# @mkdir -p $(@D) # Directory created by order-only dependency
+$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
 
 # Test executables
 $(TST_DIR)/tTiffReader: tTiffReader.cpp $(TEST_OBJS_TIFF) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+@echo "Linking $@ ..."
+$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tDatReader: tDatReader.cpp $(TEST_OBJS_DAT) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+@echo "Linking $@ ..."
+$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp $(TEST_OBJS_HDF5) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+@echo "Linking $@ ..."
+$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(TEST_OBJS_VF) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+@echo "Linking $@ ..."
+$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 $(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+@echo "Linking $@ ..."
+$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 # ============================================================
 # Supporting Targets
@@ -165,8 +163,8 @@ builddirs: $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR)
 
 # General rule for creating build directories
 $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR):
-	@echo "Creating directory $@"
-	@mkdir -p $@
+@echo "Creating directory $@"
+@mkdir -p $@
 
 # Build environments (simple examples)
 debug: CXXFLAGS += -DDEBUG
@@ -178,11 +176,11 @@ release: all
 
 # Clean target (removes objects, module files, executables, dependency files)
 clean:
-	@echo "Cleaning build artifacts..."
-	-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR) build # Remove specific dirs and top build dir
-	# Clean dependency files potentially generated in source dirs if CXXFLAGS didn't handle output dir well
-	-@find src -name '*.d' -delete
-	-@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
+@echo "Cleaning build artifacts..."
+-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR) build # Remove specific dirs and top build dir
+# Clean dependency files potentially generated in source dirs if CXXFLAGS didn't handle output dir well
+-@find src -name '*.d' -delete
+-@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
 
 # ============================================================
 # Debugging Output (Temporary)
