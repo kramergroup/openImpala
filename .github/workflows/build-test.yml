@@ -1,9 +1,3 @@
-Okay, here is the complete .github/workflows/build-test.yml file, updated to include the sudo chown command after the successful sandbox build to fix the cache saving permission errors.
-
-(Generated Wednesday, March 26, 2025 at 11:34 AM GMT, Oxford, UK)
-
-YAML
-
 # .github/workflows/build-test.yml
 name: Build and Test OpenImpala Makefile (Singularity Cache)
 
