@@ -44,11 +44,11 @@ LDFLAGS     := -L$(AMREX_HOME)/lib -lamrex \
 # ============================================================
 # Project Structure
 # ============================================================
-INC_DIR     := build/include  # For Fortran module files
+INC_DIR     := build/include
 APP_DIR     := build/apps
 TST_DIR     := build/tests
-IO_DIR      := build/io       # Build dir for io module
-PROPS_DIR   := build/props    # Build dir for props module
+IO_DIR      := build/io
+PROPS_DIR   := build/props
 
 MODULES     := io props
 SRC_DIRS    := $(addprefix src/,$(MODULES)) # src/io src/props
