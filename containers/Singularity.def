@@ -23,7 +23,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 1.9 # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 2.0 # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
@@ -41,7 +41,7 @@ From: rockylinux:8
     dnf update -y
 
     # Install compilers, build tools, and base dependencies
-    # Added flex and bison for OpenMPI build
+    # Includes flex and bison for OpenMPI build
     dnf install -y \
         gcc gcc-gfortran gcc-c++ make \
         wget git patch \
@@ -72,8 +72,8 @@ From: rockylinux:8
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
-    # Configure should now find hwloc/libevent/flex/bison from system packages
-    ./configure \
+    # Added LDFLAGS="-lfl" to link against flex library
+    LDFLAGS="-lfl" ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
        --enable-mpirun-prefix-by-default \
