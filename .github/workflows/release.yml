@@ -1,17 +1,18 @@
-name: Build and Release Singularity Container
+name: Build and Release Singularity Container (TESTING ON BUILD BRANCH)
 
-# Modified trigger for testing:
+# Trigger the workflow on pushes to the 'build' branch for testing,
+# or manually via workflow_dispatch.
 on:
   push:
     branches:
-      - 'build'  # Trigger ONLY on pushes to this branch
-  workflow_dispatch:        # Allows manual trigger via Actions tab
+      - 'build'  # <-- Trigger ONLY on pushes to the 'build' branch
+  workflow_dispatch: # Allows manual trigger via Actions tab
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest # Use the latest Ubuntu runner
     permissions:
-      contents: write # Allow action to write release assets
+      contents: write # Still needed for release step later, harmless here
 
     steps:
       # 1. Checkout repository code
@@ -30,12 +31,13 @@ jobs:
       # 3. Build the Singularity/Apptainer container (.sif file)
       - name: Build Apptainer container
         run: |
-          # Get the tag name that triggered the workflow (e.g., "v1.0.0")
-          TAG_NAME=${{ github.ref_name }}
-          # Define the output filename for the SIF file
-          SIF_FILENAME="openimpala-${TAG_NAME}.sif"
+          # Get a reference name (branch name or tag name)
+          # For testing on branch, this will be 'build'
+          REF_NAME=${{ github.ref_name }}
+          # Create a SIF filename based on branch/tag for testing uniqueness
+          SIF_FILENAME="openimpala-${REF_NAME//\//_}-testbuild.sif" # Sanitize ref name slightly
           # Define the path to the recipe file inside the containers/ directory
-          RECIPE_FILE="containers/Singularity.def" # <-- Corrected filename
+          RECIPE_FILE="containers/Singularity.def"
 
           # Verify the recipe file exists before attempting to build
           if [ ! -f "$RECIPE_FILE" ]; then
@@ -55,13 +57,30 @@ jobs:
           # Make the SIF filename available to subsequent steps via environment variable
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
 
-      # 4. Create GitHub Release and Upload SIF Asset
+      # 4. Create GitHub Release and Upload SIF Asset (DISABLED FOR TESTING)
       # Uses the softprops/action-gh-release action which conveniently
-  # Modified release step for testing:
-  - name: Create GitHub Release and Upload SIF
-    if: false # <---- Temporarily disable this step
-    uses: softprops/action-gh-release@v2
-    with:
-      files: ${{ env.SIF_FILENAME }}
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # creates a release based on the tag and uploads specified files.
+      - name: Create GitHub Release and Upload SIF
+        if: false # <-- Temporarily disable this step during testing on 'build' branch
+        uses: softprops/action-gh-release@v2 # Use v2 or later
+        with:
+          # The files glob pattern to upload as release assets.
+          # Uses the SIF_FILENAME environment variable set in the previous step.
+          files: ${{ env.SIF_FILENAME }}
+        env:
+          # GITHUB_TOKEN is automatically provided by GitHub Actions.
+          # It has the necessary permissions to create releases and upload assets
+          # because we set `permissions: contents: write` for the job.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional: Add a step here to verify build success if needed,
+      # e.g., check if the SIF file exists and has non-zero size.
+      - name: Verify Build Output
+        run: |
+          echo "Checking existence and size of ${{ env.SIF_FILENAME }}"
+          ls -lh "${{ env.SIF_FILENAME }}"
+          if [ ! -s "${{ env.SIF_FILENAME }}" ]; then
+             echo "Error: Built SIF file ${{ env.SIF_FILENAME }} is missing or empty."
+             exit 1
+          fi
+          echo "Build verification step passed."
