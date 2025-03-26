@@ -1,3 +1,9 @@
+Okay, here is the complete .github/workflows/build-test.yml file, updated to include the sudo chown command after the successful sandbox build to fix the cache saving permission errors.
+
+(Generated Wednesday, March 26, 2025 at 11:34 AM GMT, Oxford, UK)
+
+YAML
+
 # .github/workflows/build-test.yml
 name: Build and Test OpenImpala Makefile (Singularity Cache)
 
@@ -57,9 +63,18 @@ jobs:
             exit 1
           fi
           echo "Building dependencies sandbox from $RECIPE_FILE..."
-          # Build into a sandbox directory (folder)
-          # Use sudo to grant necessary privileges on GitHub Actions runner
-          sudo apptainer build --sandbox ./dependency_sandbox "$RECIPE_FILE" # <-- Changed --fakeroot to sudo
+          # Build into a sandbox directory (folder) using sudo
+          sudo apptainer build --sandbox ./dependency_sandbox "$RECIPE_FILE"
+          # Check build exit status IMMEDIATELY
+          if [ $? -ne 0 ]; then
+             echo "Error: Apptainer build failed."
+             exit 1 # Exit if build failed
+          fi
+          echo "Apptainer build successful. Fixing sandbox permissions..."
+          # Fix permissions immediately after successful build for caching
+          # Change ownership to the current GitHub Actions runner user
+          sudo chown -R $(whoami):$(id -gn) ./dependency_sandbox
+          echo "Permissions fixed for caching."
 
   # Job 2: Build OpenImpala using the cached dependencies
   build-openimpala:
@@ -86,7 +101,7 @@ jobs:
       - name: Check if sandbox exists
         run: |
           if [ ! -d "./dependency_sandbox" ]; then
-            echo "Error: Dependency sandbox not found after restore. Dependency build likely failed."
+            echo "Error: Dependency sandbox not found after restore. Dependency build likely failed or cache key mismatch."
             exit 1
           fi
           echo "Dependency sandbox restored successfully."
