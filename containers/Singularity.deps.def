@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.5-deps # <-- Version indicates dependency build
+    Version 2.6-deps # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
@@ -68,14 +68,15 @@ From: rockylinux:8
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
-    # Added LDFLAGS="-lfl" to link against flex library
-    LDFLAGS="-lfl" ./configure \
+    # LDFLAGS="-lfl" REMOVED from configure line
+    ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
        --enable-mpirun-prefix-by-default \
        --with-verbs \
        --enable-shared \
        --enable-static=no
+    # Add LDFLAGS="-lfl" to make and make install
     make -j$(nproc) LDFLAGS="-lfl"
     make install LDFLAGS="-lfl"
     cd ..
