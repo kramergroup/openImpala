@@ -8,7 +8,7 @@ on:
       - main
       - working
       - build
-      - makefile # <-- Added makefile branch trigger
+      - 'makefile' # Include makefile branch trigger
   pull_request:
     # Trigger on Pull Requests targeting main branch
     branches: [ main ]
@@ -58,7 +58,8 @@ jobs:
           fi
           echo "Building dependencies sandbox from $RECIPE_FILE..."
           # Build into a sandbox directory (folder)
-          apptainer build --fakeroot --sandbox ./dependency_sandbox "$RECIPE_FILE"
+          # Use sudo to grant necessary privileges on GitHub Actions runner
+          sudo apptainer build --sandbox ./dependency_sandbox "$RECIPE_FILE" # <-- Changed --fakeroot to sudo
 
   # Job 2: Build OpenImpala using the cached dependencies
   build-openimpala:
