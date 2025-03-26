@@ -14,7 +14,7 @@ From: rockylinux:8
       * HDF5 1.12.3 (Parallel, Fortran, C++)
       * AMReX 23.11 (MPI, OMP, EB)
       * HYPRE v2.30.0 (MPI)
-      * libtiff, boost, python3
+      * libtiff, boost, python3, hwloc, libevent
 
     Usage:
       singularity build openimpala.sif openimpala.def
@@ -23,11 +23,10 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 1.7 # <-- UPDATE AS NEEDED (Incremented for branch change)
+    Version 1.8 # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
-    # Ensure these match the versions used in the download/build steps below
     export CMAKE_VERSION=3.28.3
     export OPENMPI_VERSION=4.1.6
     export HDF5_VERSION=1.12.3
@@ -42,6 +41,7 @@ From: rockylinux:8
     dnf update -y
 
     # Install compilers, build tools, and base dependencies
+    # Added hwloc-devel and libevent-devel for OpenMPI build
     dnf install -y \
         gcc gcc-gfortran gcc-c++ make \
         wget git patch \
@@ -49,7 +49,9 @@ From: rockylinux:8
         hostname \
         infiniband-diags libibverbs-devel \
         libtiff-devel boost-devel \
-        which ca-certificates
+        hwloc-devel libevent-devel \
+        which ca-certificates && \
+    dnf clean all -y # Add clean here too
 
     # Create a temporary directory for building dependencies
     mkdir /tmp/build_src
@@ -69,13 +71,14 @@ From: rockylinux:8
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
+    # Configure should now find hwloc/libevent from system packages
     ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
        --enable-mpirun-prefix-by-default \
        --with-verbs \
        --enable-shared \
-       --enable-static=no # Prefer shared libs
+       --enable-static=no
     make -j$(nproc) install
     cd ..
     rm -rf openmpi-${OPENMPI_VERSION}*
@@ -111,6 +114,7 @@ From: rockylinux:8
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
     mkdir build && cd build
+    # Pass CMAKE_PREFIX_PATH to help find HDF5 if installed in /opt
     cmake .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
@@ -122,7 +126,8 @@ From: rockylinux:8
         -DCMAKE_Fortran_COMPILER=mpif90 \
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
-        -DCMAKE_Fortran_FLAGS="-O3 -march=native"
+        -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
     make -j$(nproc) install
     cd ../..
     rm -rf amrex
@@ -146,20 +151,21 @@ From: rockylinux:8
 
     # --- Build OpenImpala (from 'working' branch) ---
     # Set environment variables needed specifically for the OpenImpala build step
-    # These mirror the `%environment` section but ensure they are set during build
     export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
     export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
     export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
     # Ensure libs are findable during build/link phase
     export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
+    # CMAKE_PREFIX_PATH might be needed if OpenImpala uses CMake internally
+    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
+
 
     cd / # Or /opt, choose consistent install location
     echo "Cloning OpenImpala 'working' branch..."
     git clone --depth 1 --branch working https://github.com/kramergroup/openImpala.git openImpala # <-- Added -b working
     cd openImpala
     echo "Building OpenImpala..."
-    # Assuming 'make' is still the primary build method based on previous recipe.
-    # If OpenImpala uses CMake, replace 'make' with appropriate CMake commands.
+    # Assuming 'make' is still the primary build method. Requires Makefile to find deps via *_HOME or CMAKE_PREFIX_PATH
     make -j$(nproc)
 
     # --- Cleanup ---
@@ -211,9 +217,11 @@ From: rockylinux:8
 
     # Check if libraries are found by linker (simple ldd check)
     echo "--- Verifying Library Linking ---"
+    # Need full paths to .so files for ldd
     ldd ${HDF5_HOME}/lib/libhdf5.so | grep -E 'not found|statically linked' || echo "HDF5 lib OK"
     ldd ${AMREX_HOME}/lib/libamrex.so | grep -E 'not found|statically linked' || echo "AMReX lib OK"
     ldd ${HYPRE_HOME}/lib/libHYPRE.so | grep -E 'not found|statically linked' || echo "HYPRE lib OK"
+    ldd /usr/local/lib/libmpi.so | grep -E 'not found|statically linked' || echo "OpenMPI lib OK" # Check OpenMPI lib
 
     # Check if OpenImpala executable exists (adjust path if needed)
     echo "--- Verifying OpenImpala Build ---"
