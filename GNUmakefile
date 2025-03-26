@@ -63,7 +63,7 @@ BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
 # Find source files
 SOURCES_IO_CPP  := $(wildcard src/io/*.cpp)
 SOURCES_PRP_CPP := $(wildcard src/props/*.cpp)
-SOURCES_PRP_F90 := $(wildcard src/props/*.F90) # Assume F90 only in props
+SOURCES_PRP_F90 := $(wildcard src/props/*.F90)
 
 # Define object file targets based on source locations
 OBJECTS_IO_CPP  := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_CPP))
@@ -117,7 +117,7 @@ $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
 # ============================================================
 
 # Define object lists for clarity
-APP_OBJS       := $(OBJECTS) # Main app needs all objects
+APP_OBJS       := $(OBJECTS)
 
 # Specific objects needed for each test (adjust based on actual dependencies)
 TEST_OBJS_TIFF    := $(IO_DIR)/TiffReader.o
