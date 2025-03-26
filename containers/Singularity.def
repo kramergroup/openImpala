@@ -73,16 +73,18 @@ From: rockylinux:8
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
-    # Added LDFLAGS="-lfl" to link against flex library
     # Configure should now find a working C compiler and base libraries
-    LDFLAGS="-lfl" ./configure \
+    # LDFLAGS="-lfl" removed from configure command
+    ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
        --enable-mpirun-prefix-by-default \
        --with-verbs \
        --enable-shared \
        --enable-static=no
-    make -j$(nproc) install
+    # Add LDFLAGS="-lfl" to make and make install
+    make -j$(nproc) LDFLAGS="-lfl"
+    make install LDFLAGS="-lfl"
     cd ..
     rm -rf openmpi-${OPENMPI_VERSION}*
     # Update library cache for /usr/local/lib
