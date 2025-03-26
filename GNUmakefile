@@ -25,24 +25,22 @@ CXXFLAGS      := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
 F90FLAGS      := -g -O3
 
 # Include Paths (using variables for portability)
-# --- CORRECTED SECTION START ---
 # Ensure no trailing spaces before backslashes and no leading spaces on next lines (besides indentation)
-INCLUDE       := -I$(AMREX_HOME)/include \
-                 -I$(HYPRE_HOME)/include \
-                 -I$(HDF5_HOME)/include \
-                 -I$(H5CPP_HOME)/include \
+INCLUDE       := -I$(AMREX_HOME)/include\
+                 -I$(HYPRE_HOME)/include\
+                 -I$(HDF5_HOME)/include\
+                 -I$(H5CPP_HOME)/include\
                  -I$(TIFF_HOME)/include
 #                -I$(BOOST_HOME)/include  # If Boost headers are needed and non-standard
-# --- CORRECTED SECTION END ---
 
 # Linker Flags (using variables for portability)
 # Rely on MPI wrappers to link MPI libs and potentially Fortran runtime
 # List required application libraries
-LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
-                 -L$(HYPRE_HOME)/lib -lHYPRE \
-                 -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
-                 -L$(TIFF_HOME)/lib -ltiff \
-                 -lm # Math library usually needed
+LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex\
+                 -L$(HYPRE_HOME)/lib -lHYPRE\
+                 -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp\
+                 -L$(TIFF_HOME)/lib -ltiff\
+                 -lm
 
 # ============================================================
 # Project Structure
