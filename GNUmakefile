@@ -1,6 +1,5 @@
 # GNU MakeFile for OpenImpala Diffusion Application and Tests
-# Improved version incorporating fixes for make errors.
-# Oxford, UK - Wed Mar 26 2025 10:25 AM GMT
+# Improved version incorporating fixes for make errors and portability.
 
 # ============================================================
 # Environment Setup (MUST BE SET OR ADJUSTED)
@@ -9,7 +8,8 @@
 AMREX_HOME     ?= /path/to/amrex       # Base AMReX install directory
 HYPRE_HOME     ?= /path/to/hypre       # Base HYPRE install directory
 HDF5_HOME      ?= /usr                # Base HDF5 install directory (often /usr)
-H5CPP_HOME     ?= $(HDF5_HOME)         # Base H5CPP install directory (often same as HDF5 if using official bindings)
+# Assuming official HDF5 C++ bindings are installed with HDF5 C library
+H5CPP_HOME     ?= $(HDF5_HOME)         # Base H5CPP install directory
 TIFF_HOME      ?= /usr                # Base LibTIFF install directory (often /usr)
 # BOOST_HOME     ?= /usr              # Base Boost install directory (if needed & non-std)
 
@@ -88,9 +88,8 @@ tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolume
 # ============================================================
 # Compilation Rules (Using Standard Pattern Rules)
 # ============================================================
-# Note: Added order-only prerequisites (| $(DIR)) to help Make distinguish
-# directory targets from pattern rules, and ensure target dir exists.
-# Added mkdir -p in recipes as extra safety.
+# Order-only prerequisites (| $(DIR)) ensure directory exists before compiling
+# Added @mkdir -p $(@D) in recipes for extra safety
 
 # Rule for C++ objects in build/io
 $(IO_DIR)/%.o : %.cpp | $(IO_DIR)
@@ -117,44 +116,43 @@ $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
 # Define object lists for clarity
 APP_OBJS      := $(OBJECTS) # Main app needs all objects
 
-# Specific objects needed for each test
+# Specific objects needed for each test (adjust based on actual dependencies)
 TEST_OBJS_TIFF    := $(IO_DIR)/TiffReader.o
 TEST_OBJS_DAT     := $(IO_DIR)/DatReader.o
 TEST_OBJS_HDF5    := $(IO_DIR)/HDF5Reader.o
 TEST_OBJS_VF      := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
-# Tortuosity depends on Hypre backend, VolumeFraction, Readers, Fortran kernels
-TEST_OBJS_TORT    := $(filter-out $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o, $(OBJECTS))
+# Tortuosity depends on Hypre backend, VolumeFraction, Readers (Tiff?), Fortran kernels
+TEST_OBJS_TORT    := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o \
+                     $(OBJECTS_PRP_F90) \
+                     $(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
+                     # Note: Included all readers here, adjust if tTortuosity only uses one type
+
 
 # Main application
-$(APP_DIR)/Diffusion: Diffusion.cpp $(APP_OBJS)
+$(APP_DIR)/Diffusion: Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	# @mkdir -p $(@D) # Directory created by order-only dependency
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
 
 # Test executables
-$(TST_DIR)/tTiffReader: tTiffReader.cpp $(TEST_OBJS_TIFF)
+$(TST_DIR)/tTiffReader: tTiffReader.cpp $(TEST_OBJS_TIFF) | $(TST_DIR)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
-$(TST_DIR)/tDatReader: tDatReader.cpp $(TEST_OBJS_DAT)
+$(TST_DIR)/tDatReader: tDatReader.cpp $(TEST_OBJS_DAT) | $(TST_DIR)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
-$(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp $(TEST_OBJS_HDF5)
+$(TST_DIR)/tHDF5Reader: tHDF5Reader.cpp $(TEST_OBJS_HDF5) | $(TST_DIR)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
-$(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(TEST_OBJS_VF)
+$(TST_DIR)/tVolumeFraction: tVolumeFraction.cpp $(TEST_OBJS_VF) | $(TST_DIR)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
-$(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT)
+$(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT) | $(TST_DIR)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
 
 # ============================================================
@@ -165,8 +163,8 @@ $(TST_DIR)/tTortuosity: tTortuosity.cpp $(TEST_OBJS_TORT)
 builddirs: $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR)
 
 # General rule for creating build directories
-# Uses '|' to make it order-only, prevents directory timestamp issues
 $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR):
+	@echo "Creating directory $@"
 	@mkdir -p $@
 
 # Build environments (simple examples)
@@ -180,9 +178,10 @@ release: all
 # Clean target (removes objects, module files, executables, dependency files)
 clean:
 	@echo "Cleaning build artifacts..."
-	-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR)
-	# Also remove dependency files generated by C++ compilation
+	-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR) build # Remove specific dirs and top build dir
+	# Clean dependency files potentially generated in source dirs if CXXFLAGS didn't handle output dir well
 	-@find src -name '*.d' -delete
+	-@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
 
 # ============================================================
 # Include Auto-Generated Dependencies
