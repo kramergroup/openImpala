@@ -23,7 +23,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.4 # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 2.5 # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
@@ -40,8 +40,8 @@ From: rockylinux:8
     dnf install -y epel-release
     dnf update -y
 
-    # Install 'Development Tools' group AND other required packages in one command
-    # Use @'Group Name' syntax for the group
+    # Install 'Development Tools' group AND other required packages
+    # Added flex-devel for libfl library needed by OpenMPI link stage
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
@@ -51,7 +51,7 @@ From: rockylinux:8
         infiniband-diags libibverbs-devel \
         libtiff-devel boost-devel \
         hwloc-devel libevent-devel \
-        flex bison \
+        flex bison flex-devel \
         which ca-certificates && \
     dnf clean all -y
 
@@ -74,7 +74,7 @@ From: rockylinux:8
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
     # Configure should now find a working C compiler and base libraries
-    # LDFLAGS="-lfl" removed from configure command
+    # LDFLAGS="-lfl" is now passed only to make/install below
     ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
