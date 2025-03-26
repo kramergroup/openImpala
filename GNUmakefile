@@ -163,8 +163,8 @@ builddirs: $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR)
 
 # General rule for creating build directories
 $(BUILD_DIRS) $(APP_DIR) $(TST_DIR) $(INC_DIR):
-@echo "Creating directory $@"
-@mkdir -p $@
+	@echo "Creating directory $@"
+	@mkdir -p $@
 
 # Build environments (simple examples)
 debug: CXXFLAGS += -DDEBUG
@@ -176,11 +176,11 @@ release: all
 
 # Clean target (removes objects, module files, executables, dependency files)
 clean:
-@echo "Cleaning build artifacts..."
--@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR) build # Remove specific dirs and top build dir
-# Clean dependency files potentially generated in source dirs if CXXFLAGS didn't handle output dir well
--@find src -name '*.d' -delete
--@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
+	@echo "Cleaning build artifacts..."
+	-@rm -rf $(IO_DIR) $(PROPS_DIR) $(INC_DIR) $(APP_DIR) $(TST_DIR) build # Remove specific dirs and top build dir
+	# Clean dependency files potentially generated in source dirs if CXXFLAGS didn't handle output dir well
+	-@find src -name '*.d' -delete
+	-@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
 
 # ============================================================
 # Debugging Output (Temporary)
