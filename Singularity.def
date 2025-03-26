@@ -1,0 +1,230 @@
+Bootstrap: docker
+From: rockylinux:8
+
+%help
+    Container with environment for building and running OpenImpala.
+
+    Builds OpenImpala from the 'working' branch by default.
+
+    Includes:
+      * Rocky Linux 8 Base
+      * GCC 8.5 (System Default)
+      * OpenMPI 4.1.6 (with IB support)
+      * CMake 3.28.3
+      * HDF5 1.12.3 (Parallel, Fortran, C++)
+      * AMReX 23.11 (MPI, OMP, EB)
+      * HYPRE v2.30.0 (MPI)
+      * libtiff, boost, python3
+
+    Usage:
+      singularity build openimpala.sif openimpala.def
+      singularity exec -B $PWD:/data openimpala.sif Diffusion /data/inputs
+      mpirun -np 4 singularity exec -B $PWD:/data openimpala.sif Diffusion /data/inputs
+
+%labels
+    Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
+    Version 1.7 # <-- UPDATE AS NEEDED (Incremented for branch change)
+
+%post
+    # Define versions used throughout the build
+    # Ensure these match the versions used in the download/build steps below
+    export CMAKE_VERSION=3.28.3
+    export OPENMPI_VERSION=4.1.6
+    export HDF5_VERSION=1.12.3
+    export AMREX_VERSION=23.11
+    export HYPRE_VERSION=v2.30.0
+
+    # Update and install base utilities & repositories
+    dnf update -y
+    dnf install -y dnf-utils
+    dnf config-manager --set-enabled powertools
+    dnf install -y epel-release
+    dnf update -y
+
+    # Install compilers, build tools, and base dependencies
+    dnf install -y \
+        gcc gcc-gfortran gcc-c++ make \
+        wget git patch \
+        python3 python3-pip \
+        hostname \
+        infiniband-diags libibverbs-devel \
+        libtiff-devel boost-devel \
+        which ca-certificates
+
+    # Create a temporary directory for building dependencies
+    mkdir /tmp/build_src
+    cd /tmp/build_src
+
+    # --- Install CMake (Recent Version) ---
+    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
+    wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+    mkdir -p ${CMAKE_INSTALL_PREFIX}
+    tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
+    # Add to PATH temporarily for subsequent builds
+    export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
+    cmake --version
+
+    # --- Install OpenMPI (Recent Version) ---
+    export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
+    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
+    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
+    cd openmpi-${OPENMPI_VERSION}
+    ./configure \
+       --prefix=${OPENMPI_INSTALL_PREFIX} \
+       --enable-orterun-prefix-by-default \
+       --enable-mpirun-prefix-by-default \
+       --with-verbs \
+       --enable-shared \
+       --enable-static=no # Prefer shared libs
+    make -j$(nproc) install
+    cd ..
+    rm -rf openmpi-${OPENMPI_VERSION}*
+    # Update library cache for /usr/local/lib
+    ldconfig
+
+    # --- Install HDF5 (with Parallel, Fortran, C++) ---
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
+    tar -xzf hdf5-${HDF5_VERSION}.tar.gz
+    cd hdf5-${HDF5_VERSION}
+    # Export flags for configure and make
+    export CFLAGS="-O3 -march=native"
+    export CXXFLAGS="${CFLAGS}"
+    export FCFLAGS="${CFLAGS}"
+    export CC=mpicc
+    export CXX=mpicxx
+    export FC=mpif90
+    ./configure \
+        --prefix=${HDF5_INSTALL_PREFIX} \
+        --enable-parallel \
+        --enable-fortran \
+        --enable-fortran2003 \
+        --enable-cxx \
+        --enable-shared \
+        --disable-static
+    make -j$(nproc) install
+    cd ..
+    rm -rf hdf5-${HDF5_VERSION}*
+
+    # --- Install AMReX (Recent Stable Tag using CMake) ---
+    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
+    git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
+    cd amrex
+    mkdir build && cd build
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DAMReX_MPI=ON \
+        -DAMReX_OMP=ON \
+        -DAMReX_EB=ON \
+        -DCMAKE_CXX_COMPILER=mpicxx \
+        -DCMAKE_C_COMPILER=mpicc \
+        -DCMAKE_Fortran_COMPILER=mpif90 \
+        -DCMAKE_CXX_FLAGS="-O3 -march=native" \
+        -DCMAKE_C_FLAGS="-O3 -march=native" \
+        -DCMAKE_Fortran_FLAGS="-O3 -march=native"
+    make -j$(nproc) install
+    cd ../..
+    rm -rf amrex
+
+    # --- Install HYPRE (Recent Stable Tag) ---
+    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+    git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
+    cd hypre/src
+    # HYPRE configure uses CC/CXX env vars or finds MPI wrappers
+    export CC=mpicc
+    export CXX=mpicxx
+    ./configure \
+        --prefix=${HYPRE_INSTALL_PREFIX} \
+        --with-MPI \
+        --enable-shared \
+        CFLAGS="-O3 -march=native" \
+        CXXFLAGS="-O3 -march=native"
+    make -j$(nproc) install
+    cd ../..
+    rm -rf hypre
+
+    # --- Build OpenImpala (from 'working' branch) ---
+    # Set environment variables needed specifically for the OpenImpala build step
+    # These mirror the `%environment` section but ensure they are set during build
+    export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
+    export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
+    export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
+    # Ensure libs are findable during build/link phase
+    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
+
+    cd / # Or /opt, choose consistent install location
+    echo "Cloning OpenImpala 'working' branch..."
+    git clone --depth 1 --branch working https://github.com/kramergroup/openImpala.git openImpala # <-- Added -b working
+    cd openImpala
+    echo "Building OpenImpala..."
+    # Assuming 'make' is still the primary build method based on previous recipe.
+    # If OpenImpala uses CMake, replace 'make' with appropriate CMake commands.
+    make -j$(nproc)
+
+    # --- Cleanup ---
+    cd /
+    rm -rf /tmp/build_src # Remove downloaded sources for dependencies
+    dnf clean all
+
+%environment
+    # Set locale
+    export LC_ALL=C
+    export LANG=C
+
+    # Define versions based on build stage (must match %post)
+    export CMAKE_VERSION=3.28.3
+    export OPENMPI_VERSION=4.1.6
+    export HDF5_VERSION=1.12.3
+    export AMREX_VERSION=23.11
+    export HYPRE_VERSION=v2.30.0
+    # OPENIMPALA_VERSION could be set dynamically if needed/available
+
+    # Installation prefixes
+    export CMAKE_HOME=/opt/cmake/${CMAKE_VERSION}
+    export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
+    export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
+    export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
+    export OPENIMPALA_DIR=/openImpala # Assuming cloned to /openImpala
+
+    # Add binaries to PATH
+    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
+    # Add executables from OpenImpala build directory (adjust path if needed)
+    export PATH=${OPENIMPALA_DIR}/build/apps:${OPENIMPALA_DIR}/build/tests:${PATH}
+
+    # Add libraries to LD_LIBRARY_PATH
+    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
+
+    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies
+    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
+
+    # Ensure OpenMPI runs correctly within Singularity
+    export OMPI_MCA_btl_vader_single_copy_mechanism=none
+    export OMPI_MCA_rmaps_base_oversubscribe=1 # Allow oversubscription if needed
+
+%test
+    # Verify tools are found and versions are reasonable
+    echo "--- Verifying Tool Versions ---"
+    which mpicc && mpicc --version || exit 1
+    which cmake && cmake --version || exit 1
+    which gcc && gcc --version || exit 1
+
+    # Check if libraries are found by linker (simple ldd check)
+    echo "--- Verifying Library Linking ---"
+    ldd ${HDF5_HOME}/lib/libhdf5.so | grep -E 'not found|statically linked' || echo "HDF5 lib OK"
+    ldd ${AMREX_HOME}/lib/libamrex.so | grep -E 'not found|statically linked' || echo "AMReX lib OK"
+    ldd ${HYPRE_HOME}/lib/libHYPRE.so | grep -E 'not found|statically linked' || echo "HYPRE lib OK"
+
+    # Check if OpenImpala executable exists (adjust path if needed)
+    echo "--- Verifying OpenImpala Build ---"
+    ls /openImpala/build/apps/Diffusion || exit 1
+    # Optional: Run a quick test bundled with OpenImpala if available
+    # echo "Running quick test..."
+    # cd /openImpala/build/tests && ./tSomeQuickTest || exit 1
+
+    echo "--- Basic container tests passed. ---"
+
+%runscript
+    echo "Container for OpenImpala (built from 'working' branch)."
+    echo "Use 'singularity exec' or 'mpirun singularity exec'."
+    echo "Example: singularity exec openimpala.sif Diffusion <path_to_inputs>"
