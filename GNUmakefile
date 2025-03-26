@@ -92,21 +92,21 @@ tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolume
 
 # Rule for C++ objects in build/io
 $(IO_DIR)/%.o : %.cpp | $(IO_DIR)
-@echo "Compiling (IO) $< ..."
-@mkdir -p $(@D)
-$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+  @echo "Compiling (IO) $< ..."
+  @mkdir -p $(@D)
+  $(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for C++ objects in build/props
 $(PROPS_DIR)/%.o : %.cpp | $(PROPS_DIR)
-@echo "Compiling (Props) $< ..."
-@mkdir -p $(@D)
-$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
+  @echo "Compiling (Props) $< ..."
+  @mkdir -p $(@D)
+  $(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for F90 objects in build/props
 $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
-@echo "Compiling (Props Fortran) $< ..."
-@mkdir -p $(@D)
-$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
+  @echo "Compiling (Props Fortran) $< ..."
+  @mkdir -p $(@D)
+  $(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
 
 # ============================================================
 # Linking Executables
