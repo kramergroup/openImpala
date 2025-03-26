@@ -1,10 +1,11 @@
 name: Build and Release Singularity Container
 
-# Trigger the workflow on pushes to tags matching the pattern v*.*.* (e.g., v1.0.0, v1.2.3)
+# Modified trigger for testing:
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - 'build'  # Trigger ONLY on pushes to this branch
+  workflow_dispatch:        # Allows manual trigger via Actions tab
 
 jobs:
   build-and-release:
@@ -56,15 +57,11 @@ jobs:
 
       # 4. Create GitHub Release and Upload SIF Asset
       # Uses the softprops/action-gh-release action which conveniently
-      # creates a release based on the tag and uploads specified files.
-      - name: Create GitHub Release and Upload SIF
-        uses: softprops/action-gh-release@v2 # Use v2 or later
-        with:
-          # The files glob pattern to upload as release assets.
-          # Uses the SIF_FILENAME environment variable set in the previous step.
-          files: ${{ env.SIF_FILENAME }}
-        env:
-          # GITHUB_TOKEN is automatically provided by GitHub Actions.
-          # It has the necessary permissions to create releases and upload assets
-          # because we set `permissions: contents: write` for the job.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Modified release step for testing:
+  - name: Create GitHub Release and Upload SIF
+    if: false # <---- Temporarily disable this step
+    uses: softprops/action-gh-release@v2
+    with:
+      files: ${{ env.SIF_FILENAME }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
