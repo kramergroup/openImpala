@@ -5,54 +5,57 @@
 # Environment Setup (MUST BE SET OR ADJUSTED)
 # ============================================================
 # Set these variables in your environment or modify defaults here if paths differ
-AMREX_HOME     ?= /path/to/amrex       # Base AMReX install directory
-HYPRE_HOME     ?= /path/to/hypre       # Base HYPRE install directory
-HDF5_HOME      ?= /usr                # Base HDF5 install directory (often /usr)
+AMREX_HOME    ?= /path/to/amrex      # Base AMReX install directory
+HYPRE_HOME    ?= /path/to/hypre      # Base HYPRE install directory
+HDF5_HOME     ?= /usr                # Base HDF5 install directory (often /usr)
 # Assuming official HDF5 C++ bindings are installed with HDF5 C library
-H5CPP_HOME     ?= $(HDF5_HOME)         # Base H5CPP install directory
-TIFF_HOME      ?= /usr                # Base LibTIFF install directory (often /usr)
-# BOOST_HOME     ?= /usr              # Base Boost install directory (if needed & non-std)
+H5CPP_HOME    ?= $(HDF5_HOME)        # Base H5CPP install directory
+TIFF_HOME     ?= /usr                # Base LibTIFF install directory (often /usr)
+# BOOST_HOME    ?= /usr                # Base Boost install directory (if needed & non-std)
 
 # ============================================================
 # Compilers and Flags
 # ============================================================
-CXX         := mpic++
-F90         := mpif90
+CXX           := mpic++
+F90           := mpif90
 
 # Base Flags + Auto-Dependency Generation for C++ (-MMD -MP) + C++17
 # Add -DOMPI_SKIP_MPICXX if needed by your MPI implementation
-CXXFLAGS    := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
-F90FLAGS    := -g -O3
+CXXFLAGS      := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
+F90FLAGS      := -g -O3
 
 # Include Paths (using variables for portability)
-INCLUDE     := -I$(AMREX_HOME)/include \
-               -I$(HYPRE_HOME)/include \
-               -I$(HDF5_HOME)/include \
-               -I$(H5CPP_HOME)/include \
-               -I$(TIFF_HOME)/include
-            #  -I$(BOOST_HOME)/include  # If Boost headers are needed and non-standard
+# --- CORRECTED SECTION START ---
+# Ensure no trailing spaces before backslashes and no leading spaces on next lines (besides indentation)
+INCLUDE       := -I$(AMREX_HOME)/include \
+                 -I$(HYPRE_HOME)/include \
+                 -I$(HDF5_HOME)/include \
+                 -I$(H5CPP_HOME)/include \
+                 -I$(TIFF_HOME)/include
+#                -I$(BOOST_HOME)/include  # If Boost headers are needed and non-standard
+# --- CORRECTED SECTION END ---
 
 # Linker Flags (using variables for portability)
 # Rely on MPI wrappers to link MPI libs and potentially Fortran runtime
 # List required application libraries
-LDFLAGS     := -L$(AMREX_HOME)/lib -lamrex \
-               -L$(HYPRE_HOME)/lib -lHYPRE \
-               -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
-               -L$(TIFF_HOME)/lib -ltiff \
-               -lm # Math library usually needed
+LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
+                 -L$(HYPRE_HOME)/lib -lHYPRE \
+                 -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
+                 -L$(TIFF_HOME)/lib -ltiff \
+                 -lm # Math library usually needed
 
 # ============================================================
 # Project Structure
 # ============================================================
-INC_DIR     := build/include
-APP_DIR     := build/apps
-TST_DIR     := build/tests
-IO_DIR      := build/io
-PROPS_DIR   := build/props
+INC_DIR       := build/include
+APP_DIR       := build/apps
+TST_DIR       := build/tests
+IO_DIR        := build/io
+PROPS_DIR     := build/props
 
-MODULES     := io props
-SRC_DIRS    := $(addprefix src/,$(MODULES)) # src/io src/props
-BUILD_DIRS  := $(addprefix build/,$(MODULES)) # build/io build/props
+MODULES       := io props
+SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
+BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
 
 # ============================================================
 # Source and Object Files
@@ -69,7 +72,7 @@ OBJECTS_PRP_F90 := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_PRP_F90
 
 OBJECTS_CPP := $(OBJECTS_IO_CPP) $(OBJECTS_PRP_CPP)
 OBJECTS_F90 := $(OBJECTS_PRP_F90)
-OBJECTS     := $(OBJECTS_CPP) $(OBJECTS_F90)
+OBJECTS       := $(OBJECTS_CPP) $(OBJECTS_F90)
 
 # Let Make search for source files in relevant directories
 VPATH := $(subst $(space),:,$(SRC_DIRS))
@@ -114,7 +117,7 @@ $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
 # ============================================================
 
 # Define object lists for clarity
-APP_OBJS      := $(OBJECTS) # Main app needs all objects
+APP_OBJS       := $(OBJECTS) # Main app needs all objects
 
 # Specific objects needed for each test (adjust based on actual dependencies)
 TEST_OBJS_TIFF    := $(IO_DIR)/TiffReader.o
@@ -123,8 +126,8 @@ TEST_OBJS_HDF5    := $(IO_DIR)/HDF5Reader.o
 TEST_OBJS_VF      := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
 # Tortuosity depends on Hypre backend, VolumeFraction, Readers (Tiff?), Fortran kernels
 TEST_OBJS_TORT    := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o \
-                     $(OBJECTS_PRP_F90) \
-                     $(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
+                       $(OBJECTS_PRP_F90) \
+                       $(IO_DIR)/TiffReader.o $(IO_DIR)/DatReader.o $(IO_DIR)/HDF5Reader.o
                      # Note: Included all readers here, adjust if tTortuosity only uses one type
 
 
@@ -186,14 +189,14 @@ clean:
 # ============================================================
 # Debugging Output (Temporary)
 # ============================================================
-$(info --- Make Debug Variables ---)
-$(info IO_DIR      = [${IO_DIR}])
-$(info PROPS_DIR   = [${PROPS_DIR}])
-$(info OBJECTS_IO_CPP = [${OBJECTS_IO_CPP}])
-$(info OBJECTS_PRP_CPP= [${OBJECTS_PRP_CPP}])
-$(info OBJECTS_CPP = [${OBJECTS_CPP}])
-$(info DEPS_FILES  = [${OBJECTS_CPP:.o=.d}])
-$(info --- End Make Debug ---)
+# $(info --- Make Debug Variables ---)
+# $(info IO_DIR       = [${IO_DIR}])
+# $(info PROPS_DIR    = [${PROPS_DIR}])
+# $(info OBJECTS_IO_CPP = [${OBJECTS_IO_CPP}])
+# $(info OBJECTS_PRP_CPP= [${OBJECTS_PRP_CPP}])
+# $(info OBJECTS_CPP = [${OBJECTS_CPP}])
+# $(info DEPS_FILES   = [${OBJECTS_CPP:.o=.d}])
+# $(info --- End Make Debug ---)
 
 
 # ============================================================
