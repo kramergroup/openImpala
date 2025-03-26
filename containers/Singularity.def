@@ -1,3 +1,9 @@
+Okay, here is the full Singularity recipe file (Singularity.def) updated to use dnf groupinstall 'Development Tools' to ensure a complete build environment, addressing the "C compiler cannot create executables" error.
+
+(Generated Wednesday, March 26, 2025 at 1:15 AM GMT, Oxford)
+
+Code snippet
+
 Bootstrap: docker
 From: rockylinux:8
 
@@ -8,7 +14,7 @@ From: rockylinux:8
 
     Includes:
       * Rocky Linux 8 Base
-      * GCC 8.5 (System Default)
+      * GCC 8.5 (from Development Tools)
       * OpenMPI 4.1.6 (with IB support)
       * CMake 3.28.3
       * HDF5 1.12.3 (Parallel, Fortran, C++)
@@ -23,7 +29,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.0 # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 2.1 # <-- UPDATE AS NEEDED (Incremented for build fix)
 
 %post
     # Define versions used throughout the build
@@ -40,10 +46,11 @@ From: rockylinux:8
     dnf install -y epel-release
     dnf update -y
 
-    # Install compilers, build tools, and base dependencies
-    # Includes flex and bison for OpenMPI build
+    # Install 'Development Tools' group and other required packages
+    # 'Development Tools' includes gcc, g++, make, binutils, glibc-devel etc.
+    dnf groupinstall -y 'Development Tools' && \
     dnf install -y \
-        gcc gcc-gfortran gcc-c++ make \
+        gcc-gfortran \ # Ensure Fortran compiler is present
         wget git patch \
         python3 python3-pip \
         hostname \
@@ -73,6 +80,7 @@ From: rockylinux:8
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
     # Added LDFLAGS="-lfl" to link against flex library
+    # Configure should now find a working C compiler and base libraries
     LDFLAGS="-lfl" ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
@@ -95,6 +103,7 @@ From: rockylinux:8
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
+    # Use MPI wrappers installed by OpenMPI build
     export CC=mpicc
     export CXX=mpicxx
     export FC=mpif90
@@ -163,7 +172,7 @@ From: rockylinux:8
 
     cd / # Or /opt, choose consistent install location
     echo "Cloning OpenImpala 'working' branch..."
-    git clone --depth 1 --branch working https://github.com/kramergroup/openImpala.git openImpala # <-- Added -b working
+    git clone --depth 1 --branch working https://github.com/kramergroup/openImpala.git openImpala
     cd openImpala
     echo "Building OpenImpala..."
     # Assuming 'make' is still the primary build method. Requires Makefile to find deps via *_HOME or CMAKE_PREFIX_PATH
