@@ -104,10 +104,17 @@ jobs:
           echo "Dependency SIF image restored successfully."
           ls -lh ./dependency_image.sif # Show file info
 
-      - name: Build OpenImpala using Dependency SIF (with make debug)
-        id: make_build # Give step an id
-        continue-on-error: true # Allow step to fail so logs can be uploaded
+- name: Build OpenImpala using Dependency SIF (with make debug)
+        id: make_build
+        continue-on-error: true
         run: |
+          # --- START DEBUG STEP ---
+          echo "DEBUG: Printing environment inside container..."
+          # Use brackets to clearly show start/end of variable values
+          sudo apptainer exec --bind $PWD:/src ./dependency_image.sif bash -c 'echo "DEBUG AMREX_HOME=[$AMREX_HOME]"; echo "DEBUG HYPRE_HOME=[$HYPRE_HOME]"; echo "DEBUG HDF5_HOME=[$HDF5_HOME]"; echo "DEBUG H5CPP_HOME=[$H5CPP_HOME]"; echo "DEBUG TIFF_HOME=[$TIFF_HOME]"'
+          echo "DEBUG: Environment print finished."
+          # --- END DEBUG STEP ---
+
           echo "Building OpenImpala using SIF image environment (with make debug)..."
           # Execute 'make clean' first
           sudo apptainer exec --bind $PWD:/src \
