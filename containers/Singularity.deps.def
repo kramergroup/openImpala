@@ -112,7 +112,7 @@ From: rockylinux:8
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
 
         # --- Add extra check right after install ---
-        echo "*** Verifying mpicc existence immediately after install (Exit Code: $MPI_INSTALL_EXIT_CODE) ***"
+        echo "*** Verifying mpicc existence immediately after install Exit Code: $MPI_INSTALL_EXIT_CODE ***"
         ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
         # --- End extra check ---
 
