@@ -3,22 +3,11 @@ From: rockylinux:8
 
 %help
     Container providing the build environment and runtime dependencies for OpenImpala.
-
-    Installs:
-      * Rocky Linux 8 Base OS & Updates
-      * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
-      * OpenMPI 4.1.6 (built from source, with IB support, using GCC 11)
-      * CMake 3.28.3 (binary distribution)
-      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11 & OpenMPI)
-      * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
-      * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
-      * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
-
-    This container is intended to be used as a base or cache for building OpenImpala itself.
+    # ... (rest of help section) ...
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.19-deps-gcc11-mpi-log-capture # <-- Updated version
+    Version 2.20-deps-gcc11-final-fixes-v3 # <-- Updated version
 
 %post
     set -e # Ensure dnf commands exit on error early
@@ -67,25 +56,25 @@ From: rockylinux:8
         export HDF5_VERSION=1.12.3
         export AMREX_VERSION=23.11
         export HYPRE_VERSION=v2.30.0
-        echo "--- Now using GCC $(gcc --version) ---"
+        echo "--- Now using GCC $(gcc --version) ---" # No parens here
 
         # --- Install CMake (Recent Version) ---
-        echo "--- Installing CMake ---"
+        echo "--- Installing CMake ---" # No parens here
         export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
         wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         mkdir -p ${CMAKE_INSTALL_PREFIX}
         tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
-        echo "--- Verifying CMake installation ---"
+        echo "--- Verifying CMake installation ---" # No parens here
         ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake # Check existence
         ${CMAKE_INSTALL_PREFIX}/bin/cmake --version # Check execution
         rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
-        echo "--- Verifying CMake via PATH ---"
+        echo "--- Verifying CMake via PATH ---" # No parens here
         which cmake # Check if in path
         cmake --version # Check execution via path
 
         # --- Install OpenMPI (Recent Version) ---
-        echo "--- Building OpenMPI ---"
+        echo "--- Building OpenMPI ---" # No parens here
         export OPENMPI_INSTALL_PREFIX=/usr/local
         wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
         tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
@@ -93,7 +82,7 @@ From: rockylinux:8
         export CC=$(which gcc)
         export CXX=$(which g++)
         export FC=$(which gfortran)
-        echo "*** Using CC=$CC CXX=$CXX FC=$FC ***"
+        echo "*** Using CC=$CC CXX=$CXX FC=$FC ***" # No parens here
         ./configure \
             --prefix=${OPENMPI_INSTALL_PREFIX} \
             --enable-orterun-prefix-by-default \
@@ -105,18 +94,18 @@ From: rockylinux:8
 
         # --- Add check for config.log ---
         if [ -f config.log ]; then
-            echo "--- Found config.log, tailing last 50 lines: ---"
+            echo "--- Found config.log, tailing last 50 lines: ---" # No parens here
             tail -n 50 config.log || echo "Tailing config.log failed"
-            echo "--- End config.log tail ---"
+            echo "--- End config.log tail ---" # No parens here
         else
-            echo "--- config.log not found after configure ---"
+            echo "--- config.log not found after configure ---" # No parens here
         fi
         # --- End check for config.log ---
 
-        echo "*** Running make -j$(nproc) ***"
+        echo "*** Running make -j$(nproc) ***" # No parens here
         make -j$(nproc) LDFLAGS="-lfl" # Build parallel
 
-        echo "*** Running make install SERIAL NO LDFLAGS (capturing output) ***"
+        echo "*** Running make install SERIAL NO LDFLAGS capturing output ***" # Corrected echo line
         # Capture output and handle potential failure
         make install > /tmp/build_src/mpi_install.log 2>&1 || { \
             echo "*** ERROR: make install returned non-zero status! Log below: ***"; \
@@ -124,11 +113,11 @@ From: rockylinux:8
             exit 1; \
         }
         # If make install succeeded (exit 0), print the log anyway
-        echo "*** make install finished (exit 0), install log contents: ***"
+        echo "*** make install finished exit 0, install log contents: ***" # No parens here
         cat /tmp/build_src/mpi_install.log || echo "Failed to cat mpi_install.log"
-        echo "*** End make install log ***"
+        echo "*** End make install log ***" # No parens here
 
-        echo "*** Verifying mpicc existence immediately after install ***"
+        echo "*** Verifying mpicc existence immediately after install ***" # No parens here
         ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
 
         cd ..
@@ -137,12 +126,12 @@ From: rockylinux:8
         ldconfig # Update library cache
 
         # --- Install HDF5 (with Parallel, Fortran, C++) ---
-        echo "--- Building HDF5 ---"
+        echo "--- Building HDF5 ---" # No parens here
         export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
         wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
         tar -xzf hdf5-${HDF5_VERSION}.tar.gz
         cd hdf5-${HDF5_VERSION}
-        echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---"
+        echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---" # No parens here
         export CFLAGS="-O3 -march=native"
         export CXXFLAGS="${CFLAGS}"
         export FCFLAGS="${CFLAGS}"
@@ -155,15 +144,15 @@ From: rockylinux:8
             --enable-shared \
             --disable-static \
             --enable-unsupported
-        echo "*** Running make -j$(nproc) for HDF5 ***"
+        echo "*** Running make -j$(nproc) for HDF5 ***" # No parens here
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for HDF5 SERIAL ***"
+        echo "*** Running make install for HDF5 SERIAL ***" # Corrected echo
         make install # Install serial
         cd ..
         rm -rf hdf5-${HDF5_VERSION}*
 
         # --- Install AMReX (Recent Stable Tag using CMake) ---
-        echo "--- Building AMReX ---"
+        echo "--- Building AMReX ---" # No parens here
         export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
         git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
         cd amrex
@@ -178,37 +167,37 @@ From: rockylinux:8
             -DCMAKE_C_FLAGS="-O3 -march=native" \
             -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
             -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
-        echo "*** Running make -j$(nproc) for AMReX ***"
+        echo "*** Running make -j$(nproc) for AMReX ***" # No parens here
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for AMReX SERIAL ***"
+        echo "*** Running make install for AMReX SERIAL ***" # Corrected echo
         make install # Install serial
         cd ../..
         rm -rf amrex
 
         # --- Install HYPRE (Recent Stable Tag) ---
-        echo "--- Building HYPRE ---"
+        echo "--- Building HYPRE ---" # No parens here
         export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
         git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
         cd hypre/src
-        echo "--- Using HYPRE CC=$CC CXX=$CXX ---"
+        echo "--- Using HYPRE CC=$CC CXX=$CXX ---" # No parens here
         ./configure \
             --prefix=${HYPRE_INSTALL_PREFIX} \
             --with-MPI \
             --enable-shared \
             CFLAGS="-O3 -march=native" \
             CXXFLAGS="-O3 -march=native"
-        echo "*** Running make -j$(nproc) for HYPRE ***"
+        echo "*** Running make -j$(nproc) for HYPRE ***" # No parens here
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for HYPRE SERIAL ***"
+        echo "*** Running make install for HYPRE SERIAL ***" # Corrected echo
         make install # Install serial
         cd ../..
         rm -rf hypre
 
-        echo "--- Dependency builds finished using GCC Toolset 11 ---"
+        echo "--- Dependency builds finished using GCC Toolset 11 ---" # No parens here
 
     ' # End of bash -c '...' for scl enable
 
-    echo "=== GCC Toolset 11 Section Finished ==="
+    echo "=== GCC Toolset 11 Section Finished ===" # No parens here
 
     # --- Final Cleanup ---
     cd /
