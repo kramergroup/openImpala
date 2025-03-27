@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.13-deps-gcc11-explicit-cc # <-- UPDATE AS NEEDED (Incremented for explicit compiler set)
+    Version 2.14-deps-gcc11-serial-mpi-install # <-- UPDATE AS NEEDED (Incremented for serial MPI install fix)
 
 %post
     # Define versions used throughout the build
@@ -101,18 +101,28 @@ From: rockylinux:8
             --enable-static=no \
             CC="$CC" CXX="$CXX" FC="$FC" # Pass explicitly too
 
-        # Add LDFLAGS="-lfl" to make and make install (Needed for flex interaction)
+        # Build OpenMPI in parallel
+        echo "*** Running make -j$(nproc) ***"
         make -j$(nproc) LDFLAGS="-lfl"
-        make install LDFLAGS="-lfl" # Keep LDFLAGS here for now
+
+        # ---->> INSTALL OpenMPI SERIALLY (Removed -j) <<----
+        echo "*** Running make install (serially) ***"
+        make install LDFLAGS="-lfl"
 
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
-        echo "*** OpenMPI '\''make install'\'' finished with exit code: $MPI_INSTALL_EXIT_CODE ***"
+
+        # --- Add extra check right after install ---
+        echo "*** Verifying mpicc existence immediately after install (Exit Code: $MPI_INSTALL_EXIT_CODE) ***"
+        ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
+        # --- End extra check ---
+
+        echo "*** OpenMPI 'make install' finished with exit code: $MPI_INSTALL_EXIT_CODE ***"
         if [ $MPI_INSTALL_EXIT_CODE -ne 0 ]; then
-            echo "*** ERROR: OpenMPI '\''make install'\'' failed! Exit code: $MPI_INSTALL_EXIT_CODE ***"
+            echo "*** ERROR: OpenMPI 'make install' explicitly failed! Exit code: $MPI_INSTALL_EXIT_CODE ***"
             exit $MPI_INSTALL_EXIT_CODE
         fi
 
-        # --- BEGIN Enhanced OpenMPI Install Verification ---
+        # --- BEGIN Enhanced OpenMPI Install Verification (Still useful) ---
         echo "*** START MPICC CHECK ***"
         ls -l /usr/local/bin/mpicc || echo "*** ls /usr/local/bin/mpicc command failed - file likely missing ***"
         if [ -f /usr/local/bin/mpicc ]; then
@@ -120,7 +130,8 @@ From: rockylinux:8
             which mpicc || echo "*** which mpicc command failed? ***"
             /usr/local/bin/mpicc --version || echo "*** mpicc --version command failed? ***"
         else
-            echo "*** !! MPICC FILE NOT FOUND !! ***"
+            # This part should ideally not be reached if make install worked, but keep it as a final safeguard
+            echo "*** !! MPICC FILE NOT FOUND in final check !! ***"
             echo "*** Contents of /usr/local/bin: ***"
             ls -l /usr/local/bin || echo "*** ls /usr/local/bin FAILED ***"
             echo "*** EXITING SCRIPT DUE TO MISSING MPICC ***"
@@ -259,17 +270,18 @@ From: rockylinux:8
     echo "--- End of /usr/local/bin listing ---"
     # --- END ADDED LS COMMAND ---
 
-    which mpicc && mpicc --version || exit 1
+    # This check should now pass if make install worked
+    which mpicc && mpicc --version || (echo "ERROR: mpicc not found or failed!"; exit 1)
     which cmake && cmake --version || exit 1
     which gcc && gcc --version | grep "(GCC) 11." || (echo "ERROR: GCC is not version 11!"; gcc --version; exit 1)
 
     # Check if libraries are found by linker (simple ldd check)
     echo "--- Verifying Library Linking ---"
     # Need full paths to .so files for ldd
-    ldd ${HDF5_HOME}/lib/libhdf5.so | grep -E 'not found|statically linked' || echo "HDF5 lib OK"
-    ldd ${AMREX_HOME}/lib/libamrex.so | grep -E 'not found|statically linked' || echo "AMReX lib OK"
-    ldd ${HYPRE_HOME}/lib/libHYPRE.so | grep -E 'not found|statically linked' || echo "HYPRE lib OK"
-    ldd /usr/local/lib/libmpi.so | grep -E 'not found|statically linked' || echo "OpenMPI lib OK" # Check OpenMPI lib
+    ldd ${HDF5_HOME}/lib/libhdf5.so || (echo "ERROR: HDF5 lib linking failed"; exit 1)
+    ldd ${AMREX_HOME}/lib/libamrex.so || (echo "ERROR: AMReX lib linking failed"; exit 1)
+    ldd ${HYPRE_HOME}/lib/libHYPRE.so || (echo "ERROR: HYPRE lib linking failed"; exit 1)
+    ldd /usr/local/lib/libmpi.so || (echo "ERROR: OpenMPI lib linking failed"; exit 1) # Check OpenMPI lib
 
     # DO NOT check for OpenImpala executable here
     echo "--- Verifying OpenImpala Build ---"
