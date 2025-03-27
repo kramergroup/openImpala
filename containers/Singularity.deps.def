@@ -6,7 +6,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.30-deps-gcc11-hdf5-log-capture-v3 # <-- Updated version
+    Version 2.31-deps-gcc11-exec-debug # <-- Updated version
 
 %post
     set -e # Ensure commands exit on error early
@@ -48,7 +48,6 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
     # --- Install OpenMPI ---
     # ... (OpenMPI configure, make, install log capture, verification as before) ...
-    # ... Should be installing correctly now ...
     echo "Running ldconfig..."
     ldconfig
 
@@ -57,18 +56,48 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache"
     echo "--- End ldconfig check ---"
 
-    # --- Manual MPI-IO Link Test (Keep explicit -L for robustness check) ---
+    # --- Manual MPI-IO Link Test ---
     echo "--- Attempting manual MPI-IO link test ---"
     cat << EOF > /tmp/build_src/test_mpiio.c
 #include <stdio.h>
 #include <mpi.h>
 int main(int argc, char **argv) { MPI_File fh; MPI_Init(&argc, &argv); if(MPI_COMM_WORLD == MPI_COMM_NULL){fprintf(stderr, "COMM_WORLD NULL\\n"); MPI_Abort(MPI_COMM_WORLD,1);} int err=MPI_File_open(MPI_COMM_WORLD, "dummy.txt", MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &fh); if(err!=MPI_SUCCESS){fprintf(stderr,"MPI_File_open failed %d\\n",err); MPI_Abort(MPI_COMM_WORLD,err);} MPI_File_close(&fh); MPI_Finalize(); return 0;}
 EOF
+    # --- ADDED: Detailed check right before mpicc execution ---
+    echo "--- Environment state JUST before mpicc link command ---"
+    echo "Current PATH: $PATH"
+    echo "Running: which mpicc"
+    MPICC_PATH=$(which mpicc || echo "mpicc_not_found")
+    echo "which mpicc result: $MPICC_PATH"
+    if [ "$MPICC_PATH" != "mpicc_not_found" ]; then
+        echo "--- Details for mpicc and target ---"
+        ls -l "$MPICC_PATH" || echo "ls mpicc FAILED"
+        # Assuming mpicc links to opal_wrapper in the same dir
+        OPAL_WRAPPER_PATH=$(dirname "$MPICC_PATH")/opal_wrapper
+        ls -l "$OPAL_WRAPPER_PATH" || echo "ls opal_wrapper FAILED"
+        echo "--- opal_wrapper shebang ---"
+        head -n 1 "$OPAL_WRAPPER_PATH" || echo "head opal_wrapper FAILED"
+        echo "--- opal_wrapper ldd ---"
+        ldd "$OPAL_WRAPPER_PATH" || echo "ldd opal_wrapper FAILED"
+        echo "--- Attempting opal_wrapper --version ---"
+        "$OPAL_WRAPPER_PATH" --version || echo "opal_wrapper --version FAILED (Code: $?)"
+    else
+        echo "Skipping detailed checks as mpicc was not found by which."
+    fi
+    echo "--- End detailed checks ---"
+
+    echo "Running: hash -r (clearing command hash)"
+    hash -r
+
     echo "--- Running: mpicc test_mpiio.c -o test_mpiio -L/usr/local/lib ---"
+    # Capture stderr as well
     mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio -L/usr/local/lib > /tmp/build_src/mpiio_link.log 2>&1
     LINK_EXIT_CODE=$?
+    # --- END ADDED checks ---
+
     if [ $LINK_EXIT_CODE -ne 0 ]; then
         echo "*** ERROR: Manual MPI-IO link test FAILED! Exit Code: $LINK_EXIT_CODE ***" >&2
+        echo "*** Linker/Command output: ***" >&2
         cat /tmp/build_src/mpiio_link.log >&2
         exit $LINK_EXIT_CODE
     else
@@ -77,59 +106,8 @@ EOF
     fi
     # --- END Manual MPI-IO Link Test ---
 
-    # --- Install HDF5 (with Parallel, Fortran, C++) ---
-    echo "--- Building HDF5 ---"
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
-    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
-    tar -xzf hdf5-${HDF5_VERSION}.tar.gz
-    cd hdf5-${HDF5_VERSION}
-    echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---"
-    export CFLAGS="-O3 -march=native"
-    export CXXFLAGS="${CFLAGS}"
-    export FCFLAGS="${CFLAGS}"
-    # Keep explicit LDFLAGS for configure
-    export LDFLAGS="-L/usr/local/lib"
-    echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
-    mpicc -show || echo "mpicc -show failed"
-
-    # --- Final Log Capture Attempt ---
-    set +e # Temporarily disable exit on error
-    ./configure \
-        --prefix=${HDF5_INSTALL_PREFIX} \
-        --enable-parallel \
-        --enable-fortran \
-        --enable-fortran2003 \
-        --enable-cxx \
-        --enable-shared \
-        --disable-static \
-        --enable-unsupported > hdf5_configure_output.log 2>&1
-    CONFIGURE_EXIT_CODE=$? # Capture exit code
-
-    # Try to print config.log tail *before* checking exit code
-    if [ -f config.log ]; then
-        echo "--- HDF5 config.log tail (last 200 lines - run status: $CONFIGURE_EXIT_CODE): ---" >&2
-        tail -n 200 config.log || echo "Failed to tail HDF5 config.log" >&2
-    else
-        echo "*** HDF5 config.log not found ***" >&2
-    fi
-
-    # Now check the exit code and exit if configure failed
-    if [ $CONFIGURE_EXIT_CODE -ne 0 ]; then
-        echo "*** ERROR: HDF5 configure failed! Exit Code: $CONFIGURE_EXIT_CODE ***" >&2
-        exit $CONFIGURE_EXIT_CODE
-    fi
-    set -e # Re-enable exit on error if configure succeeded
-    # --- END Final Log Capture Attempt ---
-
-    echo "--- HDF5 configure finished (exit 0) ---"
-    unset LDFLAGS # Unset after configure
-
-    echo "*** Running make -j$(nproc) for HDF5 ***"
-    make -j$(nproc)
-    echo "*** Running make install for HDF5 SERIAL ***"
-    make install
-    cd ..
-    rm -rf hdf5-${HDF5_VERSION}* hdf5_configure_output.log # Clean up logs too
+    # --- Install HDF5 ---
+    # ... (Simplified HDF5 install as before) ...
 
     # --- Install AMReX ---
     # ... (Simplified AMReX install as before) ...
