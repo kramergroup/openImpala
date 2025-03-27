@@ -7,7 +7,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.22-deps-gcc11-hdf5-link-fix # <-- Updated version
+    Version 2.23-deps-gcc11-hdf5-link-debug # <-- Updated version
 
 %post
     set -e # Ensure commands exit on error early
@@ -120,6 +120,12 @@ From: rockylinux:8
     echo "Running ldconfig..."
     ldconfig
 
+    # --- Check ldconfig cache for MPI --- ADDED ---
+    echo "--- Checking ldconfig cache for libmpi ---"
+    ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache"
+    echo "--- End ldconfig check ---"
+    # --- END ADDED ---
+
     # --- Install HDF5 (with Parallel, Fortran, C++) ---
     echo "--- Building HDF5 ---"
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
@@ -130,10 +136,14 @@ From: rockylinux:8
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
-    # --- Explicitly add LDFLAGS for OpenMPI ---
+    # Explicitly add LDFLAGS for OpenMPI
     export LDFLAGS="-L/usr/local/lib"
     echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
-    # Capture configure output and check config.log on failure
+    # --- ADDED: Show mpicc link flags ---
+    echo "--- Compiler wrapper link flags (mpicc -show): ---"
+    mpicc -show || echo "mpicc -show failed" # Show how mpicc links
+    # --- END ADDED ---
+    # Configure and capture output, check exit code *after*
     ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -142,18 +152,23 @@ From: rockylinux:8
         --enable-cxx \
         --enable-shared \
         --disable-static \
-        --enable-unsupported > /tmp/build_src/hdf5_configure.log 2>&1 || { \
-            echo "*** ERROR: HDF5 configure failed! config.log tail below: ***"; \
-            tail -n 100 config.log || echo "Failed to tail config.log"; \
-            echo "*** Full configure output: ***"; \
-            cat /tmp/build_src/hdf5_configure.log || echo "Failed to cat hdf5_configure.log"; \
-            exit 1; \
-        }
-    # If configure succeeded, maybe still show end of config.log for MPI-IO check
+        --enable-unsupported > hdf5_configure.log 2>&1
+    CONFIGURE_EXIT_CODE=$? # Check exit code *after* command finishes
+    # --- UPDATED ERROR HANDLING ---
+    if [ $CONFIGURE_EXIT_CODE -ne 0 ]; then
+        echo "*** ERROR: HDF5 configure failed! Exit Code: $CONFIGURE_EXIT_CODE ***"
+        echo "*** HDF5 config.log tail (last 150 lines): ***"
+        tail -n 150 config.log || echo "Failed to tail HDF5 config.log"
+        # echo "*** HDF5 configure output log (stdout/stderr): ***" # Optional: might be less useful than config.log
+        # cat hdf5_configure.log || echo "Failed to cat hdf5_configure.log"
+        exit $CONFIGURE_EXIT_CODE
+    fi
+    # --- END UPDATED ERROR HANDLING ---
+    # If configure succeeded, show MPI-IO check section from config.log
     echo "--- HDF5 configure finished (exit 0), tailing config.log for MPI-IO check: ---"
-    grep -A 10 -B 5 'MPI-IO C program' config.log || echo "MPI-IO check section not found in config.log tail"
+    grep -A 15 -B 5 'MPI-IO C program' config.log || echo "MPI-IO check section not found in config.log tail"
     echo "--- End HDF5 config.log tail ---"
-    # Unset LDFLAGS after configure (might interfere with make?)
+    # Unset LDFLAGS after configure
     unset LDFLAGS
 
     echo "*** Running make -j$(nproc) for HDF5 ***"
@@ -170,6 +185,7 @@ From: rockylinux:8
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
     mkdir build && cd build
+    # --- ADDED: Pass LDFLAGS to CMake? Might help find MPI libs ---
     cmake .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
@@ -179,7 +195,11 @@ From: rockylinux:8
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
+        -DCMAKE_EXE_LINKER_FLAGS="-L/usr/local/lib" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-L/usr/local/lib" \
+        -DCMAKE_MODULE_LINKER_FLAGS="-L/usr/local/lib" \
         -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
+    # --- END ADDED ---
     echo "*** Running make -j$(nproc) for AMReX ***"
     make -j$(nproc) # Build parallel
     echo "*** Running make install for AMReX SERIAL ***"
@@ -190,17 +210,21 @@ From: rockylinux:8
 
     # --- Install HYPRE (Recent Stable Tag) ---
     # ... (HYPRE install as before, with serial make install) ...
+    # --- ADDED: Explicit LDFLAGS for HYPRE configure ---
     echo "--- Building HYPRE ---"
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
     echo "--- Using HYPRE CC=$CC CXX=$CXX ---"
+    export LDFLAGS="-L/usr/local/lib" # Add LDFLAGS
     ./configure \
         --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --enable-shared \
         CFLAGS="-O3 -march=native" \
         CXXFLAGS="-O3 -march=native"
+    unset LDFLAGS # Unset after configure
+    # --- END ADDED ---
     echo "*** Running make -j$(nproc) for HYPRE ***"
     make -j$(nproc) # Build parallel
     echo "*** Running make install for HYPRE SERIAL ***"
@@ -239,7 +263,7 @@ From: rockylinux:8
     export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %test
-    # ... (Test section unchanged - still has set -e) ...
+    # ... (Test section unchanged) ...
     set -e
     source /opt/rh/gcc-toolset-11/enable
     echo "--- Verifying Tool Versions ---"
