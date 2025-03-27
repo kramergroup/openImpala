@@ -18,10 +18,10 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.29-deps-gcc11-link-debug-v2 # <-- Updated version (Matches response #57)
+    Version 2.24-deps-gcc11-hdf5-link-debug-v2 # <-- Version from response #55
 
 %post
-    set -e # Ensure commands exit on error early
+    set -e # Ensure dnf commands exit on error early
 
     # Define versions used throughout the build
     export CMAKE_VERSION=3.28.3
@@ -50,7 +50,7 @@ From: rockylinux:8
         which ca-certificates && \
     dnf clean all -y
 
-    # --- Ensure /usr/local/lib is in ld cache path ---
+    # --- Ensure /usr/local/lib is in ld cache path --- (Keep this, might help runtime linking)
     echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
     # --- END ---
 
@@ -130,59 +130,35 @@ From: rockylinux:8
     cd ..
     rm -rf openmpi-${OPENMPI_VERSION}* mpi_install.log
     echo "Running ldconfig..."
-    ldconfig # Should now find /usr/local/lib because of ld.so.conf.d change
+    ldconfig
 
     # --- Check ldconfig cache for MPI ---
     echo "--- Checking ldconfig cache for libmpi ---"
     ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache"
     echo "--- End ldconfig check ---"
 
-    # --- Manual MPI-IO Link Test ---
+    # --- Manual MPI-IO Link Test (Keep explicit -L for robustness check) ---
     echo "--- Attempting manual MPI-IO link test ---"
-    # Create a simple test C file
     cat << EOF > /tmp/build_src/test_mpiio.c
 #include <stdio.h>
 #include <mpi.h>
-int main(int argc, char **argv) {
-    MPI_File fh;
-    MPI_Init(&argc, &argv);
-    if ( MPI_COMM_WORLD == MPI_COMM_NULL ) { fprintf(stderr, "Error: MPI_COMM_WORLD is NULL!\\n"); MPI_Abort(MPI_COMM_WORLD, 1); }
-    int err = MPI_File_open(MPI_COMM_WORLD, "dummy.txt", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
-    if (err != MPI_SUCCESS) { fprintf(stderr, "Error: MPI_File_open failed! Code: %d\\n", err); MPI_Abort(MPI_COMM_WORLD, err); }
-    MPI_File_close(&fh);
-    MPI_Finalize();
-    return 0;
-}
+int main(int argc, char **argv) { MPI_File fh; MPI_Init(&argc, &argv); if(MPI_COMM_WORLD == MPI_COMM_NULL){fprintf(stderr, "COMM_WORLD NULL\\n"); MPI_Abort(MPI_COMM_WORLD,1);} int err=MPI_File_open(MPI_COMM_WORLD, "dummy.txt", MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &fh); if(err!=MPI_SUCCESS){fprintf(stderr,"MPI_File_open failed %d\\n",err); MPI_Abort(MPI_COMM_WORLD,err);} MPI_File_close(&fh); MPI_Finalize(); return 0;}
 EOF
-    # --- ADDED: Detailed check right before mpicc execution ---
-    echo "--- Environment state JUST before mpicc link command ---"
-    echo "Current PATH: $PATH"
-    echo "Running: which mpicc"
-    which mpicc || echo "which mpicc FAILED before manual link test"
-    echo "Running: ls -l $(which mpicc || echo /usr/local/bin/mpicc)" # Show target permissions too
-    echo "Running: hash -r (clearing command hash)"
-    hash -r
-    echo "--- End immediate pre-check ---"
-    # --- END ADDED ---
-
     echo "--- Running: mpicc test_mpiio.c -o test_mpiio -L/usr/local/lib ---"
-    # Capture stderr as well
     mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio -L/usr/local/lib > /tmp/build_src/mpiio_link.log 2>&1
     LINK_EXIT_CODE=$?
     if [ $LINK_EXIT_CODE -ne 0 ]; then
         echo "*** ERROR: Manual MPI-IO link test FAILED! Exit Code: $LINK_EXIT_CODE ***" >&2
-        echo "*** Linker/Command output: ***" >&2 # Clarify message
+        echo "*** Linker/Command output: ***" >&2
         cat /tmp/build_src/mpiio_link.log >&2
         exit $LINK_EXIT_CODE
     else
         echo "--- Manual MPI-IO link test SUCCEEDED ---"
-        # Use rm -f to prevent script exit if dummy file wasn't created
         rm -f /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio /tmp/build_src/mpiio_link.log dummy.txt
     fi
     # --- END Manual MPI-IO Link Test ---
 
-    # --- Install HDF5 ---
-    # Simplified: Rely on mpicc wrapper and ldconfig
+    # --- Install HDF5 (with Parallel, Fortran, C++) ---
     echo "--- Building HDF5 ---"
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
     wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
@@ -192,8 +168,11 @@ EOF
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
-    # No longer explicitly setting LDFLAGS here
-    echo "--- Running HDF5 configure ---"
+    # --- Re-add explicit LDFLAGS for configure ---
+    export LDFLAGS="-L/usr/local/lib"
+    echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
+    # Use robust log capture from response #55
+    set +e
     ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -202,21 +181,34 @@ EOF
         --enable-cxx \
         --enable-shared \
         --disable-static \
-        --enable-unsupported
-    # set -e should handle exit if configure fails now that the manual link test passed
-    echo "*** Running make -j$(nproc) for HDF5 ***"
-    make -j$(nproc)
-    echo "*** Running make install for HDF5 SERIAL ***"
-    make install
-    cd ..
-    rm -rf hdf5-${HDF5_VERSION}*
+        --enable-unsupported > hdf5_configure_output.log 2>&1
+    CONFIGURE_EXIT_CODE=$?
+    if [ $CONFIGURE_EXIT_CODE -ne 0 ]; then
+        echo "*** ERROR: HDF5 configure failed! Exit Code: $CONFIGURE_EXIT_CODE ***" >&2
+        echo "*** HDF5 config.log tail (last 150 lines): ***" >&2
+        tail -n 150 config.log || echo "Failed to tail HDF5 config.log" >&2
+        exit $CONFIGURE_EXIT_CODE
+    fi
+    set -e # Re-enable exit on error
+    echo "--- HDF5 configure finished (exit 0) ---"
+    unset LDFLAGS # Unset after configure
 
-    # --- Install AMReX ---
-    # Simplified: No explicit LDFLAGS/Linker flags in cmake call
+    echo "*** Running make -j$(nproc) for HDF5 ***"
+    make -j$(nproc) # Build parallel
+    echo "*** Running make install for HDF5 SERIAL ***"
+    make install # Install serial
+    cd ..
+    rm -rf hdf5-${HDF5_VERSION}* hdf5_configure_output.log # Clean up log
+
+    # --- Install AMReX (Recent Stable Tag using CMake) ---
     echo "--- Building AMReX ---"
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
-    cd amrex && mkdir build && cd build
+    cd amrex
+    mkdir build && cd build
+    # Add LDFLAGS for CMake link steps
+    export LDFLAGS="-L/usr/local/lib -L${HDF5_INSTALL_PREFIX}/lib"
+    echo "--- Running AMReX cmake with LDFLAGS=${LDFLAGS} ---"
     cmake .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
@@ -226,31 +218,56 @@ EOF
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};/usr/local" # Point to HDF5 and MPI
+        -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
+        -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
+        -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};/usr/local" # Added /usr/local
+    AMREX_CMAKE_EXIT_CODE=$?
+    unset LDFLAGS # Unset after cmake
+    if [ $AMREX_CMAKE_EXIT_CODE -ne 0 ]; then
+        echo "*** ERROR: AMReX cmake failed! Exit Code: $AMREX_CMAKE_EXIT_CODE ***" >&2
+        exit $AMREX_CMAKE_EXIT_CODE
+    fi
     echo "*** Running make -j$(nproc) for AMReX ***"
-    make -j$(nproc)
+    make -j$(nproc) # Build parallel
     echo "*** Running make install for AMReX SERIAL ***"
-    make install
-    cd ../.. && rm -rf amrex
+    make install # Install serial
+    cd ../..
+    rm -rf amrex
 
-    # --- Install HYPRE ---
-    # Simplified: No explicit LDFLAGS
+    # --- Install HYPRE (Recent Stable Tag) ---
     echo "--- Building HYPRE ---"
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
     echo "--- Using HYPRE CC=$CC CXX=$CXX ---"
+    # Add LDFLAGS for HYPRE configure
+    export LDFLAGS="-L/usr/local/lib"
+    echo "--- Running HYPRE configure with LDFLAGS=${LDFLAGS} ---"
+    set +e
     ./configure \
         --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --enable-shared \
         CFLAGS="-O3 -march=native" \
         CXXFLAGS="-O3 -march=native"
+    HYPRE_CONFIGURE_EXIT_CODE=$?
+    if [ $HYPRE_CONFIGURE_EXIT_CODE -ne 0 ]; then
+        echo "*** ERROR: HYPRE configure failed! Exit Code: $HYPRE_CONFIGURE_EXIT_CODE ***" >&2
+        echo "*** HYPRE config.log tail (last 150 lines): ***" >&2
+        tail -n 150 config.log || echo "Failed to tail HYPRE config.log" >&2
+        exit $HYPRE_CONFIGURE_EXIT_CODE
+    fi
+    set -e # Re-enable exit on error
+    echo "--- HYPRE configure finished (exit 0) ---"
+    unset LDFLAGS # Unset after configure
+
     echo "*** Running make -j$(nproc) for HYPRE ***"
-    make -j$(nproc)
+    make -j$(nproc) # Build parallel
     echo "*** Running make install for HYPRE SERIAL ***"
-    make install
-    cd ../.. && rm -rf hypre
+    make install # Install serial
+    cd ../..
+    rm -rf hypre
 
     echo "--- Dependency builds finished using GCC Toolset 11 ---"
 
