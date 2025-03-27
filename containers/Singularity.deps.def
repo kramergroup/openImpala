@@ -6,7 +6,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.31-deps-gcc11-exec-debug # <-- Updated version
+    Version 2.33-deps-gcc11-path-fix-v2 # <-- Updated version
 
 %post
     set -e # Ensure commands exit on error early
@@ -18,9 +18,10 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
 
-    # Add /usr/local/lib to ld cache path
+    # Add ldconfig path
     echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
 
+    # Install base packages
     # ... (dnf installs as before) ...
     dnf update -y; dnf install -y dnf-utils epel-release && dnf update -y
     dnf config-manager --set-enabled powertools
@@ -32,104 +33,143 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         which ca-certificates && \
     dnf clean all -y
 
+    # --- Define Install Prefixes ---
+    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
+    export OPENMPI_INSTALL_PREFIX=/usr/local # Standard prefix
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
+    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+
     # Create a temporary directory for building dependencies
     mkdir /tmp/build_src && cd /tmp/build_src
 
-    # --- Activate GCC Toolset 11 directly ---
+    # --- Activate SCL and Install CMake ---
     echo "=== Sourcing GCC Toolset 11 enable script ==="
     source /opt/rh/gcc-toolset-11/enable
-    # ... (Verification echoes: GCC version, SCL active, PATH) ...
+    echo "--- GCC Version after SCL source: $(gcc --version) ---"
 
-    # Re-export versions
-    # ... (export CMAKE_VERSION etc) ...
-
-    # --- Install CMake ---
-    # ... (CMake install and verification as before) ...
+    echo "--- Installing CMake ---"
+    wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+    mkdir -p ${CMAKE_INSTALL_PREFIX}
+    tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
+    rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+    # --- PREPEND CMake to PATH ---
+    export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
+    echo "--- PATH after CMake prepend: $PATH ---"
+    echo "--- Verifying CMake ---"
+    which cmake && cmake --version || { echo "CMake verification failed!"; exit 1; }
+    echo "--- Verifying GCC ---"
+    which gcc && gcc --version | grep "(GCC) 11." || { echo "GCC 11 verification failed!"; exit 1; }
+    # ---------------------------------
 
     # --- Install OpenMPI ---
-    # ... (OpenMPI configure, make, install log capture, verification as before) ...
+    echo "--- Building OpenMPI ---"
+    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
+    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz && cd openmpi-${OPENMPI_VERSION}
+    export CC=$(which gcc); export CXX=$(which g++); export FC=$(which gfortran)
+    ./configure --prefix=${OPENMPI_INSTALL_PREFIX} \
+        --enable-orterun-prefix-by-default --enable-mpirun-prefix-by-default \
+        --with-verbs --enable-shared --enable-static=no \
+        CC="$CC" CXX="$CXX" FC="$FC"
+    make -j$(nproc) LDFLAGS="-lfl"
+    make install # Serial, No LDFLAGS
+    cd .. && rm -rf openmpi-${OPENMPI_VERSION}*
+
+    # --- Update PATH and ldconfig AFTER OpenMPI install ---
+    export PATH=${OPENMPI_INSTALL_PREFIX}/bin:${PATH} # Prepend MPI bins
     echo "Running ldconfig..."
     ldconfig
+    echo "--- PATH after OpenMPI prepend: $PATH ---"
+    echo "--- Verifying mpicc ---"
+    which mpicc && mpicc --version || { echo "mpicc verification failed!"; exit 1; }
+    ldconfig -p | grep libmpi || echo "WARNING: libmpi still not found in ldconfig cache"
+    # ----------------------------------------------------
 
-    # --- Check ldconfig cache ---
-    echo "--- Checking ldconfig cache for libmpi ---"
-    ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache"
-    echo "--- End ldconfig check ---"
-
-    # --- Manual MPI-IO Link Test ---
+    # --- Manual MPI-IO Test (Rely on PATH and ldconfig) ---
     echo "--- Attempting manual MPI-IO link test ---"
     cat << EOF > /tmp/build_src/test_mpiio.c
 #include <stdio.h>
 #include <mpi.h>
 int main(int argc, char **argv) { MPI_File fh; MPI_Init(&argc, &argv); if(MPI_COMM_WORLD == MPI_COMM_NULL){fprintf(stderr, "COMM_WORLD NULL\\n"); MPI_Abort(MPI_COMM_WORLD,1);} int err=MPI_File_open(MPI_COMM_WORLD, "dummy.txt", MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &fh); if(err!=MPI_SUCCESS){fprintf(stderr,"MPI_File_open failed %d\\n",err); MPI_Abort(MPI_COMM_WORLD,err);} MPI_File_close(&fh); MPI_Finalize(); return 0;}
 EOF
-    # --- ADDED: Detailed check right before mpicc execution ---
-    echo "--- Environment state JUST before mpicc link command ---"
-    echo "Current PATH: $PATH"
-    echo "Running: which mpicc"
-    MPICC_PATH=$(which mpicc || echo "mpicc_not_found")
-    echo "which mpicc result: $MPICC_PATH"
-    if [ "$MPICC_PATH" != "mpicc_not_found" ]; then
-        echo "--- Details for mpicc and target ---"
-        ls -l "$MPICC_PATH" || echo "ls mpicc FAILED"
-        # Assuming mpicc links to opal_wrapper in the same dir
-        OPAL_WRAPPER_PATH=$(dirname "$MPICC_PATH")/opal_wrapper
-        ls -l "$OPAL_WRAPPER_PATH" || echo "ls opal_wrapper FAILED"
-        echo "--- opal_wrapper shebang ---"
-        head -n 1 "$OPAL_WRAPPER_PATH" || echo "head opal_wrapper FAILED"
-        echo "--- opal_wrapper ldd ---"
-        ldd "$OPAL_WRAPPER_PATH" || echo "ldd opal_wrapper FAILED"
-        echo "--- Attempting opal_wrapper --version ---"
-        "$OPAL_WRAPPER_PATH" --version || echo "opal_wrapper --version FAILED (Code: $?)"
-    else
-        echo "Skipping detailed checks as mpicc was not found by which."
-    fi
-    echo "--- End detailed checks ---"
-
-    echo "Running: hash -r (clearing command hash)"
-    hash -r
-
-    echo "--- Running: mpicc test_mpiio.c -o test_mpiio -L/usr/local/lib ---"
-    # Capture stderr as well
-    mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio -L/usr/local/lib > /tmp/build_src/mpiio_link.log 2>&1
-    LINK_EXIT_CODE=$?
-    # --- END ADDED checks ---
-
-    if [ $LINK_EXIT_CODE -ne 0 ]; then
-        echo "*** ERROR: Manual MPI-IO link test FAILED! Exit Code: $LINK_EXIT_CODE ***" >&2
-        echo "*** Linker/Command output: ***" >&2
-        cat /tmp/build_src/mpiio_link.log >&2
-        exit $LINK_EXIT_CODE
-    else
-        echo "--- Manual MPI-IO link test SUCCEEDED ---"
-        rm -f /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio /tmp/build_src/mpiio_link.log dummy.txt
-    fi
-    # --- END Manual MPI-IO Link Test ---
+    echo "--- Running: mpicc test_mpiio.c -o test_mpiio ---"
+    mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio
+    echo "--- Manual MPI-IO link test SUCCEEDED ---" # If we get here, it worked due to set -e
+    rm -f /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio dummy.txt
+    # ----------------------------------------------------
 
     # --- Install HDF5 ---
-    # ... (Simplified HDF5 install as before) ...
+    echo "--- Building HDF5 ---"
+    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
+    tar -xzf hdf5-${HDF5_VERSION}.tar.gz && cd hdf5-${HDF5_VERSION}
+    export CFLAGS="-O3 -march=native"; export CXXFLAGS="${CFLAGS}"; export FCFLAGS="${CFLAGS}"
+    echo "--- Running HDF5 configure ---"
+    ./configure --prefix=${HDF5_INSTALL_PREFIX} --enable-parallel --enable-fortran --enable-fortran2003 --enable-cxx --enable-shared --disable-static --enable-unsupported
+    make -j$(nproc) && make install # Serial install
+    # --- Update PATH AFTER HDF5 install ---
+    export PATH=${HDF5_INSTALL_PREFIX}/bin:${PATH} # Prepend HDF5 bins
+    echo "--- Verifying h5pcc ---"
+    which h5pcc && h5pcc -showconfig || { echo "h5pcc verification failed"; exit 1; }
+    # --------------------------------------
+    cd .. && rm -rf hdf5-${HDF5_VERSION}*
 
     # --- Install AMReX ---
-    # ... (Simplified AMReX install as before) ...
+    echo "--- Building AMReX ---"
+    git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
+    cd amrex && mkdir build && cd build
+    cmake .. -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DAMReX_MPI=ON -DAMReX_OMP=ON -DAMReX_EB=ON \
+        -DCMAKE_CXX_FLAGS="-O3 -march=native" \
+        -DCMAKE_C_FLAGS="-O3 -march=native" \
+        -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};${OPENMPI_INSTALL_PREFIX}" # Use install prefixes
+    make -j$(nproc) && make install # Serial install
+    cd ../.. && rm -rf amrex
 
     # --- Install HYPRE ---
-    # ... (Simplified HYPRE install as before) ...
+    echo "--- Building HYPRE ---"
+    git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
+    cd hypre/src
+    ./configure --prefix=${HYPRE_INSTALL_PREFIX} --with-MPI --enable-shared \
+        CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
+    make -j$(nproc) && make install # Serial install
+    cd ../.. && rm -rf hypre
 
-    # ... (Rest of %post script) ...
+    echo "--- Dependency builds finished using GCC Toolset 11 ---"
+
+    # --- Final Cleanup ---
+    echo "=== Final PATH: $PATH ==="
+    cd / && rm -rf /tmp/build_src
+    dnf clean all
 
 %environment
-    # ... (Environment section unchanged) ...
+    # Define environment referencing the FINAL locations
     source /opt/rh/gcc-toolset-11/enable
     export LC_ALL=C; export LANG=C
     export CMAKE_VERSION=3.28.3; export OPENMPI_VERSION=4.1.6; export HDF5_VERSION=1.12.3; export AMREX_VERSION=23.11; export HYPRE_VERSION=v2.30.0
-    export CMAKE_HOME=/opt/cmake/${CMAKE_VERSION}; export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}; export AMREX_HOME=/opt/amrex/${AMREX_VERSION}; export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}; export H5CPP_HOME=${HDF5_HOME}; export TIFF_HOME=/usr
-    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
-    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${TIFF_HOME}/lib64:/usr/local/lib:${LD_LIBRARY_PATH}
-    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:${TIFF_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
+    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION} # Keep definition consistent
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
+    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+    # Define HOME vars based on install prefixes
+    export CMAKE_HOME=${CMAKE_INSTALL_PREFIX}
+    export HDF5_HOME=${HDF5_INSTALL_PREFIX}
+    export AMREX_HOME=${AMREX_INSTALL_PREFIX}
+    export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
+    export H5CPP_HOME=${HDF5_HOME}
+    export TIFF_HOME=/usr
+    # Set PATH using installed locations. Prepending ensures they take precedence.
+    # Sourcing SCL should handle its own paths correctly.
+    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:${AMREX_HOME}/bin:${HYPRE_HOME}/bin:/usr/local/bin:${PATH}
+    # Set LD_LIBRARY_PATH using installed locations
+    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${TIFF_HOME}/lib64:${LD_LIBRARY_PATH}
+    # Set CMAKE_PREFIX_PATH using installed locations
+    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:/usr/local:${TIFF_HOME}:${CMAKE_PREFIX_PATH}
     export OMPI_MCA_btl_vader_single_copy_mechanism=none; export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %test
-    # ... (Test section unchanged) ...
+    # ... (Test section unchanged, relies on %environment setup) ...
     set -e
     source /opt/rh/gcc-toolset-11/enable
     echo "--- Verifying Tool Versions ---"; echo "--- Contents of /usr/local/bin at start of %test ---"; ls -l /usr/local/bin
