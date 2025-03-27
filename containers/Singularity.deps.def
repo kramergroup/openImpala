@@ -102,20 +102,21 @@ From: rockylinux:8
         fi
 
         # --- BEGIN Enhanced OpenMPI Install Verification ---
-        echo "*** START MPICC CHECK ***" # Changed Markers
-        ls -l /usr/local/bin/mpicc || echo "*** ls /usr/local/bin/mpicc command failed (file likely missing) ***" # Changed Markers
+        echo "*** START MPICC CHECK ***"
+        # FIX: Removed parentheses from the echo string below
+        ls -l /usr/local/bin/mpicc || echo "*** ls /usr/local/bin/mpicc command failed - file likely missing ***"
         if [ -f /usr/local/bin/mpicc ]; then
-            echo "*** OK: MPICC FILE EXISTS ***" # Changed Markers
-            which mpicc || echo "*** which mpicc command failed? ***" # Changed Markers
-            /usr/local/bin/mpicc --version || echo "*** mpicc --version command failed? ***" # Changed Markers
+            echo "*** OK: MPICC FILE EXISTS ***"
+            which mpicc || echo "*** which mpicc command failed? ***"
+            /usr/local/bin/mpicc --version || echo "*** mpicc --version command failed? ***"
         else
-            echo "*** !! MPICC FILE NOT FOUND !! ***" # Changed Markers
-            echo "*** Contents of /usr/local/bin: ***" # Changed Markers
-            ls -l /usr/local/bin || echo "*** ls /usr/local/bin FAILED ***" # Changed Markers
-            echo "*** EXITING SCRIPT DUE TO MISSING MPICC ***" # Changed Markers
+            echo "*** !! MPICC FILE NOT FOUND !! ***"
+            echo "*** Contents of /usr/local/bin: ***"
+            ls -l /usr/local/bin || echo "*** ls /usr/local/bin FAILED ***"
+            echo "*** EXITING SCRIPT DUE TO MISSING MPICC ***"
             exit 1 # Force failure here if mpicc is missing
         fi
-        echo "*** END MPICC CHECK ***" # Changed Markers
+        echo "*** END MPICC CHECK ***"
         # --- END Enhanced OpenMPI Install Verification ---
 
         cd ..
