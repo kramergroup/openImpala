@@ -3,14 +3,25 @@ From: rockylinux:8
 
 %help
     Container providing the build environment and runtime dependencies for OpenImpala.
-    # ... (rest of help section) ...
+
+    Installs:
+      * Rocky Linux 8 Base OS & Updates
+      * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
+      * OpenMPI 4.1.6 (built from source, with IB support, using GCC 11)
+      * CMake 3.28.3 (binary distribution)
+      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11 & OpenMPI)
+      * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
+      * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
+      * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
+
+    This container is intended to be used as a base or cache for building OpenImpala itself.
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.24-deps-gcc11-hdf5-link-debug-v2 # <-- Updated version
+    Version 2.25-deps-gcc11-manual-mpiio-test # <-- Updated version
 
 %post
-    set -e # Ensure dnf commands exit on error early
+    set -e # Ensure commands exit on error early
 
     # Define versions used throughout the build
     export CMAKE_VERSION=3.28.3
@@ -20,7 +31,6 @@ From: rockylinux:8
     export HYPRE_VERSION=v2.30.0
 
     # Update and install base utilities & repositories
-    # ... (dnf commands as before) ...
     dnf update -y
     dnf install -y dnf-utils
     dnf config-manager --set-enabled powertools
@@ -125,7 +135,54 @@ From: rockylinux:8
     ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache"
     echo "--- End ldconfig check ---"
 
+    # --- ADDED: Manual MPI-IO Link Test ---
+    echo "--- Attempting manual MPI-IO link test ---"
+    # Create a simple test C file
+    cat << EOF > /tmp/build_src/test_mpiio.c
+#include <stdio.h>
+#include <mpi.h>
+int main(int argc, char **argv) {
+    MPI_File fh;
+    MPI_Init(&argc, &argv);
+    if ( MPI_COMM_WORLD == MPI_COMM_NULL ) {
+        fprintf(stderr, "Error: MPI_COMM_WORLD is NULL after MPI_Init!\\n");
+        MPI_Abort(MPI_COMM_WORLD, 1); // Use MPI_Abort for MPI errors
+    }
+    // Use a dummy file name, create/write mode
+    int err = MPI_File_open(MPI_COMM_WORLD, "dummy_mpiio_test.txt", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+    if (err != MPI_SUCCESS) {
+        fprintf(stderr, "Error: MPI_File_open failed! Error code: %d\\n", err);
+        char err_string[MPI_MAX_ERROR_STRING];
+        int len;
+        MPI_Error_string(err, err_string, &len);
+        fprintf(stderr, "%s\\n", err_string);
+        MPI_Abort(MPI_COMM_WORLD, err);
+    } else {
+         MPI_File_close(&fh);
+    }
+    MPI_Finalize();
+    return 0;
+}
+EOF
+    # Attempt to compile and link using mpicc with explicit LDFLAGS
+    echo "--- Running: mpicc test_mpiio.c -o test_mpiio -L/usr/local/lib ---"
+    # Capture stderr as well
+    mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio -L/usr/local/lib > /tmp/build_src/mpiio_link.log 2>&1
+    LINK_EXIT_CODE=$?
+    if [ $LINK_EXIT_CODE -ne 0 ]; then
+        echo "*** ERROR: Manual MPI-IO link test FAILED! Exit Code: $LINK_EXIT_CODE ***" >&2
+        echo "*** Linker output: ***" >&2
+        cat /tmp/build_src/mpiio_link.log || echo "Failed to cat mpiio_link.log" >&2
+        # Exit here as HDF5 configure will also fail
+        exit $LINK_EXIT_CODE
+    else
+        echo "--- Manual MPI-IO link test SUCCEEDED ---"
+        rm /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio /tmp/build_src/mpiio_link.log dummy_mpiio_test.txt
+    fi
+    # --- END Manual MPI-IO Link Test ---
+
     # --- Install HDF5 (with Parallel, Fortran, C++) ---
+    # Rely on set -e and the manual test above
     echo "--- Building HDF5 ---"
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
     wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
@@ -135,13 +192,9 @@ From: rockylinux:8
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
-    export LDFLAGS="-L/usr/local/lib" # Explicitly add LDFLAGS for OpenMPI libs
+    # Set LDFLAGS just in case configure uses it differently than mpicc
+    export LDFLAGS="-L/usr/local/lib"
     echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
-    echo "--- Compiler wrapper link flags (mpicc -show): ---"
-    mpicc -show || echo "mpicc -show failed"
-
-    # --- UPDATED Configure block ---
-    set +e # Temporarily disable exit on error
     ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -151,38 +204,21 @@ From: rockylinux:8
         --enable-shared \
         --disable-static \
         --enable-unsupported
-    CONFIGURE_EXIT_CODE=$? # Capture exit code
-    set -e # Re-enable exit on error
-
-    # Check exit code and print logs if failed
-    if [ $CONFIGURE_EXIT_CODE -ne 0 ]; then
-        echo "*** ERROR: HDF5 configure failed! Exit Code: $CONFIGURE_EXIT_CODE ***" >&2 # Ensure error message is visible
-        echo "*** HDF5 config.log tail (last 150 lines): ***" >&2
-        tail -n 150 config.log || echo "Failed to tail HDF5 config.log" >&2
-        exit $CONFIGURE_EXIT_CODE # Exit with the configure error code
-    fi
-    # --- END UPDATED Configure block ---
-
-    echo "--- HDF5 configure finished (exit 0) ---"
-    # Unset LDFLAGS if not needed for make (safer)
+    # If configure fails, set -e should catch it now that the link test passed
     unset LDFLAGS
-
     echo "*** Running make -j$(nproc) for HDF5 ***"
-    make -j$(nproc) # Build parallel
+    make -j$(nproc)
     echo "*** Running make install for HDF5 SERIAL ***"
-    make install # Install serial
+    make install
     cd ..
-    rm -rf hdf5-${HDF5_VERSION}* # Remove source dir only after successful install
+    rm -rf hdf5-${HDF5_VERSION}*
 
-    # --- Install AMReX (Recent Stable Tag using CMake) ---
+    # --- Install AMReX ---
     echo "--- Building AMReX ---"
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
     mkdir build && cd build
-    # Add LDFLAGS for CMake link steps
-    export LDFLAGS="-L/usr/local/lib -L${HDF5_INSTALL_PREFIX}/lib"
-    echo "--- Running AMReX cmake with LDFLAGS=${LDFLAGS} ---"
     cmake .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
@@ -192,55 +228,32 @@ From: rockylinux:8
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
-        -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
-        -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};/usr/local" # Added /usr/local
-    AMREX_CMAKE_EXIT_CODE=$?
-    unset LDFLAGS # Unset after cmake
-    if [ $AMREX_CMAKE_EXIT_CODE -ne 0 ]; then
-        echo "*** ERROR: AMReX cmake failed! Exit Code: $AMREX_CMAKE_EXIT_CODE ***" >&2
-        # Optionally check CMake logs here if they exist
-        exit $AMREX_CMAKE_EXIT_CODE
-    fi
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};/usr/local" # Point to HDF5 and MPI
+    # set -e should handle cmake failure
     echo "*** Running make -j$(nproc) for AMReX ***"
-    make -j$(nproc) # Build parallel
+    make -j$(nproc)
     echo "*** Running make install for AMReX SERIAL ***"
-    make install # Install serial
+    make install
     cd ../..
     rm -rf amrex
 
-    # --- Install HYPRE (Recent Stable Tag) ---
+    # --- Install HYPRE ---
     echo "--- Building HYPRE ---"
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
     echo "--- Using HYPRE CC=$CC CXX=$CXX ---"
-    # Add LDFLAGS for HYPRE configure
-    export LDFLAGS="-L/usr/local/lib"
-    echo "--- Running HYPRE configure with LDFLAGS=${LDFLAGS} ---"
-    set +e # Temporarily disable exit on error
     ./configure \
         --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --enable-shared \
         CFLAGS="-O3 -march=native" \
         CXXFLAGS="-O3 -march=native"
-    HYPRE_CONFIGURE_EXIT_CODE=$?
-    set -e # Re-enable exit on error
-    if [ $HYPRE_CONFIGURE_EXIT_CODE -ne 0 ]; then
-        echo "*** ERROR: HYPRE configure failed! Exit Code: $HYPRE_CONFIGURE_EXIT_CODE ***" >&2
-        echo "*** HYPRE config.log tail (last 150 lines): ***" >&2
-        tail -n 150 config.log || echo "Failed to tail HYPRE config.log" >&2
-        exit $HYPRE_CONFIGURE_EXIT_CODE
-    fi
-    echo "--- HYPRE configure finished (exit 0) ---"
-    unset LDFLAGS # Unset after configure
-
+    # set -e should handle configure failure
     echo "*** Running make -j$(nproc) for HYPRE ***"
-    make -j$(nproc) # Build parallel
+    make -j$(nproc)
     echo "*** Running make install for HYPRE SERIAL ***"
-    make install # Install serial
+    make install
     cd ../..
     rm -rf hypre
 
