@@ -47,7 +47,7 @@ jobs:
           path: dependency_image.sif
           key: ${{ steps.cache-key-step.outputs.key }}
           # restore-keys: | # Optional: allow restoring slightly older caches
-          #   deps-sif-cache-${{ runner.os }}-
+          #    deps-sif-cache-${{ runner.os }}-
 
       - name: Build Dependency SIF Image (if cache miss)
         # This step runs only if the SIF file wasn't found in the cache
@@ -64,8 +64,8 @@ jobs:
           sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
           # Check build exit status IMMEDIATELY
           if [ $? -ne 0 ]; then
-             echo "Error: Apptainer SIF build failed."
-             exit 1 # Exit if build failed
+              echo "Error: Apptainer SIF build failed."
+              exit 1 # Exit if build failed
           fi
           echo "Apptainer SIF build successful."
       # No chown needed for single SIF file caching
@@ -104,9 +104,9 @@ jobs:
           echo "Dependency SIF image restored successfully."
           ls -lh ./dependency_image.sif # Show file info
 
-- name: Build OpenImpala using Dependency SIF (with make debug)
-        id: make_build
-        continue-on-error: true
+      - name: Build OpenImpala using Dependency SIF (with make debug)
+        id: make_build # Give step an id
+        continue-on-error: true # Allow step to fail so logs can be uploaded
         run: |
           # --- START DEBUG STEP ---
           echo "DEBUG: Printing environment inside container..."
@@ -153,5 +153,5 @@ jobs:
       #   if: steps.make_build.outcome == 'success'
       #   run: |
       #     sudo apptainer exec --bind $PWD:/src \
-      #       ./dependency_image.sif \
-      #       bash -c 'cd /src/build/tests && ./tSomeTest'
+      #        ./dependency_image.sif \
+      #        bash -c 'cd /src/build/tests && ./tSomeTest'
