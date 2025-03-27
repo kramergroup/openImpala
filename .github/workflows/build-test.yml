@@ -47,7 +47,7 @@ jobs:
           path: dependency_image.sif
           key: ${{ steps.cache-key-step.outputs.key }}
           # restore-keys: | # Optional: allow restoring slightly older caches
-          #    deps-sif-cache-${{ runner.os }}-
+          #   deps-sif-cache-${{ runner.os }}-
 
       - name: Build Dependency SIF Image (if cache miss)
         # This step runs only if the SIF file wasn't found in the cache
@@ -108,23 +108,51 @@ jobs:
         id: make_build # Give step an id
         continue-on-error: true # Allow step to fail so logs can be uploaded
         run: |
-          # --- START DEBUG STEP ---
-          echo "DEBUG: Printing environment inside container..."
-          # Use brackets to clearly show start/end of variable values
-          sudo apptainer exec --bind $PWD:/src ./dependency_image.sif bash -c 'echo "DEBUG AMREX_HOME=[$AMREX_HOME]"; echo "DEBUG HYPRE_HOME=[$HYPRE_HOME]"; echo "DEBUG HDF5_HOME=[$HDF5_HOME]"; echo "DEBUG H5CPP_HOME=[$H5CPP_HOME]"; echo "DEBUG TIFF_HOME=[$TIFF_HOME]"'
+          # --- START ENHANCED DEBUG STEP ---
+          echo "DEBUG: Printing environment inside container before make..."
+          sudo apptainer exec --bind $PWD:/src ./dependency_image.sif bash -c ' \
+            echo "--- USER & GROUP ---"; \
+            id; \
+            echo "--- SCRIPT SHELL ---"; \
+            ps -p $$ -o comm=; \
+            echo "--- SCL ACTIVE? (Look for _SCL_ variables) ---"; \
+            env | grep SCL || echo "No SCL variables found"; \
+            echo "--- FULL PATH ---"; \
+            echo "$PATH"; \
+            echo "--- which mpicc ---"; \
+            which mpicc || echo "mpicc NOT FOUND"; \
+            echo "--- which mpic++ ---"; \
+            which mpic++ || echo "mpic++ NOT FOUND"; \
+            echo "--- mpic++ --version ---"; \
+            mpic++ --version || echo "mpic++ --version FAILED"; \
+            echo "--- Contents of /usr/local/bin ---"; \
+            ls -l /usr/local/bin || echo "ls /usr/local/bin FAILED"; \
+            echo "--- Expected Lib Dirs ---"; \
+            ls -ld /opt/amrex/23.11/lib /opt/hypre/v2.30.0/lib /opt/hdf5/1.12.3/lib /usr/local/lib || echo "ls lib dirs FAILED"; \
+            echo "--- LD_LIBRARY_PATH ---"; \
+            echo "$LD_LIBRARY_PATH"; \
+            echo "--- Environment Variables ---"; \
+            echo "DEBUG AMREX_HOME=[$AMREX_HOME]"; \
+            echo "DEBUG HYPRE_HOME=[$HYPRE_HOME]"; \
+            echo "DEBUG HDF5_HOME=[$HDF5_HOME]"; \
+            echo "DEBUG H5CPP_HOME=[$H5CPP_HOME]"; \
+            echo "DEBUG TIFF_HOME=[$TIFF_HOME]"; \
+          '
           echo "DEBUG: Environment print finished."
-          # --- END DEBUG STEP ---
+          # --- END ENHANCED DEBUG STEP ---
 
-          echo "Building OpenImpala using SIF image environment (with make debug)..."
+          echo "Building OpenImpala using SIF image environment (with make clean)..."
           # Execute 'make clean' first
           sudo apptainer exec --bind $PWD:/src \
             ./dependency_image.sif \
-            bash -c 'cd /src && make clean'
+            bash -c 'cd /src && make clean' # Assuming clean doesn't need SCL/MPI immediately
+
           # Execute 'make -d', redirecting all output to log file
           echo "Running make -d to capture debug output..."
           sudo apptainer exec --bind $PWD:/src \
             ./dependency_image.sif \
-            bash -c 'cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1
+            bash -c 'cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1 # Make command itself
+
           # Capture the exit code of make -d
           MAKE_EXIT_CODE=$?
           echo "Make exit code: $MAKE_EXIT_CODE"
@@ -153,5 +181,5 @@ jobs:
       #   if: steps.make_build.outcome == 'success'
       #   run: |
       #     sudo apptainer exec --bind $PWD:/src \
-      #        ./dependency_image.sif \
-      #        bash -c 'cd /src/build/tests && ./tSomeTest'
+      #         ./dependency_image.sif \
+      #         bash -c 'cd /src/build/tests && ./tSomeTest'
