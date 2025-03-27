@@ -33,7 +33,7 @@ vpath %.F90 $(SRC_DIR)
 # Targets
 all: tests main
 
-main: builddirs $(APP_DIR)/Diffusion
+main: builddirs $(APP_DIR)/Diffusion $(APP_DIR)/REVCalculator
 
 tests: builddirs $(TST_DIR)/tTiffReader $(TST_DIR)/tTiffStackReader $(TST_DIR)/tDatReader $(TST_DIR)/tVolumeFraction $(TST_DIR)/tTortuosity $(TST_DIR)/tHDF5Reader
 
@@ -50,6 +50,10 @@ endef
 $(APP_DIR)/Diffusion: Diffusion.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o build/io/DatReader.o build/io/HDF5Reader.o build/io/TiffStackReader.o
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
+	
+$(APP_DIR)/REVCalculator: REVCalculator.cpp $(addprefix build/props/,TortuosityDirect.o TortuosityHypre.o Tortuosity_filcc.o Tortuosity_poisson_3d.o TortuosityHypreFill.o VolumeFraction.o) build/io/TiffReader.o build/io/CathodeWrite.o build/io/DatReader.o build/io/HDF5Reader.o build/io/TiffStackReader.o
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)	
 
 # Executable tests
 $(TST_DIR)/tTiffReader: tTiffReader.cpp build/io/TiffReader.o
