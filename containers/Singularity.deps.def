@@ -7,9 +7,9 @@ From: rockylinux:8
     Installs:
       * Rocky Linux 8 Base OS & Updates
       * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
-      * OpenMPI 4.1.6 (built from source, with IB support)
+      * OpenMPI 4.1.6 (built from source, with IB support, using GCC 11)
       * CMake 3.28.3 (binary distribution)
-      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11)
+      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11 & OpenMPI)
       * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
       * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
       * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.12-deps-gcc11-test-ls # <-- UPDATE AS NEEDED (Incremented for test ls)
+    Version 2.13-deps-gcc11-explicit-cc # <-- UPDATE AS NEEDED (Incremented for explicit compiler set)
 
 %post
     # Define versions used throughout the build
@@ -83,16 +83,27 @@ From: rockylinux:8
         wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
         tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
         cd openmpi-${OPENMPI_VERSION}
+
+        # Explicitly set compilers from the SCL environment for ./configure
+        export CC=$(which gcc)
+        export CXX=$(which g++)
+        export FC=$(which gfortran)
+        echo "*** Using CC=$CC ***"
+        echo "*** Using CXX=$CXX ***"
+        echo "*** Using FC=$FC ***"
+
         ./configure \
             --prefix=${OPENMPI_INSTALL_PREFIX} \
             --enable-orterun-prefix-by-default \
             --enable-mpirun-prefix-by-default \
             --with-verbs \
             --enable-shared \
-            --enable-static=no
+            --enable-static=no \
+            CC="$CC" CXX="$CXX" FC="$FC" # Pass explicitly too
+
         # Add LDFLAGS="-lfl" to make and make install (Needed for flex interaction)
         make -j$(nproc) LDFLAGS="-lfl"
-        make install LDFLAGS="-lfl"  # <-- PUT LDFLAGS BACK HERE
+        make install LDFLAGS="-lfl" # Keep LDFLAGS here for now
 
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
         echo "*** OpenMPI '\''make install'\'' finished with exit code: $MPI_INSTALL_EXIT_CODE ***"
@@ -128,10 +139,8 @@ From: rockylinux:8
         wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
         tar -xzf hdf5-${HDF5_VERSION}.tar.gz
         cd hdf5-${HDF5_VERSION}
-        # Ensure MPI wrappers use the toolset compilers
-        export CC=mpicc
-        export CXX=mpicxx
-        export FC=mpif90
+        # Ensure MPI wrappers use the toolset compilers (CC/CXX/FC should still be set from OpenMPI section)
+        echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---" # Add verification
         export CFLAGS="-O3 -march=native"
         export CXXFLAGS="${CFLAGS}"
         export FCFLAGS="${CFLAGS}"
@@ -176,8 +185,8 @@ From: rockylinux:8
         git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
         cd hypre/src
         # Ensure configure uses the MPI wrappers (which use the toolset GCC)
-        export CC=mpicc
-        export CXX=mpicxx
+        # CC/CXX should still be set from OpenMPI section
+        echo "--- Using HYPRE CC=$CC CXX=$CXX ---" # Add verification
         ./configure \
             --prefix=${HYPRE_INSTALL_PREFIX} \
             --with-MPI \
@@ -244,7 +253,7 @@ From: rockylinux:8
     # Verify tools are found and versions are reasonable
     echo "--- Verifying Tool Versions ---"
 
-    # --- ADD LS COMMAND HERE ---
+    # --- Contents of /usr/local/bin at start of %test ---
     echo "--- Contents of /usr/local/bin at start of %test ---"
     ls -l /usr/local/bin || echo "Failed to list /usr/local/bin"
     echo "--- End of /usr/local/bin listing ---"
