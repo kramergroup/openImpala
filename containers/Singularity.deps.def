@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.11-deps-gcc11-mpichk3-set-e # <-- UPDATE AS NEEDED (Incremented for syntax fix)
+    Version 2.12-deps-gcc11-test-ls # <-- UPDATE AS NEEDED (Incremented for test ls)
 
 %post
     # Define versions used throughout the build
@@ -95,15 +95,14 @@ From: rockylinux:8
         # Try install WITHOUT LDFLAGS
         make install
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
-        echo "*** OpenMPI '\''make install'\'' finished with exit code: $MPI_INSTALL_EXIT_CODE ***" # Changed Markers
+        echo "*** OpenMPI '\''make install'\'' finished with exit code: $MPI_INSTALL_EXIT_CODE ***"
         if [ $MPI_INSTALL_EXIT_CODE -ne 0 ]; then
-            echo "*** ERROR: OpenMPI '\''make install'\'' failed! Exit code: $MPI_INSTALL_EXIT_CODE ***" # Changed Markers
+            echo "*** ERROR: OpenMPI '\''make install'\'' failed! Exit code: $MPI_INSTALL_EXIT_CODE ***"
             exit $MPI_INSTALL_EXIT_CODE
         fi
 
         # --- BEGIN Enhanced OpenMPI Install Verification ---
         echo "*** START MPICC CHECK ***"
-        # FIX: Removed parentheses from the echo string below
         ls -l /usr/local/bin/mpicc || echo "*** ls /usr/local/bin/mpicc command failed - file likely missing ***"
         if [ -f /usr/local/bin/mpicc ]; then
             echo "*** OK: MPICC FILE EXISTS ***"
@@ -244,6 +243,13 @@ From: rockylinux:8
 
     # Verify tools are found and versions are reasonable
     echo "--- Verifying Tool Versions ---"
+
+    # --- ADD LS COMMAND HERE ---
+    echo "--- Contents of /usr/local/bin at start of %test ---"
+    ls -l /usr/local/bin || echo "Failed to list /usr/local/bin"
+    echo "--- End of /usr/local/bin listing ---"
+    # --- END ADDED LS COMMAND ---
+
     which mpicc && mpicc --version || exit 1
     which cmake && cmake --version || exit 1
     which gcc && gcc --version | grep "(GCC) 11." || (echo "ERROR: GCC is not version 11!"; gcc --version; exit 1)
