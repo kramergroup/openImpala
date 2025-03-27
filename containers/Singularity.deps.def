@@ -3,11 +3,22 @@ From: rockylinux:8
 
 %help
     Container providing the build environment and runtime dependencies for OpenImpala.
-    # ... (rest of help section) ...
+
+    Installs:
+      * Rocky Linux 8 Base OS & Updates
+      * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
+      * OpenMPI 4.1.6 (built from source, with IB support, using GCC 11)
+      * CMake 3.28.3 (binary distribution)
+      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11 & OpenMPI)
+      * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
+      * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
+      * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
+
+    This container is intended to be used as a base or cache for building OpenImpala itself.
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.18-deps-gcc11-final-fixes-v2 # <-- Updated version
+    Version 2.19-deps-gcc11-mpi-log-capture # <-- Updated version
 
 %post
     set -e # Ensure dnf commands exit on error early
@@ -91,14 +102,38 @@ From: rockylinux:8
             --enable-shared \
             --enable-static=no \
             CC="$CC" CXX="$CXX" FC="$FC"
+
+        # --- Add check for config.log ---
+        if [ -f config.log ]; then
+            echo "--- Found config.log, tailing last 50 lines: ---"
+            tail -n 50 config.log || echo "Tailing config.log failed"
+            echo "--- End config.log tail ---"
+        else
+            echo "--- config.log not found after configure ---"
+        fi
+        # --- End check for config.log ---
+
         echo "*** Running make -j$(nproc) ***"
         make -j$(nproc) LDFLAGS="-lfl" # Build parallel
-        echo "*** Running make install SERIAL NO LDFLAGS ***" # Corrected echo
-        make install # Install serial, NO LDFLAGS
+
+        echo "*** Running make install SERIAL NO LDFLAGS (capturing output) ***"
+        # Capture output and handle potential failure
+        make install > /tmp/build_src/mpi_install.log 2>&1 || { \
+            echo "*** ERROR: make install returned non-zero status! Log below: ***"; \
+            cat /tmp/build_src/mpi_install.log; \
+            exit 1; \
+        }
+        # If make install succeeded (exit 0), print the log anyway
+        echo "*** make install finished (exit 0), install log contents: ***"
+        cat /tmp/build_src/mpi_install.log || echo "Failed to cat mpi_install.log"
+        echo "*** End make install log ***"
+
         echo "*** Verifying mpicc existence immediately after install ***"
-        ls -l /usr/local/bin/mpicc # Check existence
+        ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
+
         cd ..
-        rm -rf openmpi-${OPENMPI_VERSION}*
+        # Clean up log file too
+        rm -rf openmpi-${OPENMPI_VERSION}* mpi_install.log
         ldconfig # Update library cache
 
         # --- Install HDF5 (with Parallel, Fortran, C++) ---
@@ -122,7 +157,7 @@ From: rockylinux:8
             --enable-unsupported
         echo "*** Running make -j$(nproc) for HDF5 ***"
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for HDF5 SERIAL ***" # Corrected echo
+        echo "*** Running make install for HDF5 SERIAL ***"
         make install # Install serial
         cd ..
         rm -rf hdf5-${HDF5_VERSION}*
@@ -145,7 +180,7 @@ From: rockylinux:8
             -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
         echo "*** Running make -j$(nproc) for AMReX ***"
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for AMReX SERIAL ***" # Corrected echo
+        echo "*** Running make install for AMReX SERIAL ***"
         make install # Install serial
         cd ../..
         rm -rf amrex
@@ -164,7 +199,7 @@ From: rockylinux:8
             CXXFLAGS="-O3 -march=native"
         echo "*** Running make -j$(nproc) for HYPRE ***"
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for HYPRE SERIAL ***" # Corrected echo
+        echo "*** Running make install for HYPRE SERIAL ***"
         make install # Install serial
         cd ../..
         rm -rf hypre
