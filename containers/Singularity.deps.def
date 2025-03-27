@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.8-deps-gcc11-mpichk # <-- UPDATE AS NEEDED (Incremented for MPI check)
+    Version 2.9-deps-gcc11-mpichk-set-e # <-- UPDATE AS NEEDED (Incremented for set -e)
 
 %post
     # Define versions used throughout the build
@@ -57,6 +57,8 @@ From: rockylinux:8
     # --- Enable GCC Toolset 11 and Build Dependencies inside this environment ---
     echo "=== Enabling GCC Toolset 11 for dependency builds ==="
     scl enable gcc-toolset-11 -- bash -c '
+        set -e # Exit immediately if any command fails
+
         # Re-export versions needed within this subshell
         export CMAKE_VERSION=3.28.3
         export OPENMPI_VERSION=4.1.6
@@ -76,7 +78,6 @@ From: rockylinux:8
         cmake --version
 
         # --- Install OpenMPI (Recent Version) ---
-        # Needs to be built with the same compiler family (GCC 11 here) used for other libs
         echo "--- Building OpenMPI ---"
         export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
         wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
@@ -89,24 +90,10 @@ From: rockylinux:8
             --with-verbs \
             --enable-shared \
             --enable-static=no
-        # Add LDFLAGS="-lfl" to make and make install (Needed for flex interaction)
+        # Add LDFLAGS="-lfl" to make (Needed for flex interaction)
         make -j$(nproc) LDFLAGS="-lfl"
-        make install LDFLAGS="-lfl"
-# --- BEGIN OpenMPI Install Verification ---
-echo "--- Verifying mpicc installation ---"
-ls -l /usr/local/bin/mpicc
-if [ -f /usr/local/bin/mpicc ]; then
-    echo "OK: mpicc found in /usr/local/bin."
-    which mpicc
-    /usr/local/bin/mpicc --version # Also try running it
-else
-    echo "ERROR: mpicc NOT FOUND in /usr/local/bin after install!"
-    echo "Contents of /usr/local/bin:"
-    ls -l /usr/local/bin
-    exit 1 # Force failure here if mpicc is missing
-fi
-echo "--- Finished mpicc installation verification ---"
-# --- END OpenMPI Install Verification ---
+        # Try install WITHOUT LDFLAGS
+        make install
 
         # --- BEGIN OpenMPI Install Verification ---
         echo "--- Verifying mpicc installation ---"
