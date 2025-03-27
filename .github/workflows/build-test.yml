@@ -61,11 +61,13 @@ jobs:
           fi
           echo "Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
           # Build the SIF file directly using sudo
-          sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
+          # Increased timeout for potentially long builds
+          sudo apptainer build --timeout 3600 "$TARGET_SIF" "$RECIPE_FILE"
           # Check build exit status IMMEDIATELY
-          if [ $? -ne 0 ]; then
-              echo "Error: Apptainer SIF build failed."
-              exit 1 # Exit if build failed
+          BUILD_EXIT_CODE=$?
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+              echo "Error: Apptainer SIF build failed with exit code $BUILD_EXIT_CODE."
+              exit $BUILD_EXIT_CODE # Exit if build failed
           fi
           echo "Apptainer SIF build successful."
       # No chown needed for single SIF file caching
@@ -142,16 +144,16 @@ jobs:
           # --- END ENHANCED DEBUG STEP ---
 
           echo "Building OpenImpala using SIF image environment (with make clean)..."
-          # Execute 'make clean' first
+          # Execute 'make clean' first - Explicitly source SCL
           sudo apptainer exec --bind $PWD:/src \
             ./dependency_image.sif \
-            bash -c 'cd /src && make clean' # Assuming clean doesn't need SCL/MPI immediately
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make clean' # Added source
 
-          # Execute 'make -d', redirecting all output to log file
+          # Execute 'make -d' - Explicitly source SCL
           echo "Running make -d to capture debug output..."
           sudo apptainer exec --bind $PWD:/src \
             ./dependency_image.sif \
-            bash -c 'cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1 # Make command itself
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1 # Added source
 
           # Capture the exit code of make -d
           MAKE_EXIT_CODE=$?
@@ -182,4 +184,4 @@ jobs:
       #   run: |
       #     sudo apptainer exec --bind $PWD:/src \
       #         ./dependency_image.sif \
-      #         bash -c 'cd /src/build/tests && ./tSomeTest'
+      #         bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src/build/tests && ./tSomeTest' # Also source SCL here if needed
