@@ -7,7 +7,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.16-deps-gcc11-serial-installs-fixed-test # <-- Updated version
+    Version 2.17-deps-gcc11-final-fixes # <-- Updated version
 
 %post
     set -e # Ensure dnf commands exit on error early
@@ -93,7 +93,7 @@ From: rockylinux:8
             CC="$CC" CXX="$CXX" FC="$FC"
         echo "*** Running make -j$(nproc) ***"
         make -j$(nproc) LDFLAGS="-lfl" # Build parallel
-        echo "*** Running make install (SERIAL, NO LDFLAGS) ***"
+        echo "*** Running make install SERIAL NO LDFLAGS ***" # Corrected echo line
         make install # Install serial, NO LDFLAGS
         echo "*** Verifying mpicc existence immediately after install ***"
         ls -l /usr/local/bin/mpicc # Check existence
