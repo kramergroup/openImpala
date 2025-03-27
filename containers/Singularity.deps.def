@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.9-deps-gcc11-mpichk-set-e # <-- UPDATE AS NEEDED (Incremented for set -e)
+    Version 2.10-deps-gcc11-mpichk2-set-e # <-- UPDATE AS NEEDED (Incremented for enhanced check)
 
 %post
     # Define versions used throughout the build
@@ -94,22 +94,29 @@ From: rockylinux:8
         make -j$(nproc) LDFLAGS="-lfl"
         # Try install WITHOUT LDFLAGS
         make install
+        MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
+        echo ">>>>>> OpenMPI '\''make install'\'' finished with exit code: $MPI_INSTALL_EXIT_CODE <<<<<<"
+        if [ $MPI_INSTALL_EXIT_CODE -ne 0 ]; then
+            echo ">>>>>> ERROR: OpenMPI '\''make install'\'' failed! Exit code: $MPI_INSTALL_EXIT_CODE <<<<<<"
+            exit $MPI_INSTALL_EXIT_CODE
+        fi
 
-        # --- BEGIN OpenMPI Install Verification ---
-        echo "--- Verifying mpicc installation ---"
-        ls -l /usr/local/bin/mpicc
+        # --- BEGIN Enhanced OpenMPI Install Verification ---
+        echo ">>>>>> START MPICC CHECK <<<<<<"
+        ls -l /usr/local/bin/mpicc || echo ">>>>>> ls /usr/local/bin/mpicc command failed (file likely missing) <<<<<<"
         if [ -f /usr/local/bin/mpicc ]; then
-            echo "OK: mpicc found in /usr/local/bin."
-            which mpicc
-            /usr/local/bin/mpicc --version # Also try running it
+            echo ">>>>>> OK: MPICC FILE EXISTS <<<<<<"
+            which mpicc || echo ">>>>>> which mpicc command failed? <<<<<<"
+            /usr/local/bin/mpicc --version || echo ">>>>>> mpicc --version command failed? <<<<<<"
         else
-            echo "ERROR: mpicc NOT FOUND in /usr/local/bin after install!"
-            echo "Contents of /usr/local/bin:"
-            ls -l /usr/local/bin
+            echo ">>>>>> !! MPICC FILE NOT FOUND !! <<<<<<"
+            echo ">>>>>> Contents of /usr/local/bin: <<<<<<"
+            ls -l /usr/local/bin || echo ">>>>>> ls /usr/local/bin FAILED <<<<<<"
+            echo ">>>>>> EXITING SCRIPT DUE TO MISSING MPICC <<<<<<"
             exit 1 # Force failure here if mpicc is missing
         fi
-        echo "--- Finished mpicc installation verification ---"
-        # --- END OpenMPI Install Verification ---
+        echo ">>>>>> END MPICC CHECK <<<<<<"
+        # --- END Enhanced OpenMPI Install Verification ---
 
         cd ..
         rm -rf openmpi-${OPENMPI_VERSION}*
