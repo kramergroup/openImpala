@@ -92,6 +92,21 @@ From: rockylinux:8
         # Add LDFLAGS="-lfl" to make and make install (Needed for flex interaction)
         make -j$(nproc) LDFLAGS="-lfl"
         make install LDFLAGS="-lfl"
+# --- BEGIN OpenMPI Install Verification ---
+echo "--- Verifying mpicc installation ---"
+ls -l /usr/local/bin/mpicc
+if [ -f /usr/local/bin/mpicc ]; then
+    echo "OK: mpicc found in /usr/local/bin."
+    which mpicc
+    /usr/local/bin/mpicc --version # Also try running it
+else
+    echo "ERROR: mpicc NOT FOUND in /usr/local/bin after install!"
+    echo "Contents of /usr/local/bin:"
+    ls -l /usr/local/bin
+    exit 1 # Force failure here if mpicc is missing
+fi
+echo "--- Finished mpicc installation verification ---"
+# --- END OpenMPI Install Verification ---
 
         # --- BEGIN OpenMPI Install Verification ---
         echo "--- Verifying mpicc installation ---"
