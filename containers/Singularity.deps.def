@@ -3,24 +3,15 @@ From: rockylinux:8
 
 %help
     Container providing the build environment and runtime dependencies for OpenImpala.
-
-    Installs:
-      * Rocky Linux 8 Base OS & Updates
-      * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
-      * OpenMPI 4.1.6 (built from source, with IB support, using GCC 11)
-      * CMake 3.28.3 (binary distribution)
-      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11 & OpenMPI)
-      * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
-      * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
-      * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
-
-    This container is intended to be used as a base or cache for building OpenImpala itself.
+    # ... (rest of help section) ...
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.15-deps-gcc11-cmake-debug # <-- UPDATE AS NEEDED (Added CMake debug)
+    Version 2.16-deps-gcc11-serial-installs-fixed-test # <-- Updated version
 
 %post
+    set -e # Ensure dnf commands exit on error early
+
     # Define versions used throughout the build
     export CMAKE_VERSION=3.28.3
     export OPENMPI_VERSION=4.1.6
@@ -57,7 +48,7 @@ From: rockylinux:8
     # --- Enable GCC Toolset 11 and Build Dependencies inside this environment ---
     echo "=== Enabling GCC Toolset 11 for dependency builds ==="
     scl enable gcc-toolset-11 -- bash -c '
-        set -e # Exit immediately if any command fails
+        set -e # Exit immediately if any command fails WITHIN THIS SUBSHELL
 
         # Re-export versions needed within this subshell
         export CMAKE_VERSION=3.28.3
@@ -73,35 +64,25 @@ From: rockylinux:8
         wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         mkdir -p ${CMAKE_INSTALL_PREFIX}
         tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
-        # --- Add CMake verification ---
         echo "--- Verifying CMake installation ---"
-        ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake || echo "*** CMake executable NOT FOUND after tar ***"
-        ${CMAKE_INSTALL_PREFIX}/bin/cmake --version || echo "*** CMake --version command FAILED after tar ***"
-        # --- End CMake verification ---
+        ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake # Check existence
+        ${CMAKE_INSTALL_PREFIX}/bin/cmake --version # Check execution
         rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-        export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH} # Add CMake to PATH for subsequent steps
-        # --- Add PATH verification ---
+        export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
         echo "--- Verifying CMake via PATH ---"
-        which cmake || echo "*** which cmake FAILED after adding to PATH ***"
-        cmake --version || echo "*** cmake --version via PATH FAILED ***"
-        # --- End PATH verification ---
-
+        which cmake # Check if in path
+        cmake --version # Check execution via path
 
         # --- Install OpenMPI (Recent Version) ---
         echo "--- Building OpenMPI ---"
-        export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
+        export OPENMPI_INSTALL_PREFIX=/usr/local
         wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
         tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
         cd openmpi-${OPENMPI_VERSION}
-
-        # Explicitly set compilers from the SCL environment for ./configure
         export CC=$(which gcc)
         export CXX=$(which g++)
         export FC=$(which gfortran)
-        echo "*** Using CC=$CC ***"
-        echo "*** Using CXX=$CXX ***"
-        echo "*** Using FC=$FC ***"
-
+        echo "*** Using CC=$CC CXX=$CXX FC=$FC ***"
         ./configure \
             --prefix=${OPENMPI_INSTALL_PREFIX} \
             --enable-orterun-prefix-by-default \
@@ -109,49 +90,16 @@ From: rockylinux:8
             --with-verbs \
             --enable-shared \
             --enable-static=no \
-            CC="$CC" CXX="$CXX" FC="$FC" # Pass explicitly too
-
-        # Build OpenMPI in parallel
+            CC="$CC" CXX="$CXX" FC="$FC"
         echo "*** Running make -j$(nproc) ***"
-        make -j$(nproc) LDFLAGS="-lfl"
-
-        # ---->> INSTALL OpenMPI SERIALLY (Removed -j) <<----
-        echo "*** Running make install serially ***" # Corrected echo
-        make install LDFLAGS="-lfl" # Still includes LDFLAGS
-
-        MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
-
-        # --- Add extra check right after install ---
-        echo "*** Verifying mpicc existence immediately after install - Exit Code: $MPI_INSTALL_EXIT_CODE ***" # Corrected echo
-        ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
-        # --- End extra check ---
-
-        echo "*** OpenMPI make install finished with exit code: $MPI_INSTALL_EXIT_CODE ***" # Tidied up echo
-        if [ $MPI_INSTALL_EXIT_CODE -ne 0 ]; then
-            echo "*** ERROR: OpenMPI make install explicitly failed! Exit code: $MPI_INSTALL_EXIT_CODE ***"
-            exit $MPI_INSTALL_EXIT_CODE
-        fi
-
-        # --- BEGIN Enhanced OpenMPI Install Verification (Still useful) ---
-        echo "*** START MPICC CHECK ***"
-        ls -l /usr/local/bin/mpicc || echo "*** ls /usr/local/bin/mpicc command failed - file likely missing ***"
-        if [ -f /usr/local/bin/mpicc ]; then
-            echo "*** OK: MPICC FILE EXISTS ***"
-            which mpicc || echo "*** which mpicc command failed? ***"
-            /usr/local/bin/mpicc --version || echo "*** mpicc --version command failed? ***"
-        else
-            echo "*** !! MPICC FILE NOT FOUND in final check !! ***"
-            echo "*** Contents of /usr/local/bin: ***"
-            ls -l /usr/local/bin || echo "*** ls /usr/local/bin FAILED ***"
-            echo "*** EXITING SCRIPT DUE TO MISSING MPICC ***"
-            exit 1 # Force failure here if mpicc is missing
-        fi
-        echo "*** END MPICC CHECK ***"
-        # --- END Enhanced OpenMPI Install Verification ---
-
+        make -j$(nproc) LDFLAGS="-lfl" # Build parallel
+        echo "*** Running make install (SERIAL, NO LDFLAGS) ***"
+        make install # Install serial, NO LDFLAGS
+        echo "*** Verifying mpicc existence immediately after install ***"
+        ls -l /usr/local/bin/mpicc # Check existence
         cd ..
         rm -rf openmpi-${OPENMPI_VERSION}*
-        ldconfig # Update library cache for /usr/local/lib
+        ldconfig # Update library cache
 
         # --- Install HDF5 (with Parallel, Fortran, C++) ---
         echo "--- Building HDF5 ---"
@@ -159,8 +107,7 @@ From: rockylinux:8
         wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
         tar -xzf hdf5-${HDF5_VERSION}.tar.gz
         cd hdf5-${HDF5_VERSION}
-        # Ensure MPI wrappers use the toolset compilers (CC/CXX/FC should still be set from OpenMPI section)
-        echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---" # Add verification
+        echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---"
         export CFLAGS="-O3 -march=native"
         export CXXFLAGS="${CFLAGS}"
         export FCFLAGS="${CFLAGS}"
@@ -172,8 +119,11 @@ From: rockylinux:8
             --enable-cxx \
             --enable-shared \
             --disable-static \
-            --enable-unsupported # Allow C++/Parallel
-        make -j$(nproc) install
+            --enable-unsupported
+        echo "*** Running make -j$(nproc) for HDF5 ***"
+        make -j$(nproc) # Build parallel
+        echo "*** Running make install for HDF5 (SERIAL) ***"
+        make install # Install serial
         cd ..
         rm -rf hdf5-${HDF5_VERSION}*
 
@@ -183,8 +133,6 @@ From: rockylinux:8
         git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
         cd amrex
         mkdir build && cd build
-        # CMake should pick up CC/CXX/FC from environment (MPI wrappers using toolset GCC)
-        # Pass CMAKE_PREFIX_PATH for HDF5
         cmake .. \
             -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
             -DCMAKE_BUILD_TYPE=Release \
@@ -195,8 +143,11 @@ From: rockylinux:8
             -DCMAKE_C_FLAGS="-O3 -march=native" \
             -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
             -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
-        make -j$(nproc) install
-        cd ../.. # Back to /tmp/build_src
+        echo "*** Running make -j$(nproc) for AMReX ***"
+        make -j$(nproc) # Build parallel
+        echo "*** Running make install for AMReX (SERIAL) ***"
+        make install # Install serial
+        cd ../..
         rm -rf amrex
 
         # --- Install HYPRE (Recent Stable Tag) ---
@@ -204,17 +155,18 @@ From: rockylinux:8
         export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
         git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
         cd hypre/src
-        # Ensure configure uses the MPI wrappers (which use the toolset GCC)
-        # CC/CXX should still be set from OpenMPI section
-        echo "--- Using HYPRE CC=$CC CXX=$CXX ---" # Add verification
+        echo "--- Using HYPRE CC=$CC CXX=$CXX ---"
         ./configure \
             --prefix=${HYPRE_INSTALL_PREFIX} \
             --with-MPI \
             --enable-shared \
             CFLAGS="-O3 -march=native" \
             CXXFLAGS="-O3 -march=native"
-        make -j$(nproc) install
-        cd ../.. # Back to /tmp/build_src
+        echo "*** Running make -j$(nproc) for HYPRE ***"
+        make -j$(nproc) # Build parallel
+        echo "*** Running make install for HYPRE (SERIAL) ***"
+        make install # Install serial
+        cd ../..
         rm -rf hypre
 
         echo "--- Dependency builds finished using GCC Toolset 11 ---"
@@ -230,75 +182,73 @@ From: rockylinux:8
 
 %environment
     # --- Activate GCC Toolset 11 by default ---
+    # NOTE: This might still not work reliably in `exec` context, keep explicit sourcing in workflow for now.
     source /opt/rh/gcc-toolset-11/enable
-    # ------------------------------------------
-
-    # Set locale
+    # ... (rest of environment section as before) ...
     export LC_ALL=C
     export LANG=C
-
-    # Define versions based on build stage (must match %post)
     export CMAKE_VERSION=3.28.3
     export OPENMPI_VERSION=4.1.6
     export HDF5_VERSION=1.12.3
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
-
-    # Installation prefixes
     export CMAKE_HOME=/opt/cmake/${CMAKE_VERSION}
     export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
     export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
     export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
-    export H5CPP_HOME=${HDF5_HOME} # Set H5CPP_HOME based on HDF5_HOME
-    export TIFF_HOME=/usr          # Set TIFF_HOME for dnf installation
-
-    # Add binaries to PATH (scl enable should handle toolset path, add others)
+    export H5CPP_HOME=${HDF5_HOME}
+    export TIFF_HOME=/usr
     export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
-
-    # Add libraries to LD_LIBRARY_PATH (scl enable adds toolset libs, add ours)
     export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${TIFF_HOME}/lib64:/usr/local/lib:${LD_LIBRARY_PATH}
-
-    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies
     export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:${TIFF_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
-
-    # Ensure OpenMPI runs correctly within Singularity
     export OMPI_MCA_btl_vader_single_copy_mechanism=none
-    export OMPI_MCA_rmaps_base_oversubscribe=1 # Allow oversubscription if needed
+    export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %test
+    set -e # Exit immediately if any command fails
+
     # --- Activate GCC Toolset 11 ---
     source /opt/rh/gcc-toolset-11/enable
     # -------------------------------
 
-    # Verify tools are found and versions are reasonable
     echo "--- Verifying Tool Versions ---"
-
-    # --- Contents of /usr/local/bin at start of %test ---
     echo "--- Contents of /usr/local/bin at start of %test ---"
-    ls -l /usr/local/bin || echo "Failed to list /usr/local/bin"
-    echo "--- End of /usr/local/bin listing ---"
-    # --- END ADDED LS COMMAND ---
+    ls -l /usr/local/bin
 
-    # This check should now pass if make install worked
-    which mpicc && mpicc --version || (echo "ERROR: mpicc not found or failed!"; exit 1)
-    # This check should pass if CMake install worked and PATH is correct
-    which cmake && cmake --version || (echo "ERROR: cmake not found or failed!"; exit 1)
-    which gcc && gcc --version | grep "(GCC) 11." || (echo "ERROR: GCC is not version 11!"; gcc --version; exit 1)
+    echo "Checking mpicc..."
+    which mpicc
+    mpicc --version
 
-    # Check if libraries are found by linker (simple ldd check)
+    echo "Checking mpic++..." # Check mpic++ too now
+    which mpic++
+    mpic++ --version
+
+    echo "Checking cmake..."
+    which cmake
+    cmake --version
+
+    echo "Checking gcc version..."
+    which gcc
+    gcc --version | grep "(GCC) 11." # grep exits non-zero if no match
+
     echo "--- Verifying Library Linking ---"
-    # Need full paths to .so files for ldd
-    ldd ${HDF5_HOME}/lib/libhdf5.so || (echo "ERROR: HDF5 lib linking failed"; exit 1)
-    ldd ${AMREX_HOME}/lib/libamrex.so || (echo "ERROR: AMReX lib linking failed"; exit 1)
-    ldd ${HYPRE_HOME}/lib/libHYPRE.so || (echo "ERROR: HYPRE lib linking failed"; exit 1)
-    ldd /usr/local/lib/libmpi.so || (echo "ERROR: OpenMPI lib linking failed"; exit 1) # Check OpenMPI lib
+    # Use direct paths and check exit code of ldd explicitly
+    echo "Checking HDF5 lib (/opt/hdf5/${HDF5_VERSION}/lib/libhdf5.so)..."
+    ldd "/opt/hdf5/${HDF5_VERSION}/lib/libhdf5.so"
 
-    # DO NOT check for OpenImpala executable here
-    echo "--- Verifying OpenImpala Build ---"
-    echo "Skipping OpenImpala check in dependency build."
+    echo "Checking AMReX lib (/opt/amrex/${AMREX_VERSION}/lib/libamrex.so)..."
+    ldd "/opt/amrex/${AMREX_VERSION}/lib/libamrex.so"
+
+    echo "Checking HYPRE lib (/opt/hypre/${HYPRE_VERSION}/lib/libHYPRE.so)..."
+    ldd "/opt/hypre/${HYPRE_VERSION}/lib/libHYPRE.so"
+
+    echo "Checking OpenMPI lib (/usr/local/lib/libmpi.so)..."
+    ldd "/usr/local/lib/libmpi.so"
 
     echo "--- Basic dependency container tests passed. ---"
+    # This line will only be reached if ALL previous commands succeeded
 
 %runscript
+    # ... (runscript section as before) ...
     echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
