@@ -90,10 +90,10 @@ From: rockylinux:8
             --with-verbs \
             --enable-shared \
             --enable-static=no
-        # Add LDFLAGS="-lfl" to make (Needed for flex interaction)
+        # Add LDFLAGS="-lfl" to make and make install (Needed for flex interaction)
         make -j$(nproc) LDFLAGS="-lfl"
-        # Try install WITHOUT LDFLAGS
-        make install
+        make install LDFLAGS="-lfl"  # <-- PUT LDFLAGS BACK HERE
+
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
         echo "*** OpenMPI '\''make install'\'' finished with exit code: $MPI_INSTALL_EXIT_CODE ***"
         if [ $MPI_INSTALL_EXIT_CODE -ne 0 ]; then
