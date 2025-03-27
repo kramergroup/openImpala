@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: ghcr.io/rockylinux/rockylinux:8
+From: quay.io/rockylinux/rockylinux:8
 
 %help
     Container providing the build environment and runtime dependencies for OpenImpala.
