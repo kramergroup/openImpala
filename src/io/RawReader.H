@@ -10,6 +10,8 @@
 namespace amrex {
     class Box;
     class iMultiFab;
+    // *** ADDED for IntVect usage in .cpp ***
+    class IntVect;
 }
 
 namespace OpenImpala {
@@ -20,9 +22,9 @@ namespace OpenImpala {
  * Endianness must be specified for multi-byte types.
  */
 enum class RawDataType {
-    UNKNOWN,  ///< Default/invalid type
-    UINT8,    ///< 8-bit unsigned integer
-    INT8,     ///< 8-bit signed integer
+    UNKNOWN,   ///< Default/invalid type
+    UINT8,     ///< 8-bit unsigned integer
+    INT8,      ///< 8-bit signed integer
     INT16_LE, ///< 16-bit signed integer, Little Endian (e.g., x86)
     INT16_BE, ///< 16-bit signed integer, Big Endian
     UINT16_LE,///< 16-bit unsigned integer, Little Endian
@@ -50,7 +52,10 @@ enum class RawDataType {
  */
 class RawReader
 {
-public:
+public: // <-- Moved ByteType here
+    // Store data as raw bytes. Using unsigned char for compatibility. Use std::byte in C++17+.
+    using ByteType = unsigned char;
+
     /**
      * @brief Default constructor. Creates an empty reader.
      */
@@ -214,8 +219,7 @@ private:
     int m_depth = 0;                ///< Depth (Z) of the domain.
     RawDataType m_data_type = RawDataType::UNKNOWN; ///< Type/endianness of data in file.
 
-    // Store data as raw bytes. Using unsigned char for compatibility. Use std::byte in C++17+.
-    using ByteType = unsigned char;
+    // ByteType using alias moved to public section
     std::vector<ByteType> m_raw_bytes; ///< Vector containing the raw byte data.
 
     bool m_is_read = false;         ///< Flag indicating if data was successfully read.

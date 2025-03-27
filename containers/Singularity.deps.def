@@ -6,19 +6,19 @@ From: rockylinux:8
 
     Installs:
       * Rocky Linux 8 Base OS & Updates
-      * Development Tools (GCC 8.5, Make, etc.) & Fortran Compiler
+      * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
       * OpenMPI 4.1.6 (built from source, with IB support)
-      * CMake 3.28.3 (built from source)
-      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source)
-      * AMReX 23.11 (built from source, MPI, OMP, EB)
-      * HYPRE v2.30.0 (built from source, MPI)
+      * CMake 3.28.3 (binary distribution)
+      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11)
+      * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
+      * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
       * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
 
     This container is intended to be used as a base or cache for building OpenImpala itself.
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.6-deps # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 2.7-deps-gcc11 # <-- UPDATE AS NEEDED (Incremented for GCC update)
 
 %post
     # Define versions used throughout the build
@@ -35,11 +35,11 @@ From: rockylinux:8
     dnf install -y epel-release
     dnf update -y
 
-    # Install 'Development Tools' group AND other required packages
-    # Use @'Group Name' syntax for the group
+    # Install 'Development Tools' group, base GCC/GFortran (for bootstrap), GCC Toolset 11, AND other required packages
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
+        gcc-toolset-11 \
         wget git patch \
         python3 python3-pip \
         hostname \
@@ -54,104 +54,119 @@ From: rockylinux:8
     mkdir /tmp/build_src
     cd /tmp/build_src
 
-    # --- Install CMake (Recent Version) ---
-    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
-    wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-    mkdir -p ${CMAKE_INSTALL_PREFIX}
-    tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
-    # Add to PATH temporarily for subsequent builds
-    export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
-    cmake --version
+    # --- Enable GCC Toolset 11 and Build Dependencies inside this environment ---
+    echo "=== Enabling GCC Toolset 11 for dependency builds ==="
+    scl enable gcc-toolset-11 -- bash -c '
+        # Re-export versions needed within this subshell
+        export CMAKE_VERSION=3.28.3
+        export OPENMPI_VERSION=4.1.6
+        export HDF5_VERSION=1.12.3
+        export AMREX_VERSION=23.11
+        export HYPRE_VERSION=v2.30.0
+        echo "--- Now using GCC $(gcc --version) ---"
 
-    # --- Install OpenMPI (Recent Version) ---
-    export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
-    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
-    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
-    cd openmpi-${OPENMPI_VERSION}
-    # LDFLAGS="-lfl" REMOVED from configure line
-    ./configure \
-       --prefix=${OPENMPI_INSTALL_PREFIX} \
-       --enable-orterun-prefix-by-default \
-       --enable-mpirun-prefix-by-default \
-       --with-verbs \
-       --enable-shared \
-       --enable-static=no
-    # Add LDFLAGS="-lfl" to make and make install
-    make -j$(nproc) LDFLAGS="-lfl"
-    make install LDFLAGS="-lfl"
-    cd ..
-    rm -rf openmpi-${OPENMPI_VERSION}*
-    # Update library cache for /usr/local/lib
-    ldconfig
+        # --- Install CMake (Recent Version) ---
+        echo "--- Installing CMake ---"
+        export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
+        wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+        mkdir -p ${CMAKE_INSTALL_PREFIX}
+        tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
+        rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+        export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH} # Add CMake to PATH for subsequent steps
+        cmake --version
 
-    # --- Install HDF5 (with Parallel, Fortran, C++) ---
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
-    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
-    tar -xzf hdf5-${HDF5_VERSION}.tar.gz
-    cd hdf5-${HDF5_VERSION}
-    # Export flags for configure and make
-    export CFLAGS="-O3 -march=native"
-    export CXXFLAGS="${CFLAGS}"
-    export FCFLAGS="${CFLAGS}"
-    # Use MPI wrappers installed by OpenMPI build
-    export CC=mpicc
-    export CXX=mpicxx
-    export FC=mpif90
-    ./configure \
-        --prefix=${HDF5_INSTALL_PREFIX} \
-        --enable-parallel \
-        --enable-fortran \
-        --enable-fortran2003 \
-        --enable-cxx \
-        --enable-shared \
-        --disable-static \
-        --enable-unsupported # Allow C++/Parallel
-    make -j$(nproc) install
-    cd ..
-    rm -rf hdf5-${HDF5_VERSION}*
+        # --- Install OpenMPI (Recent Version) ---
+        # Needs to be built with the same compiler family (GCC 11 here) used for other libs
+        echo "--- Building OpenMPI ---"
+        export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
+        wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
+        tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
+        cd openmpi-${OPENMPI_VERSION}
+        ./configure \
+            --prefix=${OPENMPI_INSTALL_PREFIX} \
+            --enable-orterun-prefix-by-default \
+            --enable-mpirun-prefix-by-default \
+            --with-verbs \
+            --enable-shared \
+            --enable-static=no
+        # Add LDFLAGS="-lfl" to make and make install (Needed for flex interaction)
+        make -j$(nproc) LDFLAGS="-lfl"
+        make install LDFLAGS="-lfl"
+        cd ..
+        rm -rf openmpi-${OPENMPI_VERSION}*
+        ldconfig # Update library cache for /usr/local/lib
 
-    # --- Install AMReX (Recent Stable Tag using CMake) ---
-    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
-    git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
-    cd amrex
-    mkdir build && cd build
-    # Pass CMAKE_PREFIX_PATH to help find HDF5 if installed in /opt
-    cmake .. \
-        -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DAMReX_MPI=ON \
-        -DAMReX_OMP=ON \
-        -DAMReX_EB=ON \
-        -DCMAKE_CXX_COMPILER=mpicxx \
-        -DCMAKE_C_COMPILER=mpicc \
-        -DCMAKE_Fortran_COMPILER=mpif90 \
-        -DCMAKE_CXX_FLAGS="-O3 -march=native" \
-        -DCMAKE_C_FLAGS="-O3 -march=native" \
-        -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
-    make -j$(nproc) install
-    cd ../..
-    rm -rf amrex
+        # --- Install HDF5 (with Parallel, Fortran, C++) ---
+        echo "--- Building HDF5 ---"
+        export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+        wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
+        tar -xzf hdf5-${HDF5_VERSION}.tar.gz
+        cd hdf5-${HDF5_VERSION}
+        # Ensure MPI wrappers use the toolset compilers
+        export CC=mpicc
+        export CXX=mpicxx
+        export FC=mpif90
+        export CFLAGS="-O3 -march=native"
+        export CXXFLAGS="${CFLAGS}"
+        export FCFLAGS="${CFLAGS}"
+        ./configure \
+            --prefix=${HDF5_INSTALL_PREFIX} \
+            --enable-parallel \
+            --enable-fortran \
+            --enable-fortran2003 \
+            --enable-cxx \
+            --enable-shared \
+            --disable-static \
+            --enable-unsupported # Allow C++/Parallel
+        make -j$(nproc) install
+        cd ..
+        rm -rf hdf5-${HDF5_VERSION}*
 
-    # --- Install HYPRE (Recent Stable Tag) ---
-    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
-    git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
-    cd hypre/src
-    # HYPRE configure uses CC/CXX env vars or finds MPI wrappers
-    export CC=mpicc
-    export CXX=mpicxx
-    ./configure \
-        --prefix=${HYPRE_INSTALL_PREFIX} \
-        --with-MPI \
-        --enable-shared \
-        CFLAGS="-O3 -march=native" \
-        CXXFLAGS="-O3 -march=native"
-    make -j$(nproc) install
-    cd ../..
-    rm -rf hypre
+        # --- Install AMReX (Recent Stable Tag using CMake) ---
+        echo "--- Building AMReX ---"
+        export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
+        git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
+        cd amrex
+        mkdir build && cd build
+        # CMake should pick up CC/CXX/FC from environment (MPI wrappers using toolset GCC)
+        # Pass CMAKE_PREFIX_PATH for HDF5
+        cmake .. \
+            -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DAMReX_MPI=ON \
+            -DAMReX_OMP=ON \
+            -DAMReX_EB=ON \
+            -DCMAKE_CXX_FLAGS="-O3 -march=native" \
+            -DCMAKE_C_FLAGS="-O3 -march=native" \
+            -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
+            -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
+        make -j$(nproc) install
+        cd ../.. # Back to /tmp/build_src
+        rm -rf amrex
 
-    # --- !!! DO NOT BUILD OpenImpala HERE !!! ---
-    # This recipe only prepares the dependencies for caching.
+        # --- Install HYPRE (Recent Stable Tag) ---
+        echo "--- Building HYPRE ---"
+        export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+        git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
+        cd hypre/src
+        # Ensure configure uses the MPI wrappers (which use the toolset GCC)
+        export CC=mpicc
+        export CXX=mpicxx
+        ./configure \
+            --prefix=${HYPRE_INSTALL_PREFIX} \
+            --with-MPI \
+            --enable-shared \
+            CFLAGS="-O3 -march=native" \
+            CXXFLAGS="-O3 -march=native"
+        make -j$(nproc) install
+        cd ../.. # Back to /tmp/build_src
+        rm -rf hypre
+
+        echo "--- Dependency builds finished using GCC Toolset 11 ---"
+
+    ' # End of bash -c '...' for scl enable
+
+    echo "=== GCC Toolset 11 Section Finished ==="
 
     # --- Final Cleanup ---
     cd /
@@ -159,6 +174,10 @@ From: rockylinux:8
     dnf clean all
 
 %environment
+    # --- Activate GCC Toolset 11 by default ---
+    source /opt/rh/gcc-toolset-11/enable
+    # ------------------------------------------
+
     # Set locale
     export LC_ALL=C
     export LANG=C
@@ -175,18 +194,16 @@ From: rockylinux:8
     export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
     export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
     export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
-    # --- ADD THESE LINES ---
     export H5CPP_HOME=${HDF5_HOME} # Set H5CPP_HOME based on HDF5_HOME
     export TIFF_HOME=/usr          # Set TIFF_HOME for dnf installation
-    # --- END ADDED LINES ---
 
-    # Add binaries to PATH
+    # Add binaries to PATH (scl enable should handle toolset path, add others)
     export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
 
-    # Add libraries to LD_LIBRARY_PATH (Corrected for Rocky's lib64)
+    # Add libraries to LD_LIBRARY_PATH (scl enable adds toolset libs, add ours)
     export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${TIFF_HOME}/lib64:/usr/local/lib:${LD_LIBRARY_PATH}
 
-    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies (Add TIFF_HOME)
+    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies
     export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:${TIFF_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
 
     # Ensure OpenMPI runs correctly within Singularity
@@ -194,11 +211,15 @@ From: rockylinux:8
     export OMPI_MCA_rmaps_base_oversubscribe=1 # Allow oversubscription if needed
 
 %test
+    # --- Activate GCC Toolset 11 ---
+    source /opt/rh/gcc-toolset-11/enable
+    # -------------------------------
+
     # Verify tools are found and versions are reasonable
     echo "--- Verifying Tool Versions ---"
     which mpicc && mpicc --version || exit 1
     which cmake && cmake --version || exit 1
-    which gcc && gcc --version || exit 1
+    which gcc && gcc --version | grep "(GCC) 11." || (echo "ERROR: GCC is not version 11!"; gcc --version; exit 1)
 
     # Check if libraries are found by linker (simple ldd check)
     echo "--- Verifying Library Linking ---"
@@ -215,5 +236,5 @@ From: rockylinux:8
     echo "--- Basic dependency container tests passed. ---"
 
 %runscript
-    echo "Container with build environment and runtime dependencies for OpenImpala."
+    echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
