@@ -7,10 +7,10 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.20-deps-gcc11-final-fixes-v3 # <-- Updated version
+    Version 2.21-deps-gcc11-source-scl # <-- Updated version
 
 %post
-    set -e # Ensure dnf commands exit on error early
+    set -e # Ensure commands exit on error early
 
     # Define versions used throughout the build
     export CMAKE_VERSION=3.28.3
@@ -45,163 +45,169 @@ From: rockylinux:8
     mkdir /tmp/build_src
     cd /tmp/build_src
 
-    # --- Enable GCC Toolset 11 and Build Dependencies inside this environment ---
-    echo "=== Enabling GCC Toolset 11 for dependency builds ==="
-    scl enable gcc-toolset-11 -- bash -c '
-        set -e # Exit immediately if any command fails WITHIN THIS SUBSHELL
+    # --- Activate GCC Toolset 11 directly ---
+    echo "=== Sourcing GCC Toolset 11 enable script ==="
+    source /opt/rh/gcc-toolset-11/enable
+    echo "--- Now using GCC $(gcc --version) ---"
+    # Check if SCL variables are set now
+    echo "--- SCL ACTIVE? ---"
+    env | grep SCL || echo "No SCL variables found"
+    echo "--- Current PATH ---"
+    echo "$PATH"
+    # -----------------------------------------
 
-        # Re-export versions needed within this subshell
-        export CMAKE_VERSION=3.28.3
-        export OPENMPI_VERSION=4.1.6
-        export HDF5_VERSION=1.12.3
-        export AMREX_VERSION=23.11
-        export HYPRE_VERSION=v2.30.0
-        echo "--- Now using GCC $(gcc --version) ---" # No parens here
+    # Re-export versions (might not be strictly needed now, but safe)
+    export CMAKE_VERSION=${CMAKE_VERSION}
+    export OPENMPI_VERSION=${OPENMPI_VERSION}
+    export HDF5_VERSION=${HDF5_VERSION}
+    export AMREX_VERSION=${AMREX_VERSION}
+    export HYPRE_VERSION=${HYPRE_VERSION}
 
-        # --- Install CMake (Recent Version) ---
-        echo "--- Installing CMake ---" # No parens here
-        export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
-        wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-        mkdir -p ${CMAKE_INSTALL_PREFIX}
-        tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
-        echo "--- Verifying CMake installation ---" # No parens here
-        ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake # Check existence
-        ${CMAKE_INSTALL_PREFIX}/bin/cmake --version # Check execution
-        rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-        export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
-        echo "--- Verifying CMake via PATH ---" # No parens here
-        which cmake # Check if in path
-        cmake --version # Check execution via path
+    # --- Install CMake (Recent Version) ---
+    echo "--- Installing CMake ---"
+    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
+    wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+    mkdir -p ${CMAKE_INSTALL_PREFIX}
+    tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
+    echo "--- Verifying CMake installation ---"
+    ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake # Check existence
+    ${CMAKE_INSTALL_PREFIX}/bin/cmake --version # Check execution
+    rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+    # Add CMake to PATH *after* sourcing SCL to ensure precedence if needed
+    export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
+    echo "--- Verifying CMake via PATH ---"
+    which cmake # Check if in path
+    cmake --version # Check execution via path
 
-        # --- Install OpenMPI (Recent Version) ---
-        echo "--- Building OpenMPI ---" # No parens here
-        export OPENMPI_INSTALL_PREFIX=/usr/local
-        wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
-        tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
-        cd openmpi-${OPENMPI_VERSION}
-        export CC=$(which gcc)
-        export CXX=$(which g++)
-        export FC=$(which gfortran)
-        echo "*** Using CC=$CC CXX=$CXX FC=$FC ***" # No parens here
-        ./configure \
-            --prefix=${OPENMPI_INSTALL_PREFIX} \
-            --enable-orterun-prefix-by-default \
-            --enable-mpirun-prefix-by-default \
-            --with-verbs \
-            --enable-shared \
-            --enable-static=no \
-            CC="$CC" CXX="$CXX" FC="$FC"
+    # --- Install OpenMPI (Recent Version) ---
+    echo "--- Building OpenMPI ---"
+    export OPENMPI_INSTALL_PREFIX=/usr/local
+    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
+    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
+    cd openmpi-${OPENMPI_VERSION}
+    # Explicitly set compilers AGAIN after sourcing SCL
+    export CC=$(which gcc)
+    export CXX=$(which g++)
+    export FC=$(which gfortran)
+    echo "*** Using CC=$CC CXX=$CXX FC=$FC ***"
+    ./configure \
+        --prefix=${OPENMPI_INSTALL_PREFIX} \
+        --enable-orterun-prefix-by-default \
+        --enable-mpirun-prefix-by-default \
+        --with-verbs \
+        --enable-shared \
+        --enable-static=no \
+        CC="$CC" CXX="$CXX" FC="$FC"
 
-        # --- Add check for config.log ---
-        if [ -f config.log ]; then
-            echo "--- Found config.log, tailing last 50 lines: ---" # No parens here
-            tail -n 50 config.log || echo "Tailing config.log failed"
-            echo "--- End config.log tail ---" # No parens here
-        else
-            echo "--- config.log not found after configure ---" # No parens here
-        fi
-        # --- End check for config.log ---
+    # --- Check config.log ---
+    if [ -f config.log ]; then
+        echo "--- Found config.log, tailing last 50 lines: ---"
+        tail -n 50 config.log || echo "Tailing config.log failed"
+        echo "--- End config.log tail ---"
+    else
+        echo "--- config.log not found after configure ---"
+    fi
+    # --- End check ---
 
-        echo "*** Running make -j$(nproc) ***" # No parens here
-        make -j$(nproc) LDFLAGS="-lfl" # Build parallel
+    echo "*** Running make -j$(nproc) ***"
+    make -j$(nproc) LDFLAGS="-lfl" # Build parallel
 
-        echo "*** Running make install SERIAL NO LDFLAGS capturing output ***" # Corrected echo line
-        # Capture output and handle potential failure
-        make install > /tmp/build_src/mpi_install.log 2>&1 || { \
-            echo "*** ERROR: make install returned non-zero status! Log below: ***"; \
-            cat /tmp/build_src/mpi_install.log; \
-            exit 1; \
-        }
-        # If make install succeeded (exit 0), print the log anyway
-        echo "*** make install finished exit 0, install log contents: ***" # No parens here
-        cat /tmp/build_src/mpi_install.log || echo "Failed to cat mpi_install.log"
-        echo "*** End make install log ***" # No parens here
+    echo "*** Running make install SERIAL NO LDFLAGS capturing output ***"
+    # Capture output and handle potential failure
+    make install > /tmp/build_src/mpi_install.log 2>&1 || { \
+        echo "*** ERROR: make install returned non-zero status! Log below: ***"; \
+        cat /tmp/build_src/mpi_install.log; \
+        exit 1; \
+    }
+    # If make install succeeded (exit 0), print the log anyway
+    echo "*** make install finished exit 0, install log contents: ***"
+    cat /tmp/build_src/mpi_install.log || echo "Failed to cat mpi_install.log"
+    echo "*** End make install log ***"
 
-        echo "*** Verifying mpicc existence immediately after install ***" # No parens here
-        ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
+    echo "*** Verifying mpicc existence immediately after install ***"
+    ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
 
-        cd ..
-        # Clean up log file too
-        rm -rf openmpi-${OPENMPI_VERSION}* mpi_install.log
-        ldconfig # Update library cache
+    cd ..
+    rm -rf openmpi-${OPENMPI_VERSION}* mpi_install.log
 
-        # --- Install HDF5 (with Parallel, Fortran, C++) ---
-        echo "--- Building HDF5 ---" # No parens here
-        export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
-        wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
-        tar -xzf hdf5-${HDF5_VERSION}.tar.gz
-        cd hdf5-${HDF5_VERSION}
-        echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---" # No parens here
-        export CFLAGS="-O3 -march=native"
-        export CXXFLAGS="${CFLAGS}"
-        export FCFLAGS="${CFLAGS}"
-        ./configure \
-            --prefix=${HDF5_INSTALL_PREFIX} \
-            --enable-parallel \
-            --enable-fortran \
-            --enable-fortran2003 \
-            --enable-cxx \
-            --enable-shared \
-            --disable-static \
-            --enable-unsupported
-        echo "*** Running make -j$(nproc) for HDF5 ***" # No parens here
-        make -j$(nproc) # Build parallel
-        echo "*** Running make install for HDF5 SERIAL ***" # Corrected echo
-        make install # Install serial
-        cd ..
-        rm -rf hdf5-${HDF5_VERSION}*
+    # --- Run ldconfig after MPI install ---
+    echo "Running ldconfig..."
+    ldconfig
 
-        # --- Install AMReX (Recent Stable Tag using CMake) ---
-        echo "--- Building AMReX ---" # No parens here
-        export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
-        git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
-        cd amrex
-        mkdir build && cd build
-        cmake .. \
-            -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DAMReX_MPI=ON \
-            -DAMReX_OMP=ON \
-            -DAMReX_EB=ON \
-            -DCMAKE_CXX_FLAGS="-O3 -march=native" \
-            -DCMAKE_C_FLAGS="-O3 -march=native" \
-            -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-            -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
-        echo "*** Running make -j$(nproc) for AMReX ***" # No parens here
-        make -j$(nproc) # Build parallel
-        echo "*** Running make install for AMReX SERIAL ***" # Corrected echo
-        make install # Install serial
-        cd ../..
-        rm -rf amrex
+    # --- Install HDF5 (with Parallel, Fortran, C++) ---
+    echo "--- Building HDF5 ---"
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
+    tar -xzf hdf5-${HDF5_VERSION}.tar.gz
+    cd hdf5-${HDF5_VERSION}
+    echo "--- Using HDF5 CC=$CC CXX=$CXX FC=$FC ---"
+    export CFLAGS="-O3 -march=native"
+    export CXXFLAGS="${CFLAGS}"
+    export FCFLAGS="${CFLAGS}"
+    ./configure \
+        --prefix=${HDF5_INSTALL_PREFIX} \
+        --enable-parallel \
+        --enable-fortran \
+        --enable-fortran2003 \
+        --enable-cxx \
+        --enable-shared \
+        --disable-static \
+        --enable-unsupported
+    echo "*** Running make -j$(nproc) for HDF5 ***"
+    make -j$(nproc) # Build parallel
+    echo "*** Running make install for HDF5 SERIAL ***"
+    make install # Install serial
+    cd ..
+    rm -rf hdf5-${HDF5_VERSION}*
 
-        # --- Install HYPRE (Recent Stable Tag) ---
-        echo "--- Building HYPRE ---" # No parens here
-        export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
-        git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
-        cd hypre/src
-        echo "--- Using HYPRE CC=$CC CXX=$CXX ---" # No parens here
-        ./configure \
-            --prefix=${HYPRE_INSTALL_PREFIX} \
-            --with-MPI \
-            --enable-shared \
-            CFLAGS="-O3 -march=native" \
-            CXXFLAGS="-O3 -march=native"
-        echo "*** Running make -j$(nproc) for HYPRE ***" # No parens here
-        make -j$(nproc) # Build parallel
-        echo "*** Running make install for HYPRE SERIAL ***" # Corrected echo
-        make install # Install serial
-        cd ../..
-        rm -rf hypre
+    # --- Install AMReX (Recent Stable Tag using CMake) ---
+    echo "--- Building AMReX ---"
+    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
+    git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
+    cd amrex
+    mkdir build && cd build
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DAMReX_MPI=ON \
+        -DAMReX_OMP=ON \
+        -DAMReX_EB=ON \
+        -DCMAKE_CXX_FLAGS="-O3 -march=native" \
+        -DCMAKE_C_FLAGS="-O3 -march=native" \
+        -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
+    echo "*** Running make -j$(nproc) for AMReX ***"
+    make -j$(nproc) # Build parallel
+    echo "*** Running make install for AMReX SERIAL ***"
+    make install # Install serial
+    cd ../..
+    rm -rf amrex
 
-        echo "--- Dependency builds finished using GCC Toolset 11 ---" # No parens here
+    # --- Install HYPRE (Recent Stable Tag) ---
+    echo "--- Building HYPRE ---"
+    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+    git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
+    cd hypre/src
+    echo "--- Using HYPRE CC=$CC CXX=$CXX ---"
+    ./configure \
+        --prefix=${HYPRE_INSTALL_PREFIX} \
+        --with-MPI \
+        --enable-shared \
+        CFLAGS="-O3 -march=native" \
+        CXXFLAGS="-O3 -march=native"
+    echo "*** Running make -j$(nproc) for HYPRE ***"
+    make -j$(nproc) # Build parallel
+    echo "*** Running make install for HYPRE SERIAL ***"
+    make install # Install serial
+    cd ../..
+    rm -rf hypre
 
-    ' # End of bash -c '...' for scl enable
-
-    echo "=== GCC Toolset 11 Section Finished ===" # No parens here
+    echo "--- Dependency builds finished using GCC Toolset 11 ---"
 
     # --- Final Cleanup ---
+    echo "=== Cleaning up build directory ==="
     cd /
-    rm -rf /tmp/build_src # Remove downloaded sources for dependencies
+    rm -rf /tmp/build_src
     dnf clean all
 
 %environment
