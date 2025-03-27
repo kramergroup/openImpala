@@ -42,8 +42,8 @@ jobs:
             exit 1
           fi
           echo "Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
-          # Increased timeout for potentially long builds
-          sudo apptainer build --timeout 3600 "$TARGET_SIF" "$RECIPE_FILE"
+          # Removed --timeout flag as it's incompatible with Apptainer 1.2.5
+          sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
           # Check build exit status IMMEDIATELY
           BUILD_EXIT_CODE=$?
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
