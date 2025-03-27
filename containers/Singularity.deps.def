@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.25-deps-gcc11-manual-mpiio-test # <-- Updated version
+    Version 2.26-deps-gcc11-ldconfig-fix # <-- Updated version
 
 %post
     set -e # Ensure commands exit on error early
@@ -50,6 +50,10 @@ From: rockylinux:8
         which ca-certificates && \
     dnf clean all -y
 
+    # --- Ensure /usr/local/lib is in ld cache path --- ADDED ---
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
+    # --- END ADDED ---
+
     # Create a temporary directory for building dependencies
     mkdir /tmp/build_src
     cd /tmp/build_src
@@ -72,7 +76,6 @@ From: rockylinux:8
     export HYPRE_VERSION=${HYPRE_VERSION}
 
     # --- Install CMake (Recent Version) ---
-    # ... (CMake install and verification as before) ...
     echo "--- Installing CMake ---"
     export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
     wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
@@ -87,7 +90,6 @@ From: rockylinux:8
     which cmake && cmake --version || exit 1
 
     # --- Install OpenMPI (Recent Version) ---
-    # ... (OpenMPI configure, build, install log capture, verification as before) ...
     echo "--- Building OpenMPI ---"
     export OPENMPI_INSTALL_PREFIX=/usr/local
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
@@ -128,61 +130,47 @@ From: rockylinux:8
     cd ..
     rm -rf openmpi-${OPENMPI_VERSION}* mpi_install.log
     echo "Running ldconfig..."
-    ldconfig
+    ldconfig # Should now find /usr/local/lib because of ld.so.conf.d change
 
     # --- Check ldconfig cache for MPI ---
     echo "--- Checking ldconfig cache for libmpi ---"
-    ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache"
+    ldconfig -p | grep libmpi || echo "libmpi not found in ldconfig cache (Check /etc/ld.so.conf.d/)"
     echo "--- End ldconfig check ---"
 
-    # --- ADDED: Manual MPI-IO Link Test ---
+    # --- Manual MPI-IO Link Test (Rely on ldconfig) ---
     echo "--- Attempting manual MPI-IO link test ---"
-    # Create a simple test C file
     cat << EOF > /tmp/build_src/test_mpiio.c
 #include <stdio.h>
 #include <mpi.h>
 int main(int argc, char **argv) {
     MPI_File fh;
     MPI_Init(&argc, &argv);
-    if ( MPI_COMM_WORLD == MPI_COMM_NULL ) {
-        fprintf(stderr, "Error: MPI_COMM_WORLD is NULL after MPI_Init!\\n");
-        MPI_Abort(MPI_COMM_WORLD, 1); // Use MPI_Abort for MPI errors
-    }
-    // Use a dummy file name, create/write mode
+    if ( MPI_COMM_WORLD == MPI_COMM_NULL ) { fprintf(stderr, "Error: MPI_COMM_WORLD is NULL!\\n"); MPI_Abort(MPI_COMM_WORLD, 1); }
     int err = MPI_File_open(MPI_COMM_WORLD, "dummy_mpiio_test.txt", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
-    if (err != MPI_SUCCESS) {
-        fprintf(stderr, "Error: MPI_File_open failed! Error code: %d\\n", err);
-        char err_string[MPI_MAX_ERROR_STRING];
-        int len;
-        MPI_Error_string(err, err_string, &len);
-        fprintf(stderr, "%s\\n", err_string);
-        MPI_Abort(MPI_COMM_WORLD, err);
-    } else {
-         MPI_File_close(&fh);
-    }
+    if (err != MPI_SUCCESS) { fprintf(stderr, "Error: MPI_File_open failed! Code: %d\\n", err); MPI_Abort(MPI_COMM_WORLD, err); }
+    MPI_File_close(&fh);
     MPI_Finalize();
     return 0;
 }
 EOF
-    # Attempt to compile and link using mpicc with explicit LDFLAGS
-    echo "--- Running: mpicc test_mpiio.c -o test_mpiio -L/usr/local/lib ---"
+    echo "--- Running: mpicc test_mpiio.c -o test_mpiio ---" # No -L needed if ldconfig worked
     # Capture stderr as well
-    mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio -L/usr/local/lib > /tmp/build_src/mpiio_link.log 2>&1
+    mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio > /tmp/build_src/mpiio_link.log 2>&1
     LINK_EXIT_CODE=$?
     if [ $LINK_EXIT_CODE -ne 0 ]; then
         echo "*** ERROR: Manual MPI-IO link test FAILED! Exit Code: $LINK_EXIT_CODE ***" >&2
         echo "*** Linker output: ***" >&2
         cat /tmp/build_src/mpiio_link.log || echo "Failed to cat mpiio_link.log" >&2
-        # Exit here as HDF5 configure will also fail
         exit $LINK_EXIT_CODE
     else
         echo "--- Manual MPI-IO link test SUCCEEDED ---"
-        rm /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio /tmp/build_src/mpiio_link.log dummy_mpiio_test.txt
+        # Use rm -f to prevent script exit if dummy file wasn't created (e.g., test failed before MPI_File_Close)
+        rm -f /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio /tmp/build_src/mpiio_link.log dummy_mpiio_test.txt
     fi
     # --- END Manual MPI-IO Link Test ---
 
     # --- Install HDF5 (with Parallel, Fortran, C++) ---
-    # Rely on set -e and the manual test above
+    # Simplified: Rely on mpicc wrapper and ldconfig
     echo "--- Building HDF5 ---"
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
     wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
@@ -192,9 +180,8 @@ EOF
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
-    # Set LDFLAGS just in case configure uses it differently than mpicc
-    export LDFLAGS="-L/usr/local/lib"
-    echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
+    # No longer explicitly setting LDFLAGS here
+    echo "--- Running HDF5 configure ---"
     ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -204,8 +191,7 @@ EOF
         --enable-shared \
         --disable-static \
         --enable-unsupported
-    # If configure fails, set -e should catch it now that the link test passed
-    unset LDFLAGS
+    # set -e should handle exit if configure fails now that the manual link test passed
     echo "*** Running make -j$(nproc) for HDF5 ***"
     make -j$(nproc)
     echo "*** Running make install for HDF5 SERIAL ***"
@@ -214,6 +200,7 @@ EOF
     rm -rf hdf5-${HDF5_VERSION}*
 
     # --- Install AMReX ---
+    # Simplified: No explicit LDFLAGS in cmake call
     echo "--- Building AMReX ---"
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
@@ -229,7 +216,6 @@ EOF
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
         -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};/usr/local" # Point to HDF5 and MPI
-    # set -e should handle cmake failure
     echo "*** Running make -j$(nproc) for AMReX ***"
     make -j$(nproc)
     echo "*** Running make install for AMReX SERIAL ***"
@@ -238,6 +224,7 @@ EOF
     rm -rf amrex
 
     # --- Install HYPRE ---
+    # Simplified: No explicit LDFLAGS
     echo "--- Building HYPRE ---"
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
@@ -249,7 +236,6 @@ EOF
         --enable-shared \
         CFLAGS="-O3 -march=native" \
         CXXFLAGS="-O3 -march=native"
-    # set -e should handle configure failure
     echo "*** Running make -j$(nproc) for HYPRE ***"
     make -j$(nproc)
     echo "*** Running make install for HYPRE SERIAL ***"
