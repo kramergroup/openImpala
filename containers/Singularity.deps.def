@@ -169,24 +169,25 @@ From: rockylinux:8
     export HDF5_VERSION=1.12.3
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
-    # OPENIMPALA_VERSION is not relevant for this dependency image
 
     # Installation prefixes
     export CMAKE_HOME=/opt/cmake/${CMAKE_VERSION}
     export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
     export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
     export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
-    # OPENIMPALA_DIR is not defined here
+    # --- ADD THESE LINES ---
+    export H5CPP_HOME=${HDF5_HOME} # Set H5CPP_HOME based on HDF5_HOME
+    export TIFF_HOME=/usr          # Set TIFF_HOME for dnf installation
+    # --- END ADDED LINES ---
 
     # Add binaries to PATH
     export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
-    # Do not add OpenImpala paths yet
 
-    # Add libraries to LD_LIBRARY_PATH
-    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
+    # Add libraries to LD_LIBRARY_PATH (Corrected for Rocky's lib64)
+    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${TIFF_HOME}/lib64:/usr/local/lib:${LD_LIBRARY_PATH}
 
-    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies
-    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
+    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies (Add TIFF_HOME)
+    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:${TIFF_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
 
     # Ensure OpenMPI runs correctly within Singularity
     export OMPI_MCA_btl_vader_single_copy_mechanism=none
