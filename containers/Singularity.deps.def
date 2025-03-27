@@ -18,7 +18,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.14-deps-gcc11-serial-mpi-install # <-- UPDATE AS NEEDED (Incremented for serial MPI install fix)
+    Version 2.15-deps-gcc11-cmake-debug # <-- UPDATE AS NEEDED (Added CMake debug)
 
 %post
     # Define versions used throughout the build
@@ -73,9 +73,19 @@ From: rockylinux:8
         wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         mkdir -p ${CMAKE_INSTALL_PREFIX}
         tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
+        # --- Add CMake verification ---
+        echo "--- Verifying CMake installation ---"
+        ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake || echo "*** CMake executable NOT FOUND after tar ***"
+        ${CMAKE_INSTALL_PREFIX}/bin/cmake --version || echo "*** CMake --version command FAILED after tar ***"
+        # --- End CMake verification ---
         rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
         export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH} # Add CMake to PATH for subsequent steps
-        cmake --version
+        # --- Add PATH verification ---
+        echo "--- Verifying CMake via PATH ---"
+        which cmake || echo "*** which cmake FAILED after adding to PATH ***"
+        cmake --version || echo "*** cmake --version via PATH FAILED ***"
+        # --- End PATH verification ---
+
 
         # --- Install OpenMPI (Recent Version) ---
         echo "--- Building OpenMPI ---"
@@ -106,19 +116,19 @@ From: rockylinux:8
         make -j$(nproc) LDFLAGS="-lfl"
 
         # ---->> INSTALL OpenMPI SERIALLY (Removed -j) <<----
-        echo "*** Running make install serially ***"
-        make install LDFLAGS="-lfl"
+        echo "*** Running make install serially ***" # Corrected echo
+        make install LDFLAGS="-lfl" # Still includes LDFLAGS
 
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
 
         # --- Add extra check right after install ---
-        echo "*** Verifying mpicc existence immediately after install Exit Code: $MPI_INSTALL_EXIT_CODE ***"
+        echo "*** Verifying mpicc existence immediately after install - Exit Code: $MPI_INSTALL_EXIT_CODE ***" # Corrected echo
         ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
         # --- End extra check ---
 
-        echo "*** OpenMPI 'make install' finished with exit code: $MPI_INSTALL_EXIT_CODE ***"
+        echo "*** OpenMPI make install finished with exit code: $MPI_INSTALL_EXIT_CODE ***" # Tidied up echo
         if [ $MPI_INSTALL_EXIT_CODE -ne 0 ]; then
-            echo "*** ERROR: OpenMPI 'make install' explicitly failed! Exit code: $MPI_INSTALL_EXIT_CODE ***"
+            echo "*** ERROR: OpenMPI make install explicitly failed! Exit code: $MPI_INSTALL_EXIT_CODE ***"
             exit $MPI_INSTALL_EXIT_CODE
         fi
 
@@ -130,7 +140,6 @@ From: rockylinux:8
             which mpicc || echo "*** which mpicc command failed? ***"
             /usr/local/bin/mpicc --version || echo "*** mpicc --version command failed? ***"
         else
-            # This part should ideally not be reached if make install worked, but keep it as a final safeguard
             echo "*** !! MPICC FILE NOT FOUND in final check !! ***"
             echo "*** Contents of /usr/local/bin: ***"
             ls -l /usr/local/bin || echo "*** ls /usr/local/bin FAILED ***"
@@ -272,7 +281,8 @@ From: rockylinux:8
 
     # This check should now pass if make install worked
     which mpicc && mpicc --version || (echo "ERROR: mpicc not found or failed!"; exit 1)
-    which cmake && cmake --version || exit 1
+    # This check should pass if CMake install worked and PATH is correct
+    which cmake && cmake --version || (echo "ERROR: cmake not found or failed!"; exit 1)
     which gcc && gcc --version | grep "(GCC) 11." || (echo "ERROR: GCC is not version 11!"; gcc --version; exit 1)
 
     # Check if libraries are found by linker (simple ldd check)
