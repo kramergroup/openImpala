@@ -7,7 +7,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.21-deps-gcc11-source-scl # <-- Updated version
+    Version 2.22-deps-gcc11-hdf5-link-fix # <-- Updated version
 
 %post
     set -e # Ensure commands exit on error early
@@ -20,13 +20,12 @@ From: rockylinux:8
     export HYPRE_VERSION=v2.30.0
 
     # Update and install base utilities & repositories
+    # ... (dnf commands as before) ...
     dnf update -y
     dnf install -y dnf-utils
     dnf config-manager --set-enabled powertools
     dnf install -y epel-release
     dnf update -y
-
-    # Install 'Development Tools' group, base GCC/GFortran (for bootstrap), GCC Toolset 11, AND other required packages
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
@@ -49,14 +48,13 @@ From: rockylinux:8
     echo "=== Sourcing GCC Toolset 11 enable script ==="
     source /opt/rh/gcc-toolset-11/enable
     echo "--- Now using GCC $(gcc --version) ---"
-    # Check if SCL variables are set now
     echo "--- SCL ACTIVE? ---"
     env | grep SCL || echo "No SCL variables found"
     echo "--- Current PATH ---"
     echo "$PATH"
     # -----------------------------------------
 
-    # Re-export versions (might not be strictly needed now, but safe)
+    # Re-export versions
     export CMAKE_VERSION=${CMAKE_VERSION}
     export OPENMPI_VERSION=${OPENMPI_VERSION}
     export HDF5_VERSION=${HDF5_VERSION}
@@ -64,28 +62,27 @@ From: rockylinux:8
     export HYPRE_VERSION=${HYPRE_VERSION}
 
     # --- Install CMake (Recent Version) ---
+    # ... (CMake install and verification as before) ...
     echo "--- Installing CMake ---"
     export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
     wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
     mkdir -p ${CMAKE_INSTALL_PREFIX}
     tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
     echo "--- Verifying CMake installation ---"
-    ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake # Check existence
-    ${CMAKE_INSTALL_PREFIX}/bin/cmake --version # Check execution
+    ls -l ${CMAKE_INSTALL_PREFIX}/bin/cmake
+    ${CMAKE_INSTALL_PREFIX}/bin/cmake --version
     rm -f cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-    # Add CMake to PATH *after* sourcing SCL to ensure precedence if needed
     export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
     echo "--- Verifying CMake via PATH ---"
-    which cmake # Check if in path
-    cmake --version # Check execution via path
+    which cmake && cmake --version || exit 1
 
     # --- Install OpenMPI (Recent Version) ---
+    # ... (OpenMPI configure, build, install log capture, verification as before) ...
     echo "--- Building OpenMPI ---"
     export OPENMPI_INSTALL_PREFIX=/usr/local
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
-    # Explicitly set compilers AGAIN after sourcing SCL
     export CC=$(which gcc)
     export CXX=$(which g++)
     export FC=$(which gfortran)
@@ -98,39 +95,28 @@ From: rockylinux:8
         --enable-shared \
         --enable-static=no \
         CC="$CC" CXX="$CXX" FC="$FC"
-
-    # --- Check config.log ---
     if [ -f config.log ]; then
-        echo "--- Found config.log, tailing last 50 lines: ---"
-        tail -n 50 config.log || echo "Tailing config.log failed"
-        echo "--- End config.log tail ---"
+        echo "--- Found OpenMPI config.log, tailing last 50 lines: ---"
+        tail -n 50 config.log || echo "Tailing OpenMPI config.log failed"
+        echo "--- End OpenMPI config.log tail ---"
     else
-        echo "--- config.log not found after configure ---"
+        echo "--- OpenMPI config.log not found after configure ---"
     fi
-    # --- End check ---
-
     echo "*** Running make -j$(nproc) ***"
     make -j$(nproc) LDFLAGS="-lfl" # Build parallel
-
     echo "*** Running make install SERIAL NO LDFLAGS capturing output ***"
-    # Capture output and handle potential failure
     make install > /tmp/build_src/mpi_install.log 2>&1 || { \
-        echo "*** ERROR: make install returned non-zero status! Log below: ***"; \
+        echo "*** ERROR: OpenMPI make install returned non-zero status! Log below: ***"; \
         cat /tmp/build_src/mpi_install.log; \
         exit 1; \
     }
-    # If make install succeeded (exit 0), print the log anyway
     echo "*** make install finished exit 0, install log contents: ***"
     cat /tmp/build_src/mpi_install.log || echo "Failed to cat mpi_install.log"
     echo "*** End make install log ***"
-
     echo "*** Verifying mpicc existence immediately after install ***"
     ls -l /usr/local/bin/mpicc || echo "*** /usr/local/bin/mpicc NOT FOUND immediately after install ***"
-
     cd ..
     rm -rf openmpi-${OPENMPI_VERSION}* mpi_install.log
-
-    # --- Run ldconfig after MPI install ---
     echo "Running ldconfig..."
     ldconfig
 
@@ -144,6 +130,10 @@ From: rockylinux:8
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
+    # --- Explicitly add LDFLAGS for OpenMPI ---
+    export LDFLAGS="-L/usr/local/lib"
+    echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
+    # Capture configure output and check config.log on failure
     ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -152,15 +142,29 @@ From: rockylinux:8
         --enable-cxx \
         --enable-shared \
         --disable-static \
-        --enable-unsupported
+        --enable-unsupported > /tmp/build_src/hdf5_configure.log 2>&1 || { \
+            echo "*** ERROR: HDF5 configure failed! config.log tail below: ***"; \
+            tail -n 100 config.log || echo "Failed to tail config.log"; \
+            echo "*** Full configure output: ***"; \
+            cat /tmp/build_src/hdf5_configure.log || echo "Failed to cat hdf5_configure.log"; \
+            exit 1; \
+        }
+    # If configure succeeded, maybe still show end of config.log for MPI-IO check
+    echo "--- HDF5 configure finished (exit 0), tailing config.log for MPI-IO check: ---"
+    grep -A 10 -B 5 'MPI-IO C program' config.log || echo "MPI-IO check section not found in config.log tail"
+    echo "--- End HDF5 config.log tail ---"
+    # Unset LDFLAGS after configure (might interfere with make?)
+    unset LDFLAGS
+
     echo "*** Running make -j$(nproc) for HDF5 ***"
     make -j$(nproc) # Build parallel
     echo "*** Running make install for HDF5 SERIAL ***"
     make install # Install serial
     cd ..
-    rm -rf hdf5-${HDF5_VERSION}*
+    rm -rf hdf5-${HDF5_VERSION}* hdf5_configure.log # Clean up log
 
     # --- Install AMReX (Recent Stable Tag using CMake) ---
+    # ... (AMReX install as before, with serial make install) ...
     echo "--- Building AMReX ---"
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
@@ -183,7 +187,9 @@ From: rockylinux:8
     cd ../..
     rm -rf amrex
 
+
     # --- Install HYPRE (Recent Stable Tag) ---
+    # ... (HYPRE install as before, with serial make install) ...
     echo "--- Building HYPRE ---"
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
@@ -211,10 +217,8 @@ From: rockylinux:8
     dnf clean all
 
 %environment
-    # --- Activate GCC Toolset 11 by default ---
-    # NOTE: This might still not work reliably in `exec` context, keep explicit sourcing in workflow for now.
+    # ... (Environment section unchanged) ...
     source /opt/rh/gcc-toolset-11/enable
-    # ... (rest of environment section as before) ...
     export LC_ALL=C
     export LANG=C
     export CMAKE_VERSION=3.28.3
@@ -235,50 +239,36 @@ From: rockylinux:8
     export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %test
-    set -e # Exit immediately if any command fails
-
-    # --- Activate GCC Toolset 11 ---
+    # ... (Test section unchanged - still has set -e) ...
+    set -e
     source /opt/rh/gcc-toolset-11/enable
-    # -------------------------------
-
     echo "--- Verifying Tool Versions ---"
     echo "--- Contents of /usr/local/bin at start of %test ---"
     ls -l /usr/local/bin
-
     echo "Checking mpicc..."
     which mpicc
     mpicc --version
-
-    echo "Checking mpic++..." # Check mpic++ too now
+    echo "Checking mpic++..."
     which mpic++
     mpic++ --version
-
     echo "Checking cmake..."
     which cmake
     cmake --version
-
     echo "Checking gcc version..."
     which gcc
-    gcc --version | grep "(GCC) 11." # grep exits non-zero if no match
-
+    gcc --version | grep "(GCC) 11."
     echo "--- Verifying Library Linking ---"
-    # Use direct paths and check exit code of ldd explicitly
     echo "Checking HDF5 lib (/opt/hdf5/${HDF5_VERSION}/lib/libhdf5.so)..."
     ldd "/opt/hdf5/${HDF5_VERSION}/lib/libhdf5.so"
-
     echo "Checking AMReX lib (/opt/amrex/${AMREX_VERSION}/lib/libamrex.so)..."
     ldd "/opt/amrex/${AMREX_VERSION}/lib/libamrex.so"
-
     echo "Checking HYPRE lib (/opt/hypre/${HYPRE_VERSION}/lib/libHYPRE.so)..."
     ldd "/opt/hypre/${HYPRE_VERSION}/lib/libHYPRE.so"
-
     echo "Checking OpenMPI lib (/usr/local/lib/libmpi.so)..."
     ldd "/usr/local/lib/libmpi.so"
-
     echo "--- Basic dependency container tests passed. ---"
-    # This line will only be reached if ALL previous commands succeeded
 
 %runscript
-    # ... (runscript section as before) ...
+    # ... (Runscript section unchanged) ...
     echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
