@@ -7,7 +7,7 @@ From: rockylinux:8
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.17-deps-gcc11-final-fixes # <-- Updated version
+    Version 2.18-deps-gcc11-final-fixes-v2 # <-- Updated version
 
 %post
     set -e # Ensure dnf commands exit on error early
@@ -93,7 +93,7 @@ From: rockylinux:8
             CC="$CC" CXX="$CXX" FC="$FC"
         echo "*** Running make -j$(nproc) ***"
         make -j$(nproc) LDFLAGS="-lfl" # Build parallel
-        echo "*** Running make install SERIAL NO LDFLAGS ***" # Corrected echo line
+        echo "*** Running make install SERIAL NO LDFLAGS ***" # Corrected echo
         make install # Install serial, NO LDFLAGS
         echo "*** Verifying mpicc existence immediately after install ***"
         ls -l /usr/local/bin/mpicc # Check existence
@@ -122,7 +122,7 @@ From: rockylinux:8
             --enable-unsupported
         echo "*** Running make -j$(nproc) for HDF5 ***"
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for HDF5 (SERIAL) ***"
+        echo "*** Running make install for HDF5 SERIAL ***" # Corrected echo
         make install # Install serial
         cd ..
         rm -rf hdf5-${HDF5_VERSION}*
@@ -145,7 +145,7 @@ From: rockylinux:8
             -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
         echo "*** Running make -j$(nproc) for AMReX ***"
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for AMReX (SERIAL) ***"
+        echo "*** Running make install for AMReX SERIAL ***" # Corrected echo
         make install # Install serial
         cd ../..
         rm -rf amrex
@@ -164,7 +164,7 @@ From: rockylinux:8
             CXXFLAGS="-O3 -march=native"
         echo "*** Running make -j$(nproc) for HYPRE ***"
         make -j$(nproc) # Build parallel
-        echo "*** Running make install for HYPRE (SERIAL) ***"
+        echo "*** Running make install for HYPRE SERIAL ***" # Corrected echo
         make install # Install serial
         cd ../..
         rm -rf hypre
