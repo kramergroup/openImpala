@@ -106,7 +106,7 @@ From: rockylinux:8
         make -j$(nproc) LDFLAGS="-lfl"
 
         # ---->> INSTALL OpenMPI SERIALLY (Removed -j) <<----
-        echo "*** Running make install (serially) ***"
+        echo "*** Running make install serially ***"
         make install LDFLAGS="-lfl"
 
         MPI_INSTALL_EXIT_CODE=$? # Capture exit code immediately
