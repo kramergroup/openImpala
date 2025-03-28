@@ -2,11 +2,23 @@ Bootstrap: docker
 From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
 %help
-    # ... (Help section) ...
+    Container providing the build environment and runtime dependencies for OpenImpala.
+
+    Installs:
+      * Rocky Linux 8 Base OS & Updates
+      * Development Tools (GCC 11 via Toolset, Make, etc.) & Fortran Compiler
+      * OpenMPI 4.1.6 (built from source, with IB support, using GCC 11)
+      * CMake 3.28.3 (binary distribution)
+      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source w/ GCC 11 & OpenMPI)
+      * AMReX 23.11 (built from source w/ GCC 11, MPI, OMP, EB)
+      * HYPRE v2.30.0 (built from source w/ GCC 11, MPI)
+      * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
+
+    This container is intended to be used as a base or cache for building OpenImpala itself.
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.33-deps-gcc11-path-fix-v2 # <-- Updated version
+    Version 2.34-deps-gcc11-rpath-fix # <-- Updated version
 
 %post
     set -e # Ensure commands exit on error early
@@ -71,6 +83,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         --enable-orterun-prefix-by-default --enable-mpirun-prefix-by-default \
         --with-verbs --enable-shared --enable-static=no \
         CC="$CC" CXX="$CXX" FC="$FC"
+    # ... (config.log check is optional now) ...
     make -j$(nproc) LDFLAGS="-lfl"
     make install # Serial, No LDFLAGS
     cd .. && rm -rf openmpi-${OPENMPI_VERSION}*
@@ -82,10 +95,10 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- PATH after OpenMPI prepend: $PATH ---"
     echo "--- Verifying mpicc ---"
     which mpicc && mpicc --version || { echo "mpicc verification failed!"; exit 1; }
-    ldconfig -p | grep libmpi || echo "WARNING: libmpi still not found in ldconfig cache"
+    ldconfig -p | grep libmpi || echo "WARNING: libmpi not found in ldconfig cache"
     # ----------------------------------------------------
 
-    # --- Manual MPI-IO Test (Rely on PATH and ldconfig) ---
+    # --- Manual MPI-IO Test (Rely on PATH and ldconfig - should pass now) ---
     echo "--- Attempting manual MPI-IO link test ---"
     cat << EOF > /tmp/build_src/test_mpiio.c
 #include <stdio.h>
@@ -94,7 +107,7 @@ int main(int argc, char **argv) { MPI_File fh; MPI_Init(&argc, &argv); if(MPI_CO
 EOF
     echo "--- Running: mpicc test_mpiio.c -o test_mpiio ---"
     mpicc /tmp/build_src/test_mpiio.c -o /tmp/build_src/test_mpiio
-    echo "--- Manual MPI-IO link test SUCCEEDED ---" # If we get here, it worked due to set -e
+    echo "--- Manual MPI-IO link test SUCCEEDED ---" # Assumes success due to set -e
     rm -f /tmp/build_src/test_mpiio.c /tmp/build_src/test_mpiio dummy.txt
     # ----------------------------------------------------
 
@@ -103,8 +116,11 @@ EOF
     wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
     tar -xzf hdf5-${HDF5_VERSION}.tar.gz && cd hdf5-${HDF5_VERSION}
     export CFLAGS="-O3 -march=native"; export CXXFLAGS="${CFLAGS}"; export FCFLAGS="${CFLAGS}"
-    echo "--- Running HDF5 configure ---"
+    # --- Add LDFLAGS with RPATH ---
+    export LDFLAGS="-L/usr/local/lib -Wl,-rpath=/usr/local/lib"
+    echo "--- Running HDF5 configure with LDFLAGS=${LDFLAGS} ---"
     ./configure --prefix=${HDF5_INSTALL_PREFIX} --enable-parallel --enable-fortran --enable-fortran2003 --enable-cxx --enable-shared --disable-static --enable-unsupported
+    unset LDFLAGS # Unset after configure
     make -j$(nproc) && make install # Serial install
     # --- Update PATH AFTER HDF5 install ---
     export PATH=${HDF5_INSTALL_PREFIX}/bin:${PATH} # Prepend HDF5 bins
@@ -117,13 +133,20 @@ EOF
     echo "--- Building AMReX ---"
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex && mkdir build && cd build
+    # --- Add LDFLAGS with RPATH to CMake linker flags ---
+    export LDFLAGS="-L/usr/local/lib -Wl,-rpath=/usr/local/lib -L${HDF5_INSTALL_PREFIX}/lib -Wl,-rpath=${HDF5_INSTALL_PREFIX}/lib"
+    echo "--- Running AMReX cmake with LDFLAGS=${LDFLAGS} applied to linker flags ---"
     cmake .. -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
         -DAMReX_MPI=ON -DAMReX_OMP=ON -DAMReX_EB=ON \
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};${OPENMPI_INSTALL_PREFIX}" # Use install prefixes
+        -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
+        -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}" \
+        -DCMAKE_MODULE_LINKER_FLAGS="${LDFLAGS}" \
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};${OPENMPI_INSTALL_PREFIX}"
+    unset LDFLAGS # Unset after cmake
     make -j$(nproc) && make install # Serial install
     cd ../.. && rm -rf amrex
 
@@ -131,8 +154,12 @@ EOF
     echo "--- Building HYPRE ---"
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
+    # --- Add LDFLAGS with RPATH for HYPRE configure ---
+    export LDFLAGS="-L/usr/local/lib -Wl,-rpath=/usr/local/lib"
+    echo "--- Running HYPRE configure with LDFLAGS=${LDFLAGS} ---"
     ./configure --prefix=${HYPRE_INSTALL_PREFIX} --with-MPI --enable-shared \
         CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
+    unset LDFLAGS # Unset after configure
     make -j$(nproc) && make install # Serial install
     cd ../.. && rm -rf hypre
 
@@ -147,11 +174,14 @@ EOF
     # Define environment referencing the FINAL locations
     source /opt/rh/gcc-toolset-11/enable
     export LC_ALL=C; export LANG=C
+    # Define versions used in %post
     export CMAKE_VERSION=3.28.3; export OPENMPI_VERSION=4.1.6; export HDF5_VERSION=1.12.3; export AMREX_VERSION=23.11; export HYPRE_VERSION=v2.30.0
-    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION} # Keep definition consistent
+    # Define install prefixes based on versions
+    export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+    export OPENMPI_INSTALL_PREFIX=/usr/local # Added for consistency
     # Define HOME vars based on install prefixes
     export CMAKE_HOME=${CMAKE_INSTALL_PREFIX}
     export HDF5_HOME=${HDF5_INSTALL_PREFIX}
@@ -159,17 +189,16 @@ EOF
     export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
     export H5CPP_HOME=${HDF5_HOME}
     export TIFF_HOME=/usr
-    # Set PATH using installed locations. Prepending ensures they take precedence.
-    # Sourcing SCL should handle its own paths correctly.
-    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:${AMREX_HOME}/bin:${HYPRE_HOME}/bin:/usr/local/bin:${PATH}
-    # Set LD_LIBRARY_PATH using installed locations
-    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${TIFF_HOME}/lib64:${LD_LIBRARY_PATH}
+    # Set PATH prepending installed locations
+    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
+    # Set LD_LIBRARY_PATH prepending installed locations
+    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${TIFF_HOME}/lib64:${LD_LIBRARY_PATH}
     # Set CMAKE_PREFIX_PATH using installed locations
-    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:/usr/local:${TIFF_HOME}:${CMAKE_PREFIX_PATH}
+    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:${OPENMPI_INSTALL_PREFIX}:${TIFF_HOME}:${CMAKE_PREFIX_PATH}
+    # OpenMPI runtime settings
     export OMPI_MCA_btl_vader_single_copy_mechanism=none; export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %test
-    # ... (Test section unchanged, relies on %environment setup) ...
     set -e
     source /opt/rh/gcc-toolset-11/enable
     echo "--- Verifying Tool Versions ---"; echo "--- Contents of /usr/local/bin at start of %test ---"; ls -l /usr/local/bin
@@ -178,13 +207,12 @@ EOF
     echo "Checking cmake..."; which cmake; cmake --version
     echo "Checking gcc version..."; which gcc; gcc --version | grep "(GCC) 11."
     echo "--- Verifying Library Linking ---"
-    echo "Checking HDF5 lib (/opt/hdf5/${HDF5_VERSION}/lib/libhdf5.so)..."; ldd "/opt/hdf5/${HDF5_VERSION}/lib/libhdf5.so"
-    echo "Checking AMReX lib (/opt/amrex/${AMREX_VERSION}/lib/libamrex.so)..."; ldd "/opt/amrex/${AMREX_VERSION}/lib/libamrex.so"
-    echo "Checking HYPRE lib (/opt/hypre/${HYPRE_VERSION}/lib/libHYPRE.so)..."; ldd "/opt/hypre/${HYPRE_VERSION}/lib/libHYPRE.so"
-    echo "Checking OpenMPI lib (/usr/local/lib/libmpi.so)..."; ldd "/usr/local/lib/libmpi.so"
+    echo "Checking HDF5 lib (${HDF5_INSTALL_PREFIX}/lib/libhdf5.so)..."; ldd "${HDF5_INSTALL_PREFIX}/lib/libhdf5.so"
+    echo "Checking AMReX lib (${AMREX_INSTALL_PREFIX}/lib/libamrex.so)..."; ldd "${AMREX_INSTALL_PREFIX}/lib/libamrex.so"
+    echo "Checking HYPRE lib (${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so)..."; ldd "${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so"
+    echo "Checking OpenMPI lib (${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so)..."; ldd "${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so"
     echo "--- Basic dependency container tests passed. ---"
 
 %runscript
-    # ... (Runscript section unchanged) ...
     echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
