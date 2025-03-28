@@ -2,28 +2,23 @@ Bootstrap: docker
 From: rockylinux:8
 
 %help
-    Container with environment for building and running OpenImpala.
+    Container providing the build environment and runtime dependencies for OpenImpala.
 
-    Builds OpenImpala from the 'working' branch by default.
+    Installs:
+      * Rocky Linux 8 Base OS & Updates
+      * Development Tools (GCC 8.5, Make, etc.) & Fortran Compiler
+      * OpenMPI 4.1.6 (built from source, with IB support)
+      * CMake 3.28.3 (built from source)
+      * HDF5 1.12.3 (Parallel, Fortran, C++, built from source)
+      * AMReX 23.11 (built from source, MPI, OMP, EB)
+      * HYPRE v2.30.0 (built from source, MPI)
+      * Support libraries: libtiff, boost, python3, hwloc, libevent, flex, bison
 
-    Includes:
-      * Rocky Linux 8 Base
-      * GCC 8.5 (from Development Tools)
-      * OpenMPI 4.1.6 (with IB support)
-      * CMake 3.28.3
-      * HDF5 1.12.3 (Parallel, Fortran, C++)
-      * AMReX 23.11 (MPI, OMP, EB)
-      * HYPRE v2.30.0 (MPI)
-      * libtiff, boost, python3, hwloc, libevent, flex, bison
-
-    Usage:
-      singularity build openimpala.sif Singularity.def # Use sudo if needed
-      singularity exec -B $PWD:/data openimpala.sif Diffusion /data/inputs
-      mpirun -np 4 singularity exec -B $PWD:/data openimpala.sif Diffusion /data/inputs
+    This container is intended to be used as a base or cache for building OpenImpala itself.
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.5 # <-- UPDATE AS NEEDED (Incremented for build fix)
+    Version 2.5-deps # <-- Version indicates dependency build
 
 %post
     # Define versions used throughout the build
@@ -41,7 +36,7 @@ From: rockylinux:8
     dnf update -y
 
     # Install 'Development Tools' group AND other required packages
-    # Added flex-devel for libfl library needed by OpenMPI link stage
+    # Use @'Group Name' syntax for the group
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
@@ -73,16 +68,14 @@ From: rockylinux:8
     wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
     tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
     cd openmpi-${OPENMPI_VERSION}
-    # Configure should now find a working C compiler and base libraries
-    # LDFLAGS="-lfl" is now passed only to make/install below
-    ./configure \
+    # Added LDFLAGS="-lfl" to link against flex library
+    LDFLAGS="-lfl" ./configure \
        --prefix=${OPENMPI_INSTALL_PREFIX} \
        --enable-orterun-prefix-by-default \
        --enable-mpirun-prefix-by-default \
        --with-verbs \
        --enable-shared \
        --enable-static=no
-    # Add LDFLAGS="-lfl" to make and make install
     make -j$(nproc) LDFLAGS="-lfl"
     make install LDFLAGS="-lfl"
     cd ..
@@ -111,7 +104,7 @@ From: rockylinux:8
         --enable-cxx \
         --enable-shared \
         --disable-static \
-        --enable-unsupported # <-- Added flag to allow cxx + parallel
+        --enable-unsupported # Allow C++/Parallel
     make -j$(nproc) install
     cd ..
     rm -rf hdf5-${HDF5_VERSION}*
@@ -156,26 +149,10 @@ From: rockylinux:8
     cd ../..
     rm -rf hypre
 
-    # --- Build OpenImpala (from 'working' branch) ---
-    # Set environment variables needed specifically for the OpenImpala build step
-    export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
-    export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
-    export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
-    # Ensure libs are findable during build/link phase
-    export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
-    # CMAKE_PREFIX_PATH might be needed if OpenImpala uses CMake internally
-    export CMAKE_PREFIX_PATH=${HDF5_HOME}:${AMREX_HOME}:${HYPRE_HOME}:/usr/local:${CMAKE_PREFIX_PATH}
+    # --- !!! DO NOT BUILD OpenImpala HERE !!! ---
+    # This recipe only prepares the dependencies for caching.
 
-
-    cd / # Or /opt, choose consistent install location
-    echo "Cloning OpenImpala 'working' branch..."
-    git clone --depth 1 --branch working https://github.com/kramergroup/openImpala.git openImpala
-    cd openImpala
-    echo "Building OpenImpala..."
-    # Assuming 'make' is still the primary build method. Requires Makefile to find deps via *_HOME or CMAKE_PREFIX_PATH
-    make -j$(nproc)
-
-    # --- Cleanup ---
+    # --- Final Cleanup ---
     cd /
     rm -rf /tmp/build_src # Remove downloaded sources for dependencies
     dnf clean all
@@ -191,19 +168,18 @@ From: rockylinux:8
     export HDF5_VERSION=1.12.3
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
-    # OPENIMPALA_VERSION could be set dynamically if needed/available
+    # OPENIMPALA_VERSION is not relevant for this dependency image
 
     # Installation prefixes
     export CMAKE_HOME=/opt/cmake/${CMAKE_VERSION}
     export HDF5_HOME=/opt/hdf5/${HDF5_VERSION}
     export AMREX_HOME=/opt/amrex/${AMREX_VERSION}
     export HYPRE_HOME=/opt/hypre/${HYPRE_VERSION}
-    export OPENIMPALA_DIR=/openImpala # Assuming cloned to /openImpala
+    # OPENIMPALA_DIR is not defined here
 
     # Add binaries to PATH
     export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
-    # Add executables from OpenImpala build directory (adjust path if needed)
-    export PATH=${OPENIMPALA_DIR}/build/apps:${OPENIMPALA_DIR}/build/tests:${PATH}
+    # Do not add OpenImpala paths yet
 
     # Add libraries to LD_LIBRARY_PATH
     export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
@@ -230,16 +206,12 @@ From: rockylinux:8
     ldd ${HYPRE_HOME}/lib/libHYPRE.so | grep -E 'not found|statically linked' || echo "HYPRE lib OK"
     ldd /usr/local/lib/libmpi.so | grep -E 'not found|statically linked' || echo "OpenMPI lib OK" # Check OpenMPI lib
 
-    # Check if OpenImpala executable exists (adjust path if needed)
+    # DO NOT check for OpenImpala executable here
     echo "--- Verifying OpenImpala Build ---"
-    ls /openImpala/build/apps/Diffusion || exit 1
-    # Optional: Run a quick test bundled with OpenImpala if available
-    # echo "Running quick test..."
-    # cd /openImpala/build/tests && ./tSomeQuickTest || exit 1
+    echo "Skipping OpenImpala check in dependency build."
 
-    echo "--- Basic container tests passed. ---"
+    echo "--- Basic dependency container tests passed. ---"
 
 %runscript
-    echo "Container for OpenImpala (built from 'working' branch)."
-    echo "Use 'singularity exec' or 'mpirun singularity exec'."
-    echo "Example: singularity exec openimpala.sif Diffusion <path_to_inputs>"
+    echo "Container with build environment and runtime dependencies for OpenImpala."
+    echo "Does not contain OpenImpala itself. Intended for use with CI caching."
