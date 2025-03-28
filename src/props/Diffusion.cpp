@@ -44,7 +44,7 @@ int main (int argc, char* argv[])
 
   // Parameters
   amrex::ParmParse pp;
-  amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
+  amrex::Array<int,AMREX_SPACEDIM> is_periodic{true, true, true};
   amrex::Print() << AMREX_SPACEDIM << "D test" << std::endl;
 
   std::string FILENAME;
@@ -97,7 +97,7 @@ int main (int argc, char* argv[])
     amrex::Real fx;
     amrex::Real fy;
     amrex::Real fz;
-    amrex::Array<int,AMREX_SPACEDIM> is_periodic{false, false, false};
+    amrex::Array<int,AMREX_SPACEDIM> is_periodic{true, true, true};
     
     // Reading the file
     // The Reader potentially holds significant data in memory (the full voxel set).
@@ -121,14 +121,15 @@ int main (int argc, char* argv[])
     ba.maxSize(BOX_SIZE);
       
     dm.define(ba);
-    mf_phase.define(ba,dm,1,1);
+    mf_phase.define(ba,dm,1,2);
       
     // Threshold image data
     reader.threshold(1,mf_phase);
           
     // We have used a fab with one ghost cell to allow for stencil-type operations
     // over the fab. This requires to distribute the ghost cells
-    mf_phase.FillBoundary(geom.periodicity());
+    //mf_phase.FillBoundary(geom.periodicity());
+    mf_phase.FillBoundary();
                                                              
 }
     else if (FILENAME.substr (FILENAME.length() - 3) == "dat")
@@ -220,7 +221,7 @@ int main (int argc, char* argv[])
  
   }
 
-  VolumeFraction vf(mf_phase, 0);
+  VolumeFraction vf(mf_phase, 1);
 
   // Print volume fraction value
   amrex::Print() << std::endl << " Volume Fraction: "
@@ -231,7 +232,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
   // Compute tortuosity in x direction
-  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
+  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
   amrex::Real tau_value_x = tortuosityx.value();
   amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
@@ -242,7 +243,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Y" << std::endl;
 
   // Compute tortuosity in y direction
-  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
+  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
   amrex::Real tau_value_y = tortuosityy.value();
   amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;
@@ -253,7 +254,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Z" << std::endl;
 
   // Compute tortuosity in z direction
-  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
+  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;
@@ -264,7 +265,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
   // Compute tortuosity in x direction
-  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),0,Direction::X,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
+  TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),1,Direction::X,TortuosityHypre::SolverType::Jacobi, RESULTS_PATH);
 
   amrex::Real tau_value_x = tortuosityx.value();
   amrex::Print() << " Tortuosity value: " << tau_value_x << std::endl;
@@ -272,7 +273,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Y" << std::endl;
 
   // Compute tortuosity in y direction
-  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),0,Direction::Y,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
+  TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),1,Direction::Y,TortuosityHypre::SolverType::Jacobi, RESULTS_PATH);
 
   amrex::Real tau_value_y = tortuosityy.value();
   amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;
@@ -280,7 +281,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: Z" << std::endl;
 
   // Compute tortuosity in z direction
-  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),0,Direction::Z,TortuosityHypre::SolverType::FlexGMRES, RESULTS_PATH);
+  TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),1,Direction::Z,TortuosityHypre::SolverType::Jacobi, RESULTS_PATH);
 
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;

@@ -29,7 +29,7 @@ class TortuosityHypre : public Tortuosity
     enum SolverType {
       Jacobi,
       GMRES,
-      FlexGMRES
+      FlexGMRES,
     };
 
     /** Construct new Tortuosity solver
@@ -203,7 +203,7 @@ class TortuosityHypre : public Tortuosity
     bool m_first_call;
 
     /** Inlet concentration value */
-    const amrex::Real m_vlo = -1.0;
+    const amrex::Real m_vlo = 0.0;
 
     /** Outlet concentration value */
     const amrex::Real m_vhi = +1.0;

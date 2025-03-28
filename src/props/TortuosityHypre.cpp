@@ -44,6 +44,7 @@ void TortuosityHypre::setupGrids()
 
   // 1 - Initialise the grid owned by this MPI rank
   HYPRE_StructGridCreate(MPI_COMM_WORLD, AMREX_SPACEDIM, &m_grid);
+ 
 
   // 2 - Configure the dimensions of each box owned by this MPI rank
   int ilower[2], iupper[2];
@@ -54,13 +55,47 @@ void TortuosityHypre::setupGrids()
     auto hi = TortuosityHypre::hiV(bx);
 
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
+    
+    /*
+    int periodic[3] = {hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]};
 
+    HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    */
+      // 3 - Set grid to be periodic
+    /*
+  const amrex::Box domain = m_geom.Domain();
+  auto domainlo = TortuosityHypre::loV(domain);
+  auto domainhi = TortuosityHypre::hiV(domain);    
+  int periodic[3] = {domainhi[0]-domainlo[0], domainhi[1]-domainlo[1], domainhi[2]-domainlo[2]};
+    
+  amrex::Print() << std::endl << " Domain low: "
+                    << domainlo << std::endl << " Domain high: "
+                    << domainhi << std::endl;
+                    
+  HYPRE_StructGridSetPeriodic(m_grid, periodic);
+  */
+    
   }
-
-  // 3 - Finish setup
-   HYPRE_StructGridAssemble(m_grid);
+  
+   // 3 - Set grid to be periodic
+  /*
+  const amrex::Box domain = m_geom.Domain();
+  auto domainlo = TortuosityHypre::loV(domain);
+  auto domainhi = TortuosityHypre::hiV(domain);    
+  int periodic[3] = {domainhi[0]-domainlo[0], domainhi[1]-domainlo[1], domainhi[2]-domainlo[2]};
+    
+  amrex::Print() << std::endl << " Domain low: "
+                    << domainlo << std::endl << " Domain high: "
+                    << domainhi << std::endl;  
+                    
+  int periodic[3] = {10, 10, 10};
+  HYPRE_StructGridSetPeriodic(m_grid, periodic);
+  */
+      
+  // 4 - Finish setup 
+  HYPRE_StructGridAssemble(m_grid);
+  
 }
-
 
 /**
  *
@@ -252,18 +287,23 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       solve();
     }
 
-    amrex::Real fluxlo = 0.0;
-    amrex::Real fluxhi = 0.0;
-    amrex::Real phisumlo = 0.0;
-    amrex::Real phisumhi = 0.0;
+
+    amrex::Real fluxx = 0.0;
+    amrex::Real fluxy = 0.0;
+    amrex::Real fluxz = 0.0;
+    amrex::Real phisumx = 0.0;
+    amrex::Real phisumy = 0.0;
+    amrex::Real phisumz = 0.0;
     int num_phase_cells_0 = 0;
     int num_phase_cells_1 = 0;
     int num_phase_cells_2 = 0;
-    int num_phase_cells_3 = 0;
+    int source_cells_x = 0;
+    int sink_cells_x = 0;
+    int source_cells_y = 0;
+    int sink_cells_y = 0;
+    int source_cells_z = 0;
+    int sink_cells_z = 0;
 
-    // Iterate over all boxes and count cells with value=m_phase
-    if ( m_dir==0)
-    {
     for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     {
       const amrex::Box& box = mfi.validbox();
@@ -282,137 +322,124 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
 
       // Sum all concentration values for each slice in x direction
-      const auto domain_min_x = m_geom.Domain().loVect()[0];
-      if ( lo.x == domain_min_x) {
+      const auto domain_min_x = m_geom.Domain().loVect()[0];      
+      for (int x = lo.x; x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
-                if ( phase_fab_4(lo.x,y,z) == m_phase && phase_fab_4(lo.x+1,y,z) == m_phase ) {
-                  phisumlo += phi_fab_4(lo.x+1,y,z) - phi_fab_4(lo.x,y,z);
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) == m_phase) {
+                  phisumx += phi_fab_4(x+1,y,z) - phi_fab_4(x,y,z);
                   num_phase_cells_0 += 1;
-              }
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) != m_phase) {
+                  sink_cells_x += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x-1,y,z) != m_phase) {
+                  source_cells_x += 1;
+                }  
             }
         }
       }
-
-      const auto domain_max_x = m_geom.Domain().hiVect()[0];;
-      if ( hi.x == domain_max_x) {
-            for (int y = lo.y; y <= hi.y; ++y) {
+      
+      // Sum all concentration values for each slice in y direction    
+      for (int y = lo.y; y <= hi.y; ++y) {
+            for (int x = lo.x; x <= hi.x; ++x) {
               for (int z = lo.z; z <= hi.z; ++z) {
-                if ( phase_fab_4(hi.x,y,z) == m_phase && phase_fab_4(hi.x-1,y,z) == m_phase ) {
-                  phisumhi += phi_fab_4(hi.x,y,z) - phi_fab_4(hi.x-1,y,z);
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) == m_phase) {
+                  phisumy += phi_fab_4(x,y+1,z) - phi_fab_4(x,y,z);
                   num_phase_cells_1 += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) != m_phase) {
+                  sink_cells_y += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y-1,z) != m_phase) {
+                  source_cells_y += 1;
+                }
+            }
+        }
+      }
+
+      // Sum all concentration values for each slice in z direction     
+      for (int z = lo.z; z <= hi.z; ++z) {
+            for (int x = lo.x; x <= hi.x; ++x) {
+              for (int y = lo.y; y <= hi.y; ++y) {
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) == m_phase) {
+                  phisumz += phi_fab_4(x,y,z+1) - phi_fab_4(x,y,z);
+                  num_phase_cells_2 += 1;
               }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) != m_phase) {
+                  sink_cells_z += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z-1) != m_phase) {
+                  source_cells_z += 1;
+                }
             }
         }
       }
-
-    }
-  }
-
-
-  else if ( m_dir==1)
-  {
-  for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
-  {
-    const amrex::Box& box = mfi.validbox();
-    const amrex::IArrayBox& phase_fab = m_mf_phase[mfi];
-    const amrex::FArrayBox& phi_fab = m_mf_phi[mfi];
-
-    // Obtain Array4 from FArrayBox.  We can also do
-    //     Array4<Real> const& a = mf.array(mfi);
-    amrex::Array4<int const> const& phase_fab_4 = phase_fab.array();
-    amrex::Array4<amrex::Real const> const& phi_fab_4 = phi_fab.array();
-
-    size_t idx;
-    // Iterate over all cells in Box and threshold
-    const auto lo = lbound(box);
-    const auto hi = ubound(box);
-
-
-    // Sum all concentration values for each slice in y direction
-    const auto domain_min_y = m_geom.Domain().loVect()[1];
-    if ( lo.y == domain_min_y) {
-          for (int x = lo.x; x <= hi.x; ++x) {
-            for (int z = lo.z; z <= hi.z; ++z) {
-              if ( phase_fab_4(x,lo.y,z) == m_phase && phase_fab_4(x,lo.y+1,z) == m_phase ) {
-                phisumlo += phi_fab_4(x,lo.y+1,z) - phi_fab_4(x,lo.y,z);
-                num_phase_cells_0 += 1;
-            }
-          }
-      }
+      
     }
 
-    const auto domain_max_y = m_geom.Domain().hiVect()[1];;
-    if ( hi.y == domain_max_y) {
-          for (int x = lo.x; x <= hi.x; ++x) {
-            for (int z = lo.z; z <= hi.z; ++z) {
-              if ( phase_fab_4(x,hi.y,z) == m_phase && phase_fab_4(x,hi.y-1,z) == m_phase ) {
-                phisumhi += phi_fab_4(x,hi.y,z) - phi_fab_4(x,hi.y-1,z);
-                num_phase_cells_1 += 1;
-            }
-          }
-      }
-    }
-
-  }
-}
-
-else if ( m_dir==2)
-{
-for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
-{
-  const amrex::Box& box = mfi.validbox();
-  const amrex::IArrayBox& phase_fab = m_mf_phase[mfi];
-  const amrex::FArrayBox& phi_fab = m_mf_phi[mfi];
-
-  // Obtain Array4 from FArrayBox.  We can also do
-  //     Array4<Real> const& a = mf.array(mfi);
-  amrex::Array4<int const> const& phase_fab_4 = phase_fab.array();
-  amrex::Array4<amrex::Real const> const& phi_fab_4 = phi_fab.array();
-
-  size_t idx;
-  // Iterate over all cells in Box and threshold
-  const auto lo = lbound(box);
-  const auto hi = ubound(box);
-
-
-  // Sum all concentration values for each slice in x direction
-  const auto domain_min_z = m_geom.Domain().loVect()[2];
-  if ( lo.z == domain_min_z) {
-        for (int x = lo.x; x <= hi.x; ++x) {
-          for (int y = lo.y; y <= hi.y; ++y) {
-            if ( phase_fab_4(x,y,lo.z) == m_phase && phase_fab_4(x,y,lo.z+1) == m_phase ) {
-              phisumlo += phi_fab_4(x,y,lo.z+1) - phi_fab_4(x,y,lo.z);
-              num_phase_cells_0 += 1;
-          }
-        }
-    }
-  }
-
-  const auto domain_max_z = m_geom.Domain().hiVect()[2];;
-  if ( hi.z == domain_max_z) {
-        for (int x = lo.x; x <= hi.x; ++x) {
-          for (int y = lo.y; y <= hi.y; ++y) {
-            if ( phase_fab_4(x,y,hi.z) == m_phase && phase_fab_4(x,y,hi.z-1) == m_phase ) {
-              phisumhi += phi_fab_4(x,y,hi.z) - phi_fab_4(x,y,hi.z-1);
-              num_phase_cells_1 += 1;
-          }
-        }
-    }
-  }
-
-}
-}
 
     // Reduce parallel processes
     if (!refresh) {
-      amrex::ParallelAllReduce::Sum(phisumlo, amrex::ParallelContext::CommunicatorSub());
+      amrex::ParallelAllReduce::Sum(phisumx, amrex::ParallelContext::CommunicatorSub());
       }
-
+  
+    // Reduce parallel processes
     if (!refresh) {
-      amrex::ParallelAllReduce::Sum(phisumhi, amrex::ParallelContext::CommunicatorSub());
+      amrex::ParallelAllReduce::Sum(phisumy, amrex::ParallelContext::CommunicatorSub());
       }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(phisumz, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(num_phase_cells_0, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(num_phase_cells_1, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(num_phase_cells_2, amrex::ParallelContext::CommunicatorSub());
+      } 
 
+
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_y, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_y, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_z, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_z, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
     // Total problem length each direction
     auto length_x = m_geom.ProbLength(0);
     auto length_y = m_geom.ProbLength(1);
@@ -428,42 +455,61 @@ for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     auto num_cell_y = length_y/dy;
     auto num_cell_z = length_z/dz;
 
+
     // Compute flux between adjacent slices
-    fluxlo = phisumlo / dx * (dy*dz);
-    fluxhi = phisumhi / dx * (dy*dz);
+    fluxx = phisumx * (dx*dy*dz);
+  
+    // Compute flux between adjacent slices
+    fluxy = phisumy * (dx*dy*dz);
+  
+    // Compute flux between adjacent slices
+    fluxz = phisumz * (dx*dy*dz);
+  
+    // Add unit vector to phisum values for diagonal terms
+    if ( m_dir==0)
+    {
+      fluxx = fluxx + (num_phase_cells_0 / (num_cell_x * num_cell_y * num_cell_z));
+    }
+    else if ( m_dir==1)
+    {
+      fluxy = fluxy + (num_phase_cells_1 / (num_cell_x * num_cell_y * num_cell_z));
+    }
+    else if ( m_dir==2)
+    {
+      fluxz = fluxz + (num_phase_cells_2 / (num_cell_x * num_cell_y * num_cell_z));
+    }
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
+  
+      flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
+  
+    // Print all of fluxvect values
+    amrex::Print() << std::endl << " Number of Cells in 1D "
+                    << num_cell_x << std::endl;
 
-    if ( m_dir==0) {
-      flux_max = (m_vhi-m_vlo) / length_x * (length_y*length_z);
-    }
-
-    else if ( m_dir==1) {
-      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_y*num_cell_y));
-    }
-
-    else if ( m_dir==2) {
-      flux_max = ((m_vhi-m_vlo) / length_x * (length_y*length_z)) * ((num_cell_x*num_cell_x) / (num_cell_z*num_cell_z));
-    }
-
+    amrex::Print() << std::endl << " Flux Sum X: "
+                    << fluxx << std::endl << " Flux Sum Y: "
+                    << fluxy << std::endl << " Flux Sum Z: "
+                    << fluxz << std::endl << " Flux Max:" 
+                    << flux_max << std::endl ;  
+  
     // Compute Volume Fractions
 
-    amrex::Real rel_diffusivity = (fluxlo+fluxhi)/2.0/flux_max;
+    amrex::Real tau = 0.0;
+    if (rel_diffusivity > 1e-12) {
+        tau = m_vf / rel_diffusivity;
+    } else {
+        amrex::Print() << "WARNING: Relative diffusivity is non-positive (" << rel_diffusivity
+                       << "). Tortuosity calculation may be invalid." << std::endl;
+        tau = std::numeric_limits<amrex::Real>::infinity();
+    }
 
-    amrex::Real tau = m_vf / rel_diffusivity;
+    amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
+                   << rel_diffusivity << std::endl;
 
-    // Print all of fluxvect values
-   amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
-                    << rel_diffusivity << std::endl << " Phi Sum High: "
-                    << phisumhi << std::endl << " Phi Sum Low: "
-                    << phisumlo << std::endl << " Flux High: "
-                    << fluxhi << std::endl << " Flux Low: "
-                    << fluxlo << std::endl << " Flux Max: "
-                    << flux_max << std::endl ;
-
-
-    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxlo - fluxhi) << std::endl;
+    amrex::Real flux_diff = std::abs(fluxlo - fluxhi);
+    amrex::Print() << " Check flux conservation |Flux_lo - Flux_hi|: " << flux_diff << std::endl;
 
     return tau;
 
