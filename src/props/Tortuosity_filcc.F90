@@ -214,113 +214,62 @@ end subroutine tortuosity_remspot
 
     do n = 1, ncomp
 
-       if (q_lo(1) < ilo) then
-          imin = q_lo(1)
-          imax = min(q_hi(1),ilo-1)
-
           if (bc(1,1) .eq. amrex_bc_ext_dir) then
 
-            do k = q_lo(3), q_hi(3)
-               do j = q_lo(2), q_hi(2)
-                  do i = imin, imax
-                     q(i,j,k,n) = vlo !!! + 1.0*(j-domhi(2))/domhi(2)*(k-domhi(3))/domhi(3)*(vhi-vlo)
+            do k = domlo(3), domhi(3)
+               do j = domlo(2), domhi(2)
+                  do i = domlo(1), domhi(1)
+                     if ( p(i,j,k,1) .eq. 0) then
+                        if ( (p(i-1,j,k,1) .ne. p(i,j,k,1)) )  then
+                            q(i,j,k,n) = vhi 
+                        end if
+                        if ( (p(i+1,j,k,1) .ne. p(i,j,k,1)) ) then
+                            q(i,j,k,n) = vlo      
+                        end if
+                     end if
                   end do
                end do
             end do
 
           end if
-
-       end if
-
-       if (q_hi(1) > ihi) then
-          imin = max(q_lo(1),ihi+1)
-          imax = q_hi(1)
-
-          if (bc(1,2) .eq. amrex_bc_ext_dir) then
-
-            do k = q_lo(3), q_hi(3)
-               do j = q_lo(2), q_hi(2)
-                  do i = imin, imax
-                     q(i,j,k,n) = vhi
-                  end do
-               end do
-            end do
-
-          end if
-
-       end if
-
-       if (q_lo(2) < jlo) then
-          jmin = q_lo(2)
-          jmax = min(q_hi(2),jlo-1)
 
           if (bc(2,1) .eq. amrex_bc_ext_dir) then
 
-            do k = q_lo(3), q_hi(3)
-               do j = jmin, jmax
-                  do i = q_lo(1), q_hi(1)
-                     q(i,j,k,n) = vlo
+            do k = domlo(3), domhi(3)
+               do j = domlo(2), domhi(2)
+                  do i = domlo(1), domhi(1)
+                     if ( p(i,j,k,1) .eq. 0) then
+                        if ( (p(i,j-1,k,1) .ne. p(i,j,k,1)) )  then
+                            q(i,j,k,n) = vhi 
+                        end if
+                        if ( (p(i,j+1,k,1) .ne. p(i,j,k,1)) ) then
+                            q(i,j,k,n) = vlo 
+                        end if
+                     end if                            
                   end do
                end do
             end do
 
           end if
-
-       end if
-
-       if (q_hi(2) > jhi) then
-          jmin = max(q_lo(2),jhi+1)
-          jmax = q_hi(2)
-
-          if (bc(2,2) .eq. amrex_bc_ext_dir) then
-
-            do k = q_lo(3), q_hi(3)
-               do j = jmin, jmax
-                  do i = q_lo(1), q_hi(1)
-                     q(i,j,k,n) = vhi
-                  end do
-               end do
-            end do
-
-          end if
-
-       end if
-
-       if (q_lo(3) < klo) then
-          kmin = q_lo(3)
-          kmax = min(q_hi(3),klo-1)
 
           if (bc(3,1) .eq. amrex_bc_ext_dir) then
-
-            do k = kmin, kmax
-               do j = q_lo(2), q_hi(2)
-                  do i = q_lo(1), q_hi(1)
-                     q(i,j,k,n) = vlo
+          
+            do k = domlo(3), domhi(3)
+               do j = domlo(2), domhi(2)
+                  do i = domlo(1), domhi(1)
+                     if ( p(i,j,k,1) .eq. 0) then
+                        if ( (p(i,j,k-1,1) .ne. p(i,j,k,1)) )  then
+                            q(i,j,k,n) = vhi 
+                        end if
+                        if ( (p(i,j,k+1,1) .ne. p(i,j,k,1)) ) then
+                            q(i,j,k,n) = vlo 
+                        end if
+                     end if                            
                   end do
                end do
             end do
 
           end if
-
-       end if
-
-       if (q_hi(3) > khi) then
-          kmin = max(q_lo(3),khi+1)
-          kmax = q_hi(3)
-
-          if (bc(3,2) .eq. amrex_bc_ext_dir) then
-            
-            do k = kmin, kmax
-               do j = q_lo(2), q_hi(2)
-                  do i = q_lo(1), q_hi(1)
-                     q(i,j,k,n) = vhi
-                  end do
-               end do
-            end do
-
-          end if
-
-       end if
 
     end do
 

@@ -232,6 +232,7 @@ int main (int argc, char* argv[])
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
   // Compute tortuosity in x direction
+
   TortuosityHypre tortuosityx(geom,ba,dm,mf_phase,vf.value(),1,Direction::X,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
   amrex::Real tau_value_x = tortuosityx.value();
@@ -245,6 +246,7 @@ int main (int argc, char* argv[])
   // Compute tortuosity in y direction
   TortuosityHypre tortuosityy(geom,ba,dm,mf_phase,vf.value(),1,Direction::Y,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
+
   amrex::Real tau_value_y = tortuosityy.value();
   amrex::Print() << " Tortuosity value: " << tau_value_y << std::endl;
 }
@@ -256,11 +258,13 @@ int main (int argc, char* argv[])
   // Compute tortuosity in z direction
   TortuosityHypre tortuosityz(geom,ba,dm,mf_phase,vf.value(),1,Direction::Z,TortuosityHypre::SolverType::GMRES,RESULTS_PATH);
 
+
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;
 }
 
-  else
+
+  else if (DIRECTION==3)
   {
   amrex::Print() << std::endl << " Direction: X" << std::endl;
 
@@ -285,6 +289,11 @@ int main (int argc, char* argv[])
 
   amrex::Real tau_value_z = tortuosityz.value();
   amrex::Print() << " Tortuosity value: " << tau_value_z << std::endl;
+}
+    
+  else 
+  {
+  amrex::Print() << " ERROR: Direction input not known, try 0, 1, 2 or 3" << std::endl; 
 }
 
   // Call the timer again and compute the maximum difference between the start time and stop time

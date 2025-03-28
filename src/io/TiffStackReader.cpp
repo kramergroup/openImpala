@@ -54,26 +54,28 @@ int k = 0;
 
     do
     {
-        npixels = m_width * m_height;
+npixels = m_width * m_height;
         raster = (uint32*) _TIFFmalloc(npixels * sizeof (uint32_t));
         if (raster != NULL) {
             if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_TOPLEFT, 0)) {
-
+                // Pixel processing loop
                 for (long i = 0; i < m_height * m_width; ++i)
                 {
                     m_raw.push_back(-raster[i] - 1);
                 }
 
             } else {
+                // Error handling from master
                 amrex::Warning("Failed to read a directory/slice from TIFF file.");
-                _TIFFfree(raster);
-                break;
+                _TIFFfree(raster); // Free raster even if read failed
+                break; // Exit the do...while loop
             }
-            _TIFFfree(raster);
+            _TIFFfree(raster); // Free raster after successful processing
         } else {
+            // Error handling from master
             amrex::Abort("Failed to allocate memory for TIFF raster buffer.");
         }
-        k++;
+        k++; // Increment slice counter (from master)
     } while (TIFFReadDirectory(tif));
 
     m_depth = k;

@@ -260,6 +260,8 @@ bool TortuosityHypre::solve()
     if (HYPRE_CheckError(ierr,HYPRE_ERROR_CONV))
     {
       amrex::Print() << "ERROR: Solver did not converge" << std::endl;
+      // Write plot file to user's home dir with datetime appended in YYmmDDHHMM format
+      amrex::WriteSingleLevelPlotfile(m_resultspath + std::string("/failedplot") += datetime, m_mf_phi, {"concentration","phase"}, m_geom, 0.0, 0);
     } else if (HYPRE_CheckError(ierr,HYPRE_ERROR_MEMORY)) {
       amrex::Print() << "ERROR: Solver was unable to allocate memory" << std::endl;
     } else if (HYPRE_CheckError(ierr,HYPRE_ERROR_ARG)) {
@@ -287,7 +289,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       solve();
     }
 
-
     amrex::Real fluxx = 0.0;
     amrex::Real fluxy = 0.0;
     amrex::Real fluxz = 0.0;
@@ -297,12 +298,14 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     int num_phase_cells_0 = 0;
     int num_phase_cells_1 = 0;
     int num_phase_cells_2 = 0;
+
     int source_cells_x = 0;
     int sink_cells_x = 0;
     int source_cells_y = 0;
     int sink_cells_y = 0;
     int source_cells_z = 0;
     int sink_cells_z = 0;
+
 
     for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     {
@@ -323,6 +326,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
       // Sum all concentration values for each slice in x direction
       const auto domain_min_x = m_geom.Domain().loVect()[0];      
+
       for (int x = lo.x; x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
@@ -341,6 +345,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       }
       
       // Sum all concentration values for each slice in y direction    
+
       for (int y = lo.y; y <= hi.y; ++y) {
             for (int x = lo.x; x <= hi.x; ++x) {
               for (int z = lo.z; z <= hi.z; ++z) {
@@ -409,7 +414,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       amrex::ParallelAllReduce::Sum(num_phase_cells_2, amrex::ParallelContext::CommunicatorSub());
       } 
 
-
     // Reduce parallel processes
     if (!refresh) {
       amrex::ParallelAllReduce::Sum(source_cells_x, amrex::ParallelContext::CommunicatorSub());
@@ -454,7 +458,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     auto num_cell_x = length_x/dx;
     auto num_cell_y = length_y/dy;
     auto num_cell_z = length_z/dz;
-
 
     // Compute flux between adjacent slices
     fluxx = phisumx * (dx*dy*dz);
@@ -510,6 +513,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
     amrex::Real flux_diff = std::abs(fluxlo - fluxhi);
     amrex::Print() << " Check flux conservation |Flux_lo - Flux_hi|: " << flux_diff << std::endl;
+
 
     return tau;
 
