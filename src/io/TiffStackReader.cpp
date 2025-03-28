@@ -50,56 +50,42 @@ void TiffStackReader::readTiffFile()
         }
     }
 
-    uint16_t* data;
-    m_depth = 0;
+int k = 0;
+
     do
     {
-      npixels = m_width * m_height;
-      raster = (uint32*) _TIFFmalloc(npixels * sizeof (uint32_t));
-      if (raster != NULL) {
-          if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_TOPLEFT, 0)) {
-              for (long j=0; j<m_height; ++j)
-              {
-                if (j==0){
-                  for (long i=0; i<m_width+2; ++i)
-                 {
-                  m_raw.push_back(0);
-                  }
-                }
-                for (long i=0; i<m_width; ++i)
-                 {
-                   if (i==0){
-                     m_raw.push_back(0);
-                   }
-                   m_raw.push_back(-raster[i+j*m_width]-1);
-                   if (i==m_width-1){
-                     m_raw.push_back(0);
-                   }
-                }
-                if (j==m_height-1){
-                  for (long i=0; i<m_width+2; ++i)
-                 {
-                  m_raw.push_back(0);
-                  }
-                }
-              }
-          }
-          _TIFFfree(raster);
-      }
+        npixels = m_width * m_height;
+        raster = (uint32*) _TIFFmalloc(npixels * sizeof (uint32_t));
+        if (raster != NULL) {
+            if (TIFFReadRGBAImageOriented(tif, m_width, m_height, raster, ORIENTATION_TOPLEFT, 0)) {
 
+                for (long i = 0; i < m_height * m_width; ++i)
+                {
+                    m_raw.push_back(-raster[i] - 1);
+                }
+
+            } else {
+                amrex::Warning("Failed to read a directory/slice from TIFF file.");
+                _TIFFfree(raster);
+                break;
+            }
+            _TIFFfree(raster);
+        } else {
+            amrex::Abort("Failed to allocate memory for TIFF raster buffer.");
+        }
+        k++;
     } while (TIFFReadDirectory(tif));
 
-    m_depth=k;
-    
-    // Add ghost cells to final slice
-    if (k==m_tiffstack-1) { 
-       for (long j=0; j<m_height+2; ++j) {
-          for (long i=0; i<m_width+2; ++i) {
-              m_raw.push_back(0);
-           }
-        }
-    }
+    m_depth = k;
 
+    // Example Z-padding logic (adjust size and condition as needed):
+    /*
+    if (m_depth == m_tiffstack) {
+       for (long p = 0; p < m_width * m_height; ++p) {
+           m_raw.push_back(0);
+       }
+    }
+    */
     TIFFClose(tif);
   }
    

@@ -496,9 +496,20 @@ amrex::Real TortuosityHypre::value(const bool refresh)
   
     // Compute Volume Fractions
 
-    amrex::Real rel_diffusivity = fluxx/flux_max;
+    amrex::Real tau = 0.0;
+    if (rel_diffusivity > 1e-12) {
+        tau = m_vf / rel_diffusivity;
+    } else {
+        amrex::Print() << "WARNING: Relative diffusivity is non-positive (" << rel_diffusivity
+                       << "). Tortuosity calculation may be invalid." << std::endl;
+        tau = std::numeric_limits<amrex::Real>::infinity();
+    }
 
-    amrex::Real tau = m_vf / rel_diffusivity;
+    amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
+                   << rel_diffusivity << std::endl;
+
+    amrex::Real flux_diff = std::abs(fluxlo - fluxhi);
+    amrex::Print() << " Check flux conservation |Flux_lo - Flux_hi|: " << flux_diff << std::endl;
 
     return tau;
 
