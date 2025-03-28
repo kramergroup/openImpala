@@ -44,6 +44,7 @@ void TortuosityHypre::setupGrids()
 
   // 1 - Initialise the grid owned by this MPI rank
   HYPRE_StructGridCreate(MPI_COMM_WORLD, AMREX_SPACEDIM, &m_grid);
+ 
 
   // 2 - Configure the dimensions of each box owned by this MPI rank
   int ilower[2], iupper[2];
@@ -54,13 +55,47 @@ void TortuosityHypre::setupGrids()
     auto hi = TortuosityHypre::hiV(bx);
 
     HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
+    
+    /*
+    int periodic[3] = {hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]};
 
+    HYPRE_StructGridSetPeriodic(m_grid, periodic);
+    */
+      // 3 - Set grid to be periodic
+    /*
+  const amrex::Box domain = m_geom.Domain();
+  auto domainlo = TortuosityHypre::loV(domain);
+  auto domainhi = TortuosityHypre::hiV(domain);    
+  int periodic[3] = {domainhi[0]-domainlo[0], domainhi[1]-domainlo[1], domainhi[2]-domainlo[2]};
+    
+  amrex::Print() << std::endl << " Domain low: "
+                    << domainlo << std::endl << " Domain high: "
+                    << domainhi << std::endl;
+                    
+  HYPRE_StructGridSetPeriodic(m_grid, periodic);
+  */
+    
   }
-
-  // 3 - Finish setup
-   HYPRE_StructGridAssemble(m_grid);
+  
+   // 3 - Set grid to be periodic
+  /*
+  const amrex::Box domain = m_geom.Domain();
+  auto domainlo = TortuosityHypre::loV(domain);
+  auto domainhi = TortuosityHypre::hiV(domain);    
+  int periodic[3] = {domainhi[0]-domainlo[0], domainhi[1]-domainlo[1], domainhi[2]-domainlo[2]};
+    
+  amrex::Print() << std::endl << " Domain low: "
+                    << domainlo << std::endl << " Domain high: "
+                    << domainhi << std::endl;  
+                    
+  int periodic[3] = {10, 10, 10};
+  HYPRE_StructGridSetPeriodic(m_grid, periodic);
+  */
+      
+  // 4 - Finish setup 
+  HYPRE_StructGridAssemble(m_grid);
+  
 }
-
 
 /**
  *
@@ -264,6 +299,14 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     int num_phase_cells_1 = 0;
     int num_phase_cells_2 = 0;
 
+    int source_cells_x = 0;
+    int sink_cells_x = 0;
+    int source_cells_y = 0;
+    int sink_cells_y = 0;
+    int source_cells_z = 0;
+    int sink_cells_z = 0;
+
+
     for (amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi) // Loop over grids
     {
       const amrex::Box& box = mfi.validbox();
@@ -283,42 +326,61 @@ amrex::Real TortuosityHypre::value(const bool refresh)
 
       // Sum all concentration values for each slice in x direction
       const auto domain_min_x = m_geom.Domain().loVect()[0];      
-      for (int x = lo.x; x < hi.x; ++x) {
+
+      for (int x = lo.x; x <= hi.x; ++x) {
             for (int y = lo.y; y <= hi.y; ++y) {
               for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) == m_phase) {
                   phisumx += phi_fab_4(x+1,y,z) - phi_fab_4(x,y,z);
                   num_phase_cells_0 += 1;
-              }
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x+1,y,z) != m_phase) {
+                  sink_cells_x += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x-1,y,z) != m_phase) {
+                  source_cells_x += 1;
+                }  
             }
         }
       }
       
       // Sum all concentration values for each slice in y direction    
-      for (int y = lo.y; y < hi.y; ++y) {
+
+      for (int y = lo.y; y <= hi.y; ++y) {
             for (int x = lo.x; x <= hi.x; ++x) {
               for (int z = lo.z; z <= hi.z; ++z) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) == m_phase) {
                   phisumy += phi_fab_4(x,y+1,z) - phi_fab_4(x,y,z);
                   num_phase_cells_1 += 1;
-              }
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y+1,z) != m_phase) {
+                  sink_cells_y += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y-1,z) != m_phase) {
+                  source_cells_y += 1;
+                }
             }
         }
       }
 
       // Sum all concentration values for each slice in z direction     
-      for (int z = lo.z; z < hi.z; ++z) {
+      for (int z = lo.z; z <= hi.z; ++z) {
             for (int x = lo.x; x <= hi.x; ++x) {
               for (int y = lo.y; y <= hi.y; ++y) {
                 if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) == m_phase) {
                   phisumz += phi_fab_4(x,y,z+1) - phi_fab_4(x,y,z);
                   num_phase_cells_2 += 1;
               }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z+1) != m_phase) {
+                  sink_cells_z += 1;
+                }
+                if ( phase_fab_4(x,y,z) == m_phase && phase_fab_4(x,y,z-1) != m_phase) {
+                  source_cells_z += 1;
+                }
             }
         }
       }
       
-
     }
 
 
@@ -352,6 +414,36 @@ amrex::Real TortuosityHypre::value(const bool refresh)
       amrex::ParallelAllReduce::Sum(num_phase_cells_2, amrex::ParallelContext::CommunicatorSub());
       } 
 
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_x, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_y, amrex::ParallelContext::CommunicatorSub());
+      }
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_y, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(source_cells_z, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
+    // Reduce parallel processes
+    if (!refresh) {
+      amrex::ParallelAllReduce::Sum(sink_cells_z, amrex::ParallelContext::CommunicatorSub());
+      } 
+  
     // Total problem length each direction
     auto length_x = m_geom.ProbLength(0);
     auto length_y = m_geom.ProbLength(1);
@@ -375,30 +467,29 @@ amrex::Real TortuosityHypre::value(const bool refresh)
   
     // Compute flux between adjacent slices
     fluxz = phisumz * (dx*dy*dz);
+  
+    // Add unit vector to phisum values for diagonal terms
+    if ( m_dir==0)
+    {
+      fluxx = fluxx + (num_phase_cells_0 / (num_cell_x * num_cell_y * num_cell_z));
+    }
+    else if ( m_dir==1)
+    {
+      fluxy = fluxy + (num_phase_cells_1 / (num_cell_x * num_cell_y * num_cell_z));
+    }
+    else if ( m_dir==2)
+    {
+      fluxz = fluxz + (num_phase_cells_2 / (num_cell_x * num_cell_y * num_cell_z));
+    }
 
     // Compute maximum flux as max_flux = (phi(left) - phi(right))*(b*c)/a
     amrex::Real flux_max=0.0;
   
-    flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
+      flux_max = (m_vhi-m_vlo) / 2 * (length_x*length_y*length_z);
   
     // Print all of fluxvect values
-    amrex::Print() << std::endl << " Number phase cells 0: "
-                    << num_phase_cells_0  << std::endl << " Number phase cells 1: "
-                    << num_phase_cells_1  << std::endl << " Number phase cells 2: "
-                    << num_phase_cells_2  << std::endl << " Vhi "
-                    << m_vhi << std::endl << " Vlo "
-                    << m_vlo << std::endl << " Length_x "
-                    << length_x << std::endl << " Length_y "
-                    << length_y << std::endl << " Length_z "
-                    << length_z << std::endl << " Num_cells_x "
-                    << num_cell_x << std::endl << " Num_cells_y "
-                    << num_cell_y << std::endl << " Num_cells_z "
-                    << num_cell_z << std::endl;
-
-    amrex::Print() << std::endl << " Phi Sum X: "
-                    << phisumx << std::endl << " Phi Sum Y: "
-                    << phisumy << std::endl << " Phi Sum Z: "
-                    << phisumz << std::endl;  
+    amrex::Print() << std::endl << " Number of Cells in 1D "
+                    << num_cell_x << std::endl;
 
     amrex::Print() << std::endl << " Flux Sum X: "
                     << fluxx << std::endl << " Flux Sum Y: "
@@ -408,15 +499,21 @@ amrex::Real TortuosityHypre::value(const bool refresh)
   
     // Compute Volume Fractions
 
-    amrex::Real rel_diffusivity = fluxx/flux_max;
+    amrex::Real tau = 0.0;
+    if (rel_diffusivity > 1e-12) {
+        tau = m_vf / rel_diffusivity;
+    } else {
+        amrex::Print() << "WARNING: Relative diffusivity is non-positive (" << rel_diffusivity
+                       << "). Tortuosity calculation may be invalid." << std::endl;
+        tau = std::numeric_limits<amrex::Real>::infinity();
+    }
 
-    amrex::Real tau = m_vf / rel_diffusivity;
-
-    // Print all of fluxvect values
     amrex::Print() << std::endl << " Relative Effective Diffusivity (D_eff / D): "
-                    << rel_diffusivity << std::endl ;
+                   << rel_diffusivity << std::endl;
 
-    amrex::Print() << " Check difference between top and bottom fluxes is nil: " << abs(fluxx) << std::endl;
+    amrex::Real flux_diff = std::abs(fluxlo - fluxhi);
+    amrex::Print() << " Check flux conservation |Flux_lo - Flux_hi|: " << flux_diff << std::endl;
+
 
     return tau;
 

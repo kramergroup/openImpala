@@ -1,0 +1,9 @@
+FILENAME     = "SampleData_2Phase.raw"    # Filename
+DATA_PATH    = "/openImpala/data/"        # Directory path of input data, use ~ if you want to point it to your home directory i.e. "~/openImpala/data/" 
+RESULTS_PATH = "~/openimpalaresults/"     # Directory path for results, use ~ for HOMEDIR
+BOX_SIZE     = 32                         # 1D size of computational box
+ENDIAN       = "little"                   # Endianness of the data, either little or big
+XDIM         = 1000                       # Dimension in the x-direction
+YDIM         = 1000                       # Dimension in the y-direction
+ZDIM         = 1000                       # Dimension in the z-direction
+PRECISION    = "8bit"                     # Precision of the data, 8bit, 16bit, 32bit or 64bit
