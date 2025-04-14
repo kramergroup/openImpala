@@ -64,15 +64,14 @@ From: rockylinux:8
     cmake --version
 
    # --- Install OpenMPI ---
-    export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
-    export OPENMPI_VERSION=4.1.6 # Make sure version is defined
-    cd /tmp/build_src # Ensure you are in the correct parent directory
-    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
-    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
-    cd openmpi-${OPENMPI_VERSION} # cd into the extracted directory
+    export OPENMPI_INSTALL_PREFIX=/usr/local
+    export OPENMPI_VERSION=4.1.6
+    cd /tmp/build_src
+    # ... (wget, tar) ...
+    cd openmpi-${OPENMPI_VERSION}
 
-    # --- Modified Configure Line ---
-    LDFLAGS="-lfl" ./configure \
+    # Configure WITHOUT LDFLAGS="-lfl"
+    ./configure \
         --prefix=${OPENMPI_INSTALL_PREFIX} \
         --enable-orterun-prefix-by-default \
         --enable-mpirun-prefix-by-default \
@@ -80,23 +79,18 @@ From: rockylinux:8
         --enable-shared \
         --enable-static=no \
     || { \
-        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
         echo "!!! OpenMPI Configure Failed! Dumping config.log: !!!"; \
-        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
         cat config.log; \
-        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
-        echo "!!! End of config.log                             !!!"; \
-        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
         exit 1; \
-    } # Exit after dumping log if configure fails
+    }
 
-    # Add error checks for make and make install too
+    # Build and Install WITH LDFLAGS="-lfl" (if needed here)
     make -j$(nproc) LDFLAGS="-lfl" || { echo "*** OpenMPI Make Failed!"; exit 1; }
     make install LDFLAGS="-lfl" || { echo "*** OpenMPI Make Install Failed!"; exit 1; }
 
-    cd .. # Go back to /tmp/build_src
-    rm -rf openmpi-${OPENMPI_VERSION}* # Clean up source dir
-    ldconfig # Update library cache
+    cd ..
+    rm -rf openmpi-${OPENMPI_VERSION}*
+    ldconfig
 
     # --- Install HDF5 (with Parallel, Fortran, C++) ---
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
