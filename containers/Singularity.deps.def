@@ -8,7 +8,7 @@ From: rockylinux:8
       * Rocky Linux 8 Base OS & Updates
       * Development Tools (GCC 8.5, Make, etc.) & Fortran Compiler
       * OpenMPI 4.1.6 (built from source, with IB support)
-      * CMake 3.28.3 (built from source)
+      * CMake 3.28.3 (downloaded binary)
       * HDF5 1.12.3 (Parallel, Fortran, C++, built from source)
       * AMReX 23.11 (built from source, MPI, OMP, EB)
       * HYPRE v2.30.0 (built from source, MPI)
@@ -21,6 +21,9 @@ From: rockylinux:8
     Version 2.5-deps # <-- Version indicates dependency build
 
 %post
+    # Exit immediately if a command exits with a non-zero status.
+    set -e
+
     # Define versions used throughout the build
     export CMAKE_VERSION=3.28.3
     export OPENMPI_VERSION=4.1.6
@@ -28,13 +31,14 @@ From: rockylinux:8
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
 
-    # Update and install base utilities & repositories
+    echo "--- Updating Base OS and Installing Repositories ---"
     dnf update -y
     dnf install -y dnf-utils
     dnf config-manager --set-enabled powertools
     dnf install -y epel-release
     dnf update -y
 
+    echo "--- Installing Development Tools and Core Packages ---"
     # Install 'Development Tools' group AND other required packages
     # Use @'Group Name' syntax for the group
     dnf install -y \
@@ -51,26 +55,44 @@ From: rockylinux:8
     dnf clean all -y
 
     # Create a temporary directory for building dependencies
-    mkdir /tmp/build_src
+    mkdir -p /tmp/build_src
     cd /tmp/build_src
 
     # --- Install CMake (Recent Version) ---
+    echo "--- Installing CMake ${CMAKE_VERSION} ---"
     export CMAKE_INSTALL_PREFIX=/opt/cmake/${CMAKE_VERSION}
     wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
+    if [ $? -ne 0 ]; then echo "*** ERROR: wget for CMake failed!"; exit 1; fi
+    if [ ! -f "cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" ]; then echo "*** ERROR: CMake tarball not found after wget!"; exit 1; fi
     mkdir -p ${CMAKE_INSTALL_PREFIX}
     tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C ${CMAKE_INSTALL_PREFIX}
+    if [ $? -ne 0 ]; then echo "*** ERROR: tar extract for CMake failed!"; exit 1; fi
     # Add to PATH temporarily for subsequent builds
     export PATH=${CMAKE_INSTALL_PREFIX}/bin:${PATH}
+    echo "--- Verifying CMake ---"
     cmake --version
 
-   # --- Install OpenMPI ---
-    export OPENMPI_INSTALL_PREFIX=/usr/local
-    export OPENMPI_VERSION=4.1.6
-    cd /tmp/build_src
-    # ... (wget, tar) ...
+    # --- Install OpenMPI (Recent Version) ---
+    echo "--- Installing OpenMPI ${OPENMPI_VERSION} ---"
+    export OPENMPI_INSTALL_PREFIX=/usr/local # Install to standard prefix
+
+    echo "--- Downloading OpenMPI v${OPENMPI_VERSION} ---"
+    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
+    if [ $? -ne 0 ]; then echo "*** ERROR: wget for OpenMPI failed!"; exit 1; fi
+    if [ ! -f "openmpi-${OPENMPI_VERSION}.tar.gz" ]; then echo "*** ERROR: OpenMPI tarball not found after wget!"; exit 1; fi
+    echo "--- Downloaded OpenMPI tarball successfully ---"
+
+    echo "--- Extracting OpenMPI v${OPENMPI_VERSION} ---"
+    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz
+    if [ $? -ne 0 ]; then echo "*** ERROR: tar extract for OpenMPI failed!"; exit 1; fi
+    if [ ! -d "openmpi-${OPENMPI_VERSION}" ]; then echo "*** ERROR: OpenMPI directory not found after tar!"; exit 1; fi
+    echo "--- Extracted OpenMPI successfully ---"
+
+    echo "--- Configuring OpenMPI ---"
     cd openmpi-${OPENMPI_VERSION}
 
-    # Configure WITHOUT LDFLAGS="-lfl"
+    # Configure WITHOUT LDFLAGS="-lfl" initially to avoid breaking compiler checks
+    # Added || { cat config.log; ... } block for debugging configure failures
     ./configure \
         --prefix=${OPENMPI_INSTALL_PREFIX} \
         --enable-orterun-prefix-by-default \
@@ -79,32 +101,51 @@ From: rockylinux:8
         --enable-shared \
         --enable-static=no \
     || { \
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
         echo "!!! OpenMPI Configure Failed! Dumping config.log: !!!"; \
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
         cat config.log; \
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
+        echo "!!! End of config.log                             !!!"; \
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; \
         exit 1; \
     }
 
+    echo "--- Building OpenMPI (make) ---"
     # Build and Install WITH LDFLAGS="-lfl" (if needed here)
     make -j$(nproc) LDFLAGS="-lfl" || { echo "*** OpenMPI Make Failed!"; exit 1; }
+
+    echo "--- Installing OpenMPI (make install) ---"
     make install LDFLAGS="-lfl" || { echo "*** OpenMPI Make Install Failed!"; exit 1; }
 
-    cd ..
+    cd .. # Go back to /tmp/build_src
+    echo "--- Cleaning up OpenMPI source ---"
     rm -rf openmpi-${OPENMPI_VERSION}*
+    # Update library cache for /usr/local/lib
+    echo "--- Updating ld cache ---"
     ldconfig
 
     # --- Install HDF5 (with Parallel, Fortran, C++) ---
+    echo "--- Installing HDF5 ${HDF5_VERSION} ---"
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
     wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
+    if [ $? -ne 0 ]; then echo "*** ERROR: wget for HDF5 failed!"; exit 1; fi
+    if [ ! -f "hdf5-${HDF5_VERSION}.tar.gz" ]; then echo "*** ERROR: HDF5 tarball not found after wget!"; exit 1; fi
     tar -xzf hdf5-${HDF5_VERSION}.tar.gz
+    if [ $? -ne 0 ]; then echo "*** ERROR: tar extract for HDF5 failed!"; exit 1; fi
+    if [ ! -d "hdf5-${HDF5_VERSION}" ]; then echo "*** ERROR: HDF5 directory not found after tar!"; exit 1; fi
     cd hdf5-${HDF5_VERSION}
+
     # Export flags for configure and make
     export CFLAGS="-O3 -march=native"
     export CXXFLAGS="${CFLAGS}"
     export FCFLAGS="${CFLAGS}"
-    # Use MPI wrappers installed by OpenMPI build
+    # Use MPI wrappers installed by OpenMPI build (now findable in /usr/local/bin)
     export CC=mpicc
     export CXX=mpicxx
     export FC=mpif90
+
+    echo "--- Configuring HDF5 ---"
     ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -113,17 +154,36 @@ From: rockylinux:8
         --enable-cxx \
         --enable-shared \
         --disable-static \
-        --enable-unsupported # Allow C++/Parallel
-    make -j$(nproc) install
+        --enable-unsupported \
+    || { echo "*** HDF5 Configure Failed!"; exit 1; }
+
+    echo "--- Building HDF5 (make) ---"
+    make -j$(nproc) || { echo "*** HDF5 Make Failed!"; exit 1; }
+
+    echo "--- Installing HDF5 (make install) ---"
+    make install || { echo "*** HDF5 Make Install Failed!"; exit 1; }
+
+    # Add HDF5 bin directory to PATH for subsequent steps/checks within %post
+    echo "--- Adding HDF5 bin to PATH for post section ---"
     export PATH=${HDF5_INSTALL_PREFIX}/bin:${PATH}
-    cd ..
+
+    # Optional: Verify h5pcc is now found within %post
+    echo "--- Verifying HDF5 Source Install (h5pcc) ---"
+    which h5pcc || { echo "*** ERROR: h5pcc not found after HDF5 source install within post section!"; exit 1; }
+    echo "h5pcc found at: $(which h5pcc)"
+    h5pcc -show || { echo "*** WARNING: h5pcc -show failed"; } # Show config, don't exit on failure here
+
+    cd .. # Go back to /tmp/build_src
+    echo "--- Cleaning up HDF5 source ---"
     rm -rf hdf5-${HDF5_VERSION}*
 
     # --- Install AMReX (Recent Stable Tag using CMake) ---
+    echo "--- Installing AMReX ${AMREX_VERSION} ---"
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
     mkdir build && cd build
+    echo "--- Configuring AMReX ---"
     # Pass CMAKE_PREFIX_PATH to help find HDF5 if installed in /opt
     cmake .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
@@ -137,35 +197,52 @@ From: rockylinux:8
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}"
-    make -j$(nproc) install
-    cd ../..
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}" \
+    || { echo "*** AMReX Configure Failed!"; exit 1; }
+    echo "--- Building AMReX (make) ---"
+    make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
+    echo "--- Installing AMReX (make install) ---"
+    make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
+    cd ../.. # Go back to /tmp/build_src
+    echo "--- Cleaning up AMReX source ---"
     rm -rf amrex
 
     # --- Install HYPRE (Recent Stable Tag) ---
+    echo "--- Installing HYPRE ${HYPRE_VERSION} ---"
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
     # HYPRE configure uses CC/CXX env vars or finds MPI wrappers
     export CC=mpicc
     export CXX=mpicxx
+    echo "--- Configuring HYPRE ---"
     ./configure \
         --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --enable-shared \
         CFLAGS="-O3 -march=native" \
-        CXXFLAGS="-O3 -march=native"
-    make -j$(nproc) install
-    cd ../..
+        CXXFLAGS="-O3 -march=native" \
+    || { echo "*** HYPRE Configure Failed!"; exit 1; }
+    echo "--- Building HYPRE (make) ---"
+    make -j$(nproc) || { echo "*** HYPRE Make Failed!"; exit 1; }
+    echo "--- Installing HYPRE (make install) ---"
+    make install || { echo "*** HYPRE Make Install Failed!"; exit 1; }
+    cd ../.. # Go back to /tmp/build_src
+    echo "--- Cleaning up HYPRE source ---"
     rm -rf hypre
 
     # --- !!! DO NOT BUILD OpenImpala HERE !!! ---
     # This recipe only prepares the dependencies for caching.
 
     # --- Final Cleanup ---
+    echo "--- Final Cleanup ---"
     cd /
-    rm -rf /tmp/build_src # Remove downloaded sources for dependencies
+    if [ -d "/tmp/build_src" ]; then
+        rm -rf /tmp/build_src # Remove downloaded sources for dependencies
+    fi
     dnf clean all
+
+    echo "--- %post section completed successfully ---"
 
 %environment
     # Set locale
@@ -188,8 +265,8 @@ From: rockylinux:8
     # OPENIMPALA_DIR is not defined here
 
     # Add binaries to PATH
-    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:/usr/local/bin:${PATH}
-    # Do not add OpenImpala paths yet
+    # Ensure MPI from /usr/local/bin is prioritized if needed, but HDF5/CMake are specific
+    export PATH=${CMAKE_HOME}/bin:${HDF5_HOME}/bin:${AMREX_HOME}/bin:${HYPRE_HOME}/bin:/usr/local/bin:${PATH}
 
     # Add libraries to LD_LIBRARY_PATH
     export LD_LIBRARY_PATH=${HDF5_HOME}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:/usr/local/lib:${LD_LIBRARY_PATH}
@@ -204,9 +281,10 @@ From: rockylinux:8
 %test
     # Verify tools are found and versions are reasonable
     echo "--- Verifying Tool Versions ---"
-    which mpicc && mpicc --version || exit 1
-    which cmake && cmake --version || exit 1
-    which gcc && gcc --version || exit 1
+    which mpicc && mpicc --version || { echo "ERROR: mpicc check failed"; exit 1; }
+    which cmake && cmake --version || { echo "ERROR: cmake check failed"; exit 1; }
+    which h5pcc && h5pcc --version || { echo "ERROR: h5pcc check failed"; exit 1; } # Check h5pcc here too
+    which gcc && gcc --version || { echo "ERROR: gcc check failed"; exit 1; }
 
     # Check if libraries are found by linker (simple ldd check)
     echo "--- Verifying Library Linking ---"
@@ -214,7 +292,7 @@ From: rockylinux:8
     ldd ${HDF5_HOME}/lib/libhdf5.so | grep -E 'not found|statically linked' || echo "HDF5 lib OK"
     ldd ${AMREX_HOME}/lib/libamrex.so | grep -E 'not found|statically linked' || echo "AMReX lib OK"
     ldd ${HYPRE_HOME}/lib/libHYPRE.so | grep -E 'not found|statically linked' || echo "HYPRE lib OK"
-    ldd /usr/local/lib/libmpi.so | grep -E 'not found|statically linked' || echo "OpenMPI lib OK" # Check OpenMPI lib
+    ldd /usr/local/lib/libmpi.so | grep -E 'not found|statically linked' || echo "OpenMPI lib OK"
 
     # DO NOT check for OpenImpala executable here
     echo "--- Verifying OpenImpala Build ---"
@@ -224,4 +302,4 @@ From: rockylinux:8
 
 %runscript
     echo "Container with build environment and runtime dependencies for OpenImpala."
-    echo "Does not contain OpenImpala itself. Intended for use with CI caching."
+    echo "Does not contain OpenImpala itself. Intended for use with CI caching or as a base image."
