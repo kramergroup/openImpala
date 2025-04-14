@@ -42,14 +42,19 @@ jobs:
           # restore-keys: | # Optional: allow restoring slightly older caches
           #   deps-cache-${{ runner.os }}-
 
-      - name: Build Dependencies Sandbox (if cache miss)
+    - name: Build Dependencies Sandbox (if cache miss)
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           RECIPE_FILE="containers/Singularity.deps.def"
           if [ ! -f "$RECIPE_FILE" ]; then exit 1; fi
           echo "Building dependencies sandbox from $RECIPE_FILE..."
-          # Use sudo instead of --fakeroot
+          # Use sudo to build
           sudo apptainer build --sandbox ./dependency_sandbox "$RECIPE_FILE"
+
+          # Add this line to fix permissions for caching:
+          echo "Changing sandbox ownership for caching..."
+          sudo chown -R $(id -u):$(id -g) ./dependency_sandbox
+          echo "Ownership change complete."
 
   # Job 2: Build OpenImpala using the cached dependencies
   build-openimpala:
