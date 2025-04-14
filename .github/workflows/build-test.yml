@@ -27,10 +27,12 @@ jobs:
         id: cache-key-step
         # Key based on hash of the dependency recipe file + runner OS
         run: |
-          RECIPE_FILE="containers/Singularity.deps.def"
-          CACHE_DATE=$(date +'%Y-%m') # Add month to key to allow periodic refresh
-          echo "key=deps-cache-${{ runner.os }}-${CACHE_DATE}-$(echo -n ${{ hashFiles(RECIPE_FILE) }} | md5sum | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-
+          # This shell variable is fine for use within the script itself if needed later
+          RECIPE_PATH="containers/Singularity.deps.def"
+          CACHE_DATE=$(date +'%Y-%m')
+          # CORRECTED: Provide the path string directly to hashFiles()
+          echo "key=deps-cache-${{ runner.os }}-${CACHE_DATE}-$(echo -n ${{ hashFiles('containers/Singularity.deps.def') }} | md5sum | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+          
       - name: Cache Dependencies Sandbox
         id: cache-deps
         uses: actions/cache@v4
