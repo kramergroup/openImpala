@@ -106,6 +106,7 @@ From: rockylinux:8
         --disable-static \
         --enable-unsupported # Allow C++/Parallel
     make -j$(nproc) install
+    export PATH=${HDF5_INSTALL_PREFIX}/bin:${PATH}
     cd ..
     rm -rf hdf5-${HDF5_VERSION}*
 
