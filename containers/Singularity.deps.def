@@ -191,6 +191,7 @@ From: rockylinux:8
         -DAMReX_MPI=ON \
         -DAMReX_OMP=ON \
         -DAMReX_EB=ON \
+        -DAMReX_FORTRAN=ON \ # <--- ADD THIS LINE
         -DCMAKE_CXX_COMPILER=mpicxx \
         -DCMAKE_C_COMPILER=mpicc \
         -DCMAKE_Fortran_COMPILER=mpif90 \
@@ -199,10 +200,14 @@ From: rockylinux:8
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
         -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}" \
     || { echo "*** AMReX Configure Failed!"; exit 1; }
+
     echo "--- Building AMReX (make) ---"
     make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
     echo "--- Installing AMReX (make install) ---"
     make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
+    # Add ls check here if desired for debugging
+    # ls -lR ${AMREX_INSTALL_PREFIX}/lib || echo "Warning: Failed to list AMReX lib directory."
+
     cd ../.. # Go back to /tmp/build_src
     echo "--- Cleaning up AMReX source ---"
     rm -rf amrex
