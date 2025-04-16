@@ -45,6 +45,12 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         which ca-certificates zlib-devel && \
     dnf clean all -y
 
+    # ADD THIS CHECK HERE:
+    echo "--- Verifying wget installation post dnf ---"
+    which wget || { echo "!!! ERROR: wget command not found right after dnf install!"; exit 1; }
+    echo "--- wget found, continuing build ---"
+
+
     mkdir /tmp/build_src && cd /tmp/build_src
 
     # --- Activate SCL ---
