@@ -1,6 +1,6 @@
 #include "DatReader.H"
-
-#include <cstddef> // <--- ADD HERE
+#include <AMReX_Utility.H> // <-- MOVE HERE
+#include <cstddef>
 #include <fstream>
 #include <vector>
 #include <string>
@@ -14,7 +14,6 @@
 #include <AMReX_IntVect.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_GpuContainers.H> // For amrex::LoopOnCpu
-#include <AMReX_Utility.H> // For amrex::SwapBytes, amrex::isBigEndian
 
 namespace OpenImpala {
 
