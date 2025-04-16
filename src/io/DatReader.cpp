@@ -128,7 +128,7 @@ bool DatReader::readFile(const std::string& filename)
     }
     if (actual_data_size > expected_data_size) {
          std::string msg = "Warning: [DatReader] File contains more data than expected. Ignoring extra data.";
-         amrex::Warning(msg);
+         amrex::Warning(msg.c_str()); // <<< FIX: Use .c_str() for safety >>>
     }
 
     try {
@@ -166,8 +166,8 @@ bool DatReader::readFile(const std::string& filename)
     return true;
 }
 
+
 // --- Getter Implementations ---
-// (No changes needed here)
 int DatReader::width() const { return m_width; }
 int DatReader::height() const { return m_height; }
 int DatReader::depth() const { return m_depth; }
@@ -197,7 +197,6 @@ DatReader::DataType DatReader::getRawValue(int i, int j, int k) const {
 }
 
 // --- Threshold Implementation ---
-// (No changes needed here, uses corrected IArrayBox syntax)
 void DatReader::threshold(DataType raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
 {
     if (!m_is_read) {
