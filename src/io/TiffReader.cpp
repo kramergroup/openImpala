@@ -136,13 +136,22 @@ bool TiffReader::readTiffInternal() {
             }
             bytes_read_total_in_slice += bytes_read_this_strip;
         }
-         if (bytes_read_total_in_slice != static_cast<tsize_t>(slice_bytes)) {
-               std::ostringstream warning_msg;
-                    warning_msg << "Warning: [TiffReader] Bytes read (" << bytes_read_total_in_slice
-                    << ") does not match expected (" << bytes_per_slice
-                    << ") for slice " << i << ". File: " << m_filename; // Adjust variables as needed
+         // Inside TiffReader::readTiffInternal(), after the strip reading loop
+
+            // Check if the total bytes read match the expected size for this slice
+            if (bytes_read_total_in_slice != static_cast<tsize_t>(slice_bytes)) {
+                std::ostringstream warning_msg;
+                warning_msg << "Warning: [TiffReader] Bytes read for current directory (" << bytes_read_total_in_slice
+                            // Use the calculated expected slice size 'slice_bytes' in the message
+                            << ") does not match expected bytes per slice (" << slice_bytes // <<< FIX 1
+                            // Remove the reference to 'i' as it's not in scope here
+                            << "). File: " << m_filename; // <<< FIX 2
                 amrex::Warning(warning_msg.str());
-         }
+            }
+        } // End else block for stripped images
+    // File automatically closed by TiffPtr going out of scope via RAII
+    return true;
+} // End of TiffReader::readTiffInternal
     }
     // File automatically closed by TiffPtr going out of scope via RAII
     return true;
