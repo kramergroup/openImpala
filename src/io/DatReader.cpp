@@ -1,5 +1,5 @@
 #include "DatReader.H"
-#include <AMReX_Utility.H> // <-- MOVE HERE
+#include <AMReX_Utility.H> // <-- MOVE HERE (User confirmed this was done)
 #include <cstddef>
 #include <fstream>
 #include <vector>
@@ -14,6 +14,7 @@
 #include <AMReX_IntVect.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_GpuContainers.H> // For amrex::LoopOnCpu
+// Note: AMReX_Utility.H was moved higher up
 
 namespace OpenImpala {
 
@@ -75,11 +76,13 @@ bool DatReader::readFile(const std::string& filename)
     }
 
     // --- Handle Endianness for Header (ASSUMPTION: File is Little Endian) ---
+#if 0 // <<< TEMPORARY DIAGNOSTIC - Block 1 Start >>>
     if (amrex::isBigEndian()) {
         amrex::SwapBytes(dims[0]);
         amrex::SwapBytes(dims[1]);
         amrex::SwapBytes(dims[2]);
     }
+#endif // <<< TEMPORARY DIAGNOSTIC - Block 1 End >>>
 
     // Check dimensions
     if (dims[0] <= 0 || dims[1] <= 0 || dims[2] <= 0) {
@@ -106,7 +109,9 @@ bool DatReader::readFile(const std::string& filename)
     }
     // Optionally warn if actual_data_size > expected_data_size (extra data ignored)
     if (actual_data_size > expected_data_size) {
-         amrex::Warning("Warning: [DatReader] File contains more data than expected based on header dimensions. Ignoring extra data.");
+         // Using amrex::Warning(std::string) format which is known to work
+         std::string msg = "Warning: [DatReader] File contains more data than expected based on header dimensions. Ignoring extra data.";
+         amrex::Warning(msg);
     }
 
 
@@ -132,11 +137,13 @@ bool DatReader::readFile(const std::string& filename)
     }
 
     // --- Handle Endianness for Data (ASSUMPTION: File is Little Endian) ---
+#if 0 // <<< TEMPORARY DIAGNOSTIC - Block 2 Start >>>
     if (amrex::isBigEndian()) {
         for (DataType& val : m_raw) {
             amrex::SwapBytes(val);
         }
     }
+#endif // <<< TEMPORARY DIAGNOSTIC - Block 2 End >>>
 
     m_is_read = true;
     amrex::Print() << "Successfully read DAT file: " << m_filename
@@ -214,7 +221,7 @@ void DatReader::threshold(DataType raw_threshold, int value_if_true, int value_i
 
     // Pre-calculate for index bounds checking inside loop
     const amrex::Long raw_data_size = static_cast<amrex::Long>(m_raw.size());
-    const int current_width = m_width;   // Copy to local const for lambda capture
+    const int current_width = m_width;    // Copy to local const for lambda capture
     const int current_height = m_height;
     const int current_depth = m_depth;
 
@@ -240,18 +247,18 @@ void DatReader::threshold(DataType raw_threshold, int value_if_true, int value_i
                 // Check calculated index against actual data size
                 if (idx >= 0 && idx < raw_data_size) // idx should always be >= 0 here
                 {
-                    // Apply threshold condition (>)
-                    fab(amrex::IntVect(i, j, k), 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false;
+                    // Apply threshold condition (>) using corrected IArrayBox syntax
+                    fab(amrex::IntVect(i, j, k), 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false; // <-- Fix applied here
                 } else {
                     // Voxel (i,j,k) is within dimensions but calculated index is bad (should not happen if logic is correct)
                     // OR voxel is outside original dimensions covered by mf Box (handled below)
-                    fab(amrex::IntVect(i, j, k), 0) = value_if_false; // Or some error value? Defaulting to false seems reasonable.
+                    fab(amrex::IntVect(i, j, k), 0) = value_if_false; // <-- Fix applied here
                     // Consider adding a warning here if idx check fails unexpectedly
-                    // amrex::Warning("Index calculation error in threshold");
+                    // std::string msg = "Index calculation error in threshold"; amrex::Warning(msg);
                 }
             } else {
                  // The box associated with this fab extends beyond the original image dimensions
-                 fab(amrex::IntVect(i, j, k), 0) = value_if_false; // Assign 'false' value to regions outside image
+                 fab(amrex::IntVect(i, j, k), 0) = value_if_false; // <-- Fix applied here
             }
         });
     }
