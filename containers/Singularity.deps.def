@@ -145,6 +145,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
         -DCMAKE_PREFIX_PATH="${OPENMPI_INSTALL_PREFIX};${HDF5_INSTALL_PREFIX}" # Point to our installs
     make -j$(nproc) && make install # Serial install
+    # ADD THIS LINE BACK:
+    echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"; ls -lR ${AMREX_INSTALL_PREFIX} || echo "!!! ERROR: Failed to list AMReX install directory!"
     cd ../.. && rm -rf amrex
 
     # --- Install HYPRE ---
