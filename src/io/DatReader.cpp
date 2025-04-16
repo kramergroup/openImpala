@@ -1,18 +1,6 @@
-Okay, here is the complete DatReader.cpp implementation, based on the latest DatReader.H and incorporating the suggestions for a robust rewrite.
-
-CRITICAL ASSUMPTIONS (MUST BE VERIFIED):
-
-File Format: Assumes a binary file.
-Header: Assumes the first 3 values are 32-bit integers (int32_t) representing Width, Height, Depth.
-Data Type: Assumes the voxel data consists of 16-bit unsigned integers (std::uint16_t), matching DataType in the header. Change DataType in both files if this is incorrect.
-Endianness: Assumes the numbers in the file (header and data) are stored in Little-Endian byte order. The code includes logic to byte-swap if run on a Big-Endian machine. If the file is Big-Endian, the swapping logic needs to be inverted.
-Data Layout: Assumes the voxel data is stored in XYZ order (Z index varies slowest).
-If any of these assumptions are wrong, the readFile implementation will need significant adjustments.
-
-C++
-
 #include "DatReader.H"
 
+#include <cstddef> // <--- ADD HERE
 #include <fstream>
 #include <vector>
 #include <string>
