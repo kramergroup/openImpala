@@ -1,5 +1,5 @@
 #include "DatReader.H"
-// #include <AMReX_Utility.H> // Keep moved or remove if not needed elsewhere
+#include <AMReX_Utility.H> // Keep moved or remove if not needed elsewhere
 #include <cstddef>
 #include <fstream>
 #include <vector>
