@@ -7,10 +7,10 @@
 #include <stdexcept>
 #include <limits>
 #include <cmath>
-#include <sstream>
+#include <sstream>   // Needed for std::ostringstream
 #include <cstring>   // For std::memcpy
 #include <algorithm> // For std::min
-#include <sstream>   // For filename generation
+// #include <sstream>   // Duplicate include removed
 #include <iomanip>   // For std::setw, std::setfill
 
 #include <AMReX_Print.H>
@@ -44,12 +44,11 @@ AMREX_FORCE_INLINE T getValueFromBytes(const unsigned char* byte_ptr) {
 } // namespace
 
 
-// --- Constructors / Destructor / Getters / getValue / threshold / readTiffInternal ---
-// Assume implementations from previous version exist here...
-// Make sure readTiffInternal is adjusted to NOT set m_depth by counting directories,
-// but instead reads only the first directory (or assumes single dir per file).
-// Let's slightly modify readTiffInternal to read only ONE directory and return depth=1.
+// --- Assume constructors, destructor, other getters, getValue, threshold exist ---
+// --- (Copy implementations from your working version if needed) ---
 
+
+// --- readTiffInternal Implementation ---
 bool TiffReader::readTiffInternal() {
     // Reset state only partially if called by readFileSequence
     // Let readFile/readFileSequence handle full reset.
@@ -66,8 +65,8 @@ bool TiffReader::readTiffInternal() {
     uint32_t w32 = 0, h32 = 0;
     uint16_t bps = 0, fmt = SAMPLEFORMAT_UINT, spp = 1, planar = PLANARCONFIG_CONTIG, compression = 0;
 
-    if (!TIFFGetField(tif.get(), TIFFTAG_IMAGEWIDTH, &w32)) { /* Handle error */ return false; }
-    if (!TIFFGetField(tif.get(), TIFFTAG_IMAGELENGTH, &h32)) { /* Handle error */ return false; }
+    if (!TIFFGetField(tif.get(), TIFFTAG_IMAGEWIDTH, &w32)) { amrex::Print() << "Error: [TiffReader] Failed getting Width from " << m_filename << "\n"; return false; }
+    if (!TIFFGetField(tif.get(), TIFFTAG_IMAGELENGTH, &h32)) { amrex::Print() << "Error: [TiffReader] Failed getting Height from " << m_filename << "\n"; return false; }
     TIFFGetFieldDefaulted(tif.get(), TIFFTAG_BITSPERSAMPLE, &bps);
     TIFFGetFieldDefaulted(tif.get(), TIFFTAG_SAMPLEFORMAT, &fmt);
     TIFFGetFieldDefaulted(tif.get(), TIFFTAG_SAMPLESPERPIXEL, &spp);
@@ -83,82 +82,112 @@ bool TiffReader::readTiffInternal() {
     m_sample_format = fmt;
     m_samples_per_pixel = spp;
     // Assume m_depth is handled by caller (set to 1 for single file read here)
-    m_depth = 1;
+    m_depth = 1; // This function only reads the current directory/slice
 
-    if (m_width <= 0 || m_height <= 0) { /* Invalid dims */ return false; }
-    if (planar != PLANARCONFIG_CONTIG) { /* Unsupported */ return false; }
-    if (m_bits_per_sample != 8 && m_bits_per_sample != 16 && m_bits_per_sample != 32 && m_bits_per_sample != 64) { /* Unsupported */ return false; }
-    if (m_sample_format != SAMPLEFORMAT_UINT && m_sample_format != SAMPLEFORMAT_INT && m_sample_format != SAMPLEFORMAT_IEEEFP) { /* Unsupported */ return false; }
+    // Basic Validation
+    if (m_width <= 0 || m_height <= 0) { amrex::Print() << "Error: [TiffReader] Invalid dimensions in " << m_filename << "\n"; return false; }
+    if (planar != PLANARCONFIG_CONTIG) { amrex::Print() << "Error: [TiffReader] Planar configuration not supported in " << m_filename << "\n"; return false; }
+    if (m_bits_per_sample != 8 && m_bits_per_sample != 16 && m_bits_per_sample != 32 && m_bits_per_sample != 64) { amrex::Print() << "Error: [TiffReader] Unsupported bits per sample (" << m_bits_per_sample << ") in " << m_filename << "\n"; return false; }
+    if (m_sample_format != SAMPLEFORMAT_UINT && m_sample_format != SAMPLEFORMAT_INT && m_sample_format != SAMPLEFORMAT_IEEEFP) { amrex::Print() << "Error: [TiffReader] Unsupported sample format (" << m_sample_format << ") in " << m_filename << "\n"; return false; }
 
     size_t bytes_per_sample = m_bits_per_sample / 8;
-    if (bytes_per_sample == 0) { return false; }
+    if (bytes_per_sample == 0) { amrex::Print() << "Error: [TiffReader] Calculated bytes_per_sample is zero in " << m_filename << "\n"; return false; }
     size_t bytes_per_pixel = bytes_per_sample * m_samples_per_pixel;
     size_t slice_bytes = static_cast<size_t>(m_width) * m_height * bytes_per_pixel;
 
-    // --- Allocate Storage ---
-    // Caller (readFile / readFileSequence) should handle allocation
-    if (m_raw_bytes.size() < slice_bytes){
-         amrex::Print() << "Error: [readTiffInternal] m_raw_bytes not allocated sufficiently.\n";
-         return false;
+    // --- Check Allocation ---
+    // Caller (readFile / readFileSequence) handles allocation based on expected total size
+    // We just need to ensure the buffer passed (m_raw_bytes) is large enough for *this* slice.
+    // This check assumes m_raw_bytes points to the *start* of the buffer for the current slice.
+    if (m_raw_bytes.size() < slice_bytes){ // This check might need refinement depending on how readFileSequence passes buffers
+        amrex::Print() << "Error: [readTiffInternal] m_raw_bytes not allocated sufficiently for current slice from " << m_filename << "\n";
+        return false;
     }
 
     // --- Read Pixel Data (Current Directory Only) ---
-    ByteType* slice_start_ptr = m_raw_bytes.data(); // Assume caller allocated enough for 1 slice
+    // This assumes m_raw_bytes.data() points to the correct starting position
+    // for the current slice being read by the CALLER function.
+    ByteType* slice_start_ptr = m_raw_bytes.data();
 
     if (TIFFIsTiled(tif.get())) {
-        amrex::Print() << "Error: [TiffReader] Tiled TIFF reading is not implemented.\n";
+        amrex::Print() << "Error: [TiffReader] Tiled TIFF reading is not implemented for " << m_filename << "\n";
         return false;
     } else {
         // --- Stripped Read Logic ---
         uint32_t rows_per_strip = 0;
         TIFFGetFieldDefaulted(tif.get(), TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
-        if (rows_per_strip == 0) { rows_per_strip = m_height; } // Default if not set
-        rows_per_strip = std::min(rows_per_strip, static_cast<uint32_t>(m_height));
+        if (rows_per_strip == 0 || rows_per_strip > static_cast<uint32_t>(m_height)) { // Added check for invalid rows_per_strip
+             rows_per_strip = m_height; // Treat as single strip if unset or invalid
+        }
+        // rows_per_strip = std::min(rows_per_strip, static_cast<uint32_t>(m_height)); // Already handled by check above
 
         tstrip_t num_strips = TIFFNumberOfStrips(tif.get());
-        tsize_t strip_buf_size = TIFFStripSize(tif.get());
+        tsize_t strip_buf_size = TIFFStripSize(tif.get()); // Max size of one strip buffer
         tsize_t bytes_read_total_in_slice = 0;
 
+        if (strip_buf_size <= 0) {
+             amrex::Print() << "Error: [TiffReader] Invalid strip size calculated for " << m_filename << "\n";
+             return false;
+        }
+
+
         for (tstrip_t strip = 0; strip < num_strips; ++strip) {
-            ByteType* strip_dest_ptr = slice_start_ptr + static_cast<size_t>(strip) * strip_buf_size;
-            // Need more careful calculation if rows_per_strip varies or last strip is partial
-            // size_t current_row = strip * rows_per_strip;
-            // ByteType* strip_dest_ptr = slice_start_ptr + current_row * m_width * bytes_per_pixel;
+             // Calculate destination pointer more carefully for varying rows_per_strip or last strip
+             size_t rows_in_this_strip = rows_per_strip;
+             size_t current_row_start = static_cast<size_t>(strip) * rows_per_strip;
 
-             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(strip_dest_ptr >= m_raw_bytes.data() && strip_dest_ptr < m_raw_bytes.data() + slice_bytes,
-                                             "Strip destination pointer out of bounds");
+             // Adjust for last strip if height is not multiple of rows_per_strip
+             if (current_row_start + rows_in_this_strip > static_cast<size_t>(m_height)) {
+                 rows_in_this_strip = static_cast<size_t>(m_height) - current_row_start;
+             }
+             // Calculate expected byte size for THIS strip's actual rows
+             tsize_t expected_bytes_this_strip = static_cast<tsize_t>(rows_in_this_strip * m_width * bytes_per_pixel);
 
-            tsize_t bytes_read_this_strip = TIFFReadEncodedStrip(tif.get(), strip, strip_dest_ptr, strip_buf_size);
+             // Ensure buffer size isn't smaller than needed for this potentially partial strip
+             tsize_t buffer_size_for_this_strip = std::min(strip_buf_size, expected_bytes_this_strip);
 
-            if (bytes_read_this_strip == -1) {
+             // Calculate destination pointer based on starting row of the strip
+             ByteType* strip_dest_ptr = slice_start_ptr + current_row_start * m_width * bytes_per_pixel;
+
+             // Bounds check for safety
+             AMREX_ALWAYS_ASSERT_WITH_MESSAGE(strip_dest_ptr >= slice_start_ptr && (strip_dest_ptr + buffer_size_for_this_strip) <= (slice_start_ptr + slice_bytes),
+                                              "Strip destination pointer or size out of bounds");
+
+             tsize_t bytes_read_this_strip = TIFFReadEncodedStrip(tif.get(), strip, strip_dest_ptr, buffer_size_for_this_strip); // Use potentially smaller buffer size
+
+             if (bytes_read_this_strip == -1) {
                  amrex::Print() << "Error: [TiffReader] Failed reading strip " << strip << " from " << m_filename << "\n";
                  return false;
-            }
-            bytes_read_total_in_slice += bytes_read_this_strip;
+             }
+             // Add the *actual* bytes read for this strip
+             bytes_read_total_in_slice += bytes_read_this_strip;
+
+             // Optional: Check if bytes read match expected for *this specific strip*
+             // if (bytes_read_this_strip != expected_bytes_this_strip) {
+             //     // Handle potential partial read within a strip if TIFFReadEncodedStrip allows it
+             //     amrex::Warning("Partial read within strip " + std::to_string(strip));
+             // }
+        } // End loop over strips
+
+        // Check if the total bytes read match the total expected size for this slice
+        if (bytes_read_total_in_slice != static_cast<tsize_t>(slice_bytes)) {
+            std::ostringstream warning_msg;
+            warning_msg << "Warning: [TiffReader] Bytes read for current directory (" << bytes_read_total_in_slice
+                        // Use the calculated expected slice size 'slice_bytes' in the message
+                        << ") does not match expected bytes per slice (" << slice_bytes // <<< CORRECTED VARIABLE
+                        // Remove the reference to 'i' as it's not in scope here
+                        << "). File: " << m_filename; // <<< CORRECTED: Removed 'i'
+            amrex::Warning(warning_msg.str());
         }
-         // Inside TiffReader::readTiffInternal(), after the strip reading loop
+    } // End else block for stripped images
 
-            // Check if the total bytes read match the expected size for this slice
-            if (bytes_read_total_in_slice != static_cast<tsize_t>(slice_bytes)) {
-                std::ostringstream warning_msg;
-                warning_msg << "Warning: [TiffReader] Bytes read for current directory (" << bytes_read_total_in_slice
-                            // Use the calculated expected slice size 'slice_bytes' in the message
-                            << ") does not match expected bytes per slice (" << slice_bytes // <<< FIX 1
-                            // Remove the reference to 'i' as it's not in scope here
-                            << "). File: " << m_filename; // <<< FIX 2
-                amrex::Warning(warning_msg.str());
-            }
-        } // End else block for stripped images
     // File automatically closed by TiffPtr going out of scope via RAII
     return true;
+// } // <<< REMOVED EXTRA BRACE HERE
 } // End of TiffReader::readTiffInternal
-    }
-    // File automatically closed by TiffPtr going out of scope via RAII
-    return true;
-}
 
 
-// --- readFile for single multi-dir file (Modified to use internal helper) ---
+// --- readFile for single multi-dir file ---
 bool TiffReader::readFile(const std::string& filename)
 {
     // Reset state
@@ -180,11 +209,10 @@ bool TiffReader::readFile(const std::string& filename)
     }
 
     // Read metadata from first directory
-    // (Duplicating logic from readTiffInternal - could refactor later)
     uint32_t w32 = 0, h32 = 0;
     uint16_t bps = 0, fmt = SAMPLEFORMAT_UINT, spp = 1, planar = PLANARCONFIG_CONTIG;
     if (!TIFFGetField(tif.get(), TIFFTAG_IMAGEWIDTH, &w32) ||
-        !TIFFGetField(tif.get(), TIFFTAG_IMAGELENGTH, &h32)) { /* Error */ return false; }
+        !TIFFGetField(tif.get(), TIFFTAG_IMAGELENGTH, &h32)) { amrex::Print() << "Error reading dims from " << m_filename << "\n"; return false; }
     TIFFGetFieldDefaulted(tif.get(), TIFFTAG_BITSPERSAMPLE, &bps);
     TIFFGetFieldDefaulted(tif.get(), TIFFTAG_SAMPLEFORMAT, &fmt);
     TIFFGetFieldDefaulted(tif.get(), TIFFTAG_SAMPLESPERPIXEL, &spp);
@@ -195,59 +223,84 @@ bool TiffReader::readFile(const std::string& filename)
     m_bits_per_sample = bps;
     m_sample_format = fmt;
     m_samples_per_pixel = spp;
-    // Validate... (same checks as in readTiffInternal)
-    if (m_width <= 0 || m_height <= 0 || planar != PLANARCONFIG_CONTIG || /* other checks */ false) {
+
+    // Validate basic properties
+    if (m_width <= 0 || m_height <= 0 || planar != PLANARCONFIG_CONTIG ||
+        (m_bits_per_sample != 8 && m_bits_per_sample != 16 && m_bits_per_sample != 32 && m_bits_per_sample != 64) ||
+        (m_sample_format != SAMPLEFORMAT_UINT && m_sample_format != SAMPLEFORMAT_INT && m_sample_format != SAMPLEFORMAT_IEEEFP))
+    {
+         amrex::Print() << "Error: [TiffReader::readFile] Invalid or unsupported format in file: " << m_filename << "\n";
          return false;
     }
     size_t bytes_per_sample = m_bits_per_sample / 8;
+    if (bytes_per_sample == 0) { amrex::Print() << "Error: bytes_per_sample is zero\n"; return false; }
     size_t bytes_per_pixel = bytes_per_sample * m_samples_per_pixel;
     size_t slice_bytes = static_cast<size_t>(m_width) * m_height * bytes_per_pixel;
 
     // Count directories for depth
     m_depth = 0;
     do { m_depth++; } while (TIFFReadDirectory(tif.get()));
-    if (m_depth == 0) { return false; }
+    if (m_depth == 0) { amrex::Print() << "Error: No directories found in TIFF: " << m_filename << "\n"; return false; }
 
     // Allocate storage
     size_t total_bytes = slice_bytes * m_depth;
-     if (static_cast<double>(m_width)*m_height*m_depth*bytes_per_pixel > std::numeric_limits<size_t>::max()){ return false;}
+    // Check for potential size overflow before allocation
+    if (static_cast<double>(m_width)*m_height*m_depth*bytes_per_pixel > std::numeric_limits<size_t>::max()){
+        amrex::Print() << "Error: Total image size exceeds size_t limits.\n"; return false;
+    }
     try {
         m_raw_bytes.resize(total_bytes);
-    } catch (const std::exception& e) { /* Error */ return false; }
+    } catch (const std::exception& e) {
+        amrex::Print() << "Error: Failed to allocate memory for TIFF data: " << e.what() << "\n"; return false;
+    }
 
-    // Loop and read each directory using internal logic (or replicate here)
+    // Loop and read each directory
     for (int slice = 0; slice < m_depth; ++slice) {
-        if (!TIFFSetDirectory(tif.get(), static_cast<tdir_t>(slice))) { /* Error */ return false; }
+        if (!TIFFSetDirectory(tif.get(), static_cast<tdir_t>(slice))) {
+            amrex::Print() << "Error: Failed to set directory " << slice << " in " << m_filename << "\n"; return false;
+        }
+        // Calculate pointer to the start of the buffer for this slice
         ByteType* slice_start_ptr = m_raw_bytes.data() + static_cast<size_t>(slice) * slice_bytes;
 
-         // Need to read strip/tile into slice_start_ptr
-         // Simplified: Assume readTiffInternal logic handles ONE slice read correctly
-         // This requires modification of readTiffInternal to accept target buffer/offset
-         // Or replicate the strip/tile reading loop here. Replicating:
-         if (TIFFIsTiled(tif.get())) {
-             amrex::Print() << "Error: [TiffReader] Tiled TIFF reading is not implemented.\n";
-             return false;
-         } else {
-             uint32_t rows_per_strip = 0;
-             TIFFGetFieldDefaulted(tif.get(), TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
-             if (rows_per_strip == 0) rows_per_strip = m_height;
-             rows_per_strip = std::min(rows_per_strip, static_cast<uint32_t>(m_height));
-             tstrip_t num_strips = TIFFNumberOfStrips(tif.get());
-             tsize_t strip_buf_size = TIFFStripSize(tif.get());
-
-             for (tstrip_t strip = 0; strip < num_strips; ++strip) {
-                  // Calculate correct pointer for this strip within this slice buffer
-                  size_t rows_already_in_strip = static_cast<size_t>(strip) * rows_per_strip;
-                  ByteType* strip_dest_ptr = slice_start_ptr + rows_already_in_strip * m_width * bytes_per_pixel;
-                  // More careful calculation needed for partial strips at the end
-
-                  AMREX_ASSERT(strip_dest_ptr >= slice_start_ptr && (strip_dest_ptr+strip_buf_size) <= (slice_start_ptr + slice_bytes) );
-
-                 tsize_t bytes_read = TIFFReadEncodedStrip(tif.get(), strip, strip_dest_ptr, strip_buf_size);
-                 if (bytes_read == -1) { /* Error */ return false;}
+        // Replicate the strip reading logic here for each slice
+        if (TIFFIsTiled(tif.get())) {
+            amrex::Print() << "Error: [TiffReader] Tiled TIFF reading is not implemented.\n";
+            return false;
+        } else {
+            uint32_t rows_per_strip = 0;
+            TIFFGetFieldDefaulted(tif.get(), TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
+             if (rows_per_strip == 0 || rows_per_strip > static_cast<uint32_t>(m_height)) {
+                 rows_per_strip = m_height;
              }
-         }
-    }
+            tstrip_t num_strips = TIFFNumberOfStrips(tif.get());
+            tsize_t strip_buf_size = TIFFStripSize(tif.get());
+            if (strip_buf_size <= 0) {
+                 amrex::Print() << "Error: [TiffReader] Invalid strip size calculated for " << m_filename << " slice " << slice << "\n";
+                 return false;
+            }
+
+
+            for (tstrip_t strip = 0; strip < num_strips; ++strip) {
+                 size_t rows_in_this_strip = rows_per_strip;
+                 size_t current_row_start = static_cast<size_t>(strip) * rows_per_strip;
+                 if (current_row_start + rows_in_this_strip > static_cast<size_t>(m_height)) {
+                     rows_in_this_strip = static_cast<size_t>(m_height) - current_row_start;
+                 }
+                 tsize_t expected_bytes_this_strip = static_cast<tsize_t>(rows_in_this_strip * m_width * bytes_per_pixel);
+                 tsize_t buffer_size_for_this_strip = std::min(strip_buf_size, expected_bytes_this_strip);
+                 ByteType* strip_dest_ptr = slice_start_ptr + current_row_start * m_width * bytes_per_pixel;
+
+                // Bounds check for safety
+                AMREX_ASSERT(strip_dest_ptr >= slice_start_ptr && (strip_dest_ptr + buffer_size_for_this_strip) <= (slice_start_ptr + slice_bytes));
+
+                tsize_t bytes_read = TIFFReadEncodedStrip(tif.get(), strip, strip_dest_ptr, buffer_size_for_this_strip); // Read into correct slice part
+                if (bytes_read == -1) {
+                    amrex::Print() << "Error: Failed reading strip " << strip << " for slice " << slice << " in " << m_filename << "\n";
+                    return false;
+                }
+            }
+        }
+    } // End loop over slices (directories)
 
     m_is_read = true;
     amrex::Print() << "Successfully read multi-directory TIFF File: " << m_filename
@@ -255,7 +308,7 @@ bool TiffReader::readFile(const std::string& filename)
     return true;
 }
 
-// --- NEW: readFileSequence Implementation ---
+// --- readFileSequence Implementation ---
 bool TiffReader::readFileSequence(
     const std::string& base_pattern,
     int num_files,
@@ -324,20 +377,23 @@ bool TiffReader::readFileSequence(
             m_samples_per_pixel = spp;
 
             // Validate format
-             if (m_width <= 0 || m_height <= 0 || planar != PLANARCONFIG_CONTIG || /* other checks */ false) {
+             if (m_width <= 0 || m_height <= 0 || planar != PLANARCONFIG_CONTIG ||
+                 (m_bits_per_sample != 8 && m_bits_per_sample != 16 && m_bits_per_sample != 32 && m_bits_per_sample != 64) ||
+                 (m_sample_format != SAMPLEFORMAT_UINT && m_sample_format != SAMPLEFORMAT_INT && m_sample_format != SAMPLEFORMAT_IEEEFP))
+             {
                   amrex::Print() << "Error: [TiffReader::readFileSequence] Invalid or unsupported format in first file: " << current_filename << "\n"; return false;
              }
              bytes_per_sample = m_bits_per_sample / 8;
-             if (bytes_per_sample == 0) { /* Error */ return false; }
+             if (bytes_per_sample == 0) { /* Error */ amrex::Print() << "Error: Bytes per sample is zero in " << current_filename << "\n"; return false; }
              bytes_per_pixel = bytes_per_sample * m_samples_per_pixel;
              slice_bytes = static_cast<size_t>(m_width) * m_height * bytes_per_pixel;
-             total_bytes = slice_bytes * m_depth;
+             total_bytes = slice_bytes * m_depth; // m_depth is num_files
 
             // Allocate storage
-            if (static_cast<double>(m_width)*m_height*m_depth*bytes_per_pixel > std::numeric_limits<size_t>::max()){ amrex::Print()<<"Size Overflow\n"; return false;}
-            try {
-                m_raw_bytes.resize(total_bytes);
-            } catch (const std::exception& e) { /* Error */ return false; }
+             if (static_cast<double>(m_width)*m_height*m_depth*bytes_per_pixel > std::numeric_limits<size_t>::max()){ amrex::Print()<<"Size Overflow\n"; return false;}
+             try {
+                 m_raw_bytes.resize(total_bytes);
+             } catch (const std::exception& e) { amrex::Print() << "Error allocating memory: " << e.what() << "\n"; return false; }
 
         } else {
             // --- Verify Consistency ---
@@ -352,33 +408,56 @@ bool TiffReader::readFileSequence(
         }
 
         // --- Read Pixel Data for this slice ---
+        // Calculate pointer to the start of the buffer for this slice
         ByteType* slice_start_ptr = m_raw_bytes.data() + static_cast<size_t>(file_idx) * slice_bytes;
 
         if (TIFFIsTiled(tif.get())) {
             amrex::Print() << "Error: [TiffReader::readFileSequence] Tiled TIFF reading not implemented (" << current_filename << ").\n";
             return false;
         } else {
-            // Stripped Read Logic (same as in readTiffInternal)
+            // Stripped Read Logic (similar to readTiffInternal and readFile)
             uint32_t rows_per_strip = 0;
             TIFFGetFieldDefaulted(tif.get(), TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
-            if (rows_per_strip == 0) rows_per_strip = m_height;
-            rows_per_strip = std::min(rows_per_strip, static_cast<uint32_t>(m_height));
+            if (rows_per_strip == 0 || rows_per_strip > static_cast<uint32_t>(m_height)) { rows_per_strip = m_height; }
+            // rows_per_strip = std::min(rows_per_strip, static_cast<uint32_t>(m_height));
             tstrip_t num_strips = TIFFNumberOfStrips(tif.get());
             tsize_t strip_buf_size = TIFFStripSize(tif.get());
-
-            for (tstrip_t strip = 0; strip < num_strips; ++strip) {
-                 size_t rows_already_in_strip = static_cast<size_t>(strip) * rows_per_strip;
-                 ByteType* strip_dest_ptr = slice_start_ptr + rows_already_in_strip * m_width * bytes_per_pixel;
-
-                  AMREX_ASSERT(strip_dest_ptr >= m_raw_bytes.data() && (strip_dest_ptr+strip_buf_size) <= (m_raw_bytes.data() + total_bytes) );
-
-
-                 tsize_t bytes_read = TIFFReadEncodedStrip(tif.get(), strip, strip_dest_ptr, strip_buf_size);
-                 if (bytes_read == -1) {
-                      amrex::Print() << "Error: [TiffReader::readFileSequence] Failed reading strip " << strip << " from file " << current_filename << "\n";
-                      return false;
-                 }
+            if (strip_buf_size <= 0) {
+                 amrex::Print() << "Error: [TiffReader::readFileSequence] Invalid strip size calculated for " << current_filename << "\n";
+                 return false;
             }
+
+
+            tsize_t bytes_read_total_this_slice = 0;
+            for (tstrip_t strip = 0; strip < num_strips; ++strip) {
+                 size_t rows_in_this_strip = rows_per_strip;
+                 size_t current_row_start = static_cast<size_t>(strip) * rows_per_strip;
+                 if (current_row_start + rows_in_this_strip > static_cast<size_t>(m_height)) {
+                     rows_in_this_strip = static_cast<size_t>(m_height) - current_row_start;
+                 }
+                 tsize_t expected_bytes_this_strip = static_cast<tsize_t>(rows_in_this_strip * m_width * bytes_per_pixel);
+                 tsize_t buffer_size_for_this_strip = std::min(strip_buf_size, expected_bytes_this_strip);
+
+                ByteType* strip_dest_ptr = slice_start_ptr + current_row_start * m_width * bytes_per_pixel;
+
+                // Bounds check
+                AMREX_ASSERT(strip_dest_ptr >= m_raw_bytes.data() && (strip_dest_ptr+buffer_size_for_this_strip) <= (m_raw_bytes.data() + total_bytes) );
+
+                tsize_t bytes_read = TIFFReadEncodedStrip(tif.get(), strip, strip_dest_ptr, buffer_size_for_this_strip);
+                if (bytes_read == -1) {
+                    amrex::Print() << "Error: [TiffReader::readFileSequence] Failed reading strip " << strip << " from file " << current_filename << "\n";
+                    return false;
+                }
+                bytes_read_total_this_slice += bytes_read;
+            }
+             // Optional: Check if total bytes read for this slice match expected
+             if (bytes_read_total_this_slice != static_cast<tsize_t>(slice_bytes)) {
+                 std::ostringstream warning_msg;
+                 warning_msg << "Warning: [TiffReader::readFileSequence] Bytes read (" << bytes_read_total_this_slice
+                             << ") does not match expected (" << slice_bytes
+                             << ") for file " << current_filename; // 'i' or 'file_idx' could be used here if needed
+                 amrex::Warning(warning_msg.str());
+             }
         }
         // TIFF file closed automatically by TiffPtr destructor
     } // End loop over files
@@ -390,8 +469,123 @@ bool TiffReader::readFileSequence(
 }
 
 
-// --- getValue / threshold implementations (Assume they exist as previously defined) ---
-// ... Need to copy/paste the implementations for getValue and threshold from the previous response ...
-// ... Make sure they use members like m_width, m_height, m_depth, m_bits_per_sample, m_sample_format, m_raw_bytes ...
+// --- getValue / threshold implementations ---
+// Placeholder - Copy actual implementations here from your working version
+// Ensure they use the class members correctly (m_width, m_height, m_depth,
+// m_bits_per_sample, m_sample_format, m_samples_per_pixel, m_raw_bytes)
+
+template <typename T>
+T TiffReader::getValue(int i, int j, int k) const {
+    // Implementation needed - Requires calculating offset using bytes_per_pixel
+    // and using getValueFromBytes helper, similar to DatReader but with m_raw_bytes
+    if (!m_is_read) {
+        throw std::runtime_error("Data not read");
+    }
+    // Basic bounds check
+    if (i < 0 || i >= m_width || j < 0 || j >= m_height || k < 0 || k >= m_depth) {
+         throw std::out_of_range("Index out of bounds");
+    }
+
+    size_t bytes_per_sample = m_bits_per_sample / 8;
+    size_t bytes_per_pixel = bytes_per_sample * m_samples_per_pixel;
+    size_t slice_bytes = static_cast<size_t>(m_width) * m_height * bytes_per_pixel;
+
+    // Calculate the starting byte position for the voxel
+    size_t byte_offset = static_cast<size_t>(k) * slice_bytes +
+                         static_cast<size_t>(j) * m_width * bytes_per_pixel +
+                         static_cast<size_t>(i) * bytes_per_pixel;
+
+    // Check if offset + size of T is within bounds
+    if (byte_offset + sizeof(T) > m_raw_bytes.size()) {
+         throw std::out_of_range("Calculated byte offset out of bounds");
+    }
+
+    // Assume reading the first sample if samples_per_pixel > 1
+    const ByteType* byte_ptr = m_raw_bytes.data() + byte_offset;
+
+    // Use the helper to interpret bytes as type T
+    // This requires the requested type T to match the underlying data size
+    // A more robust version would check sizeof(T) against bytes_per_pixel
+    if (sizeof(T) > bytes_per_pixel) {
+        throw std::runtime_error("Requested type T is larger than bytes per pixel");
+    }
+    return getValueFromBytes<T>(byte_ptr);
+}
+
+// Explicit template instantiations if needed (adjust types based on expected usage)
+template std::uint8_t TiffReader::getValue<std::uint8_t>(int, int, int) const;
+template std::uint16_t TiffReader::getValue<std::uint16_t>(int, int, int) const;
+template std::uint32_t TiffReader::getValue<std::uint32_t>(int, int, int) const;
+template std::int8_t TiffReader::getValue<std::int8_t>(int, int, int) const;
+template std::int16_t TiffReader::getValue<std::int16_t>(int, int, int) const;
+template std::int32_t TiffReader::getValue<std::int32_t>(int, int, int) const;
+template float TiffReader::getValue<float>(int, int, int) const;
+template double TiffReader::getValue<double>(int, int, int) const;
+
+
+void TiffReader::threshold(double raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
+{
+     if (!m_is_read) {
+        amrex::Abort("[TiffReader::threshold] Cannot threshold, data not read successfully.");
+     }
+
+     // Determine bytes per sample to call correct templated getValue
+     size_t bytes_per_sample = m_bits_per_sample / 8;
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& box = mfi.validbox();
+        amrex::IArrayBox& fab = mf[mfi];
+
+        amrex::LoopOnCpu(box, [&] (int i, int j, int k)
+        {
+            // Check bounds against image dimensions
+            if (i >= 0 && i < m_width && j >= 0 && j < m_height && k >= 0 && k < m_depth) {
+                double raw_value = 0.0;
+                // Call the appropriate templated getValue based on file format
+                // This assumes only one sample per pixel for simplicity here
+                // Needs enhancement for multi-sample pixels
+                try {
+                    if (m_sample_format == SAMPLEFORMAT_UINT) {
+                        if (bytes_per_sample == 1) raw_value = static_cast<double>(getValue<std::uint8_t>(i,j,k));
+                        else if (bytes_per_sample == 2) raw_value = static_cast<double>(getValue<std::uint16_t>(i,j,k));
+                        else if (bytes_per_sample == 4) raw_value = static_cast<double>(getValue<std::uint32_t>(i,j,k));
+                        // Add case for 64-bit if needed
+                    } else if (m_sample_format == SAMPLEFORMAT_INT) {
+                        if (bytes_per_sample == 1) raw_value = static_cast<double>(getValue<std::int8_t>(i,j,k));
+                        else if (bytes_per_sample == 2) raw_value = static_cast<double>(getValue<std::int16_t>(i,j,k));
+                        else if (bytes_per_sample == 4) raw_value = static_cast<double>(getValue<std::int32_t>(i,j,k));
+                        // Add case for 64-bit if needed
+                    } else if (m_sample_format == SAMPLEFORMAT_IEEEFP) {
+                        if (bytes_per_sample == 4) raw_value = static_cast<double>(getValue<float>(i,j,k));
+                        else if (bytes_per_sample == 8) raw_value = getValue<double>(i,j,k); // Already double
+                    } else {
+                        // Should not happen if validated earlier, but good to handle
+                        raw_value = 0.0; // Or throw?
+                    }
+                    fab(amrex::IntVect(i, j, k), 0) = (raw_value > raw_threshold) ? value_if_true : value_if_false;
+                } catch (const std::exception& e) {
+                    // Handle potential out_of_range from getValue if bounds check fails internally
+                    fab(amrex::IntVect(i, j, k), 0) = value_if_false; // Default outside bounds
+                    // Maybe issue a warning once?
+                    // amrex::Warning("Exception during getValue in threshold: " + std::string(e.what()));
+                }
+
+            } else {
+                 // Cell is outside the original image bounds
+                 fab(amrex::IntVect(i, j, k), 0) = value_if_false;
+            }
+        });
+    }
+}
+
+// Overload for 1/0 output
+void TiffReader::threshold(double raw_threshold, amrex::iMultiFab& mf) const {
+    threshold(raw_threshold, 1, 0, mf);
+}
+
 
 } // namespace OpenImpala
