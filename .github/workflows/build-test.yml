@@ -1,125 +1,186 @@
-# Workflow name
-name: Test OpenImpala Build (Singularity Cache)
 
-# Triggers
+# .github/workflows/build-test.yml
+name: Build and Test OpenImpala Makefile with SIF Cache
+
+# Define workflow triggers
 on:
   push:
-    branches: [ main, working, build ] # Trigger on relevant branches
+    # Trigger on pushes to these specific branches
+    branches:
+      - main
+      - working
+      - build
+      - 'makefile' # Include makefile branch trigger
   pull_request:
+    # Trigger on Pull Requests targeting main branch
     branches: [ main ]
   workflow_dispatch: # Allows manual triggering
 
 jobs:
-  # Job 1: Build dependencies and cache them in a sandbox
-  cache-dependencies:
-    runs-on: ubuntu-latest # Use a standard GitHub-hosted runner
-    outputs:
-      cache-key: ${{ steps.cache-key-step.outputs.key }} # Output the key used for the next job
+
+  # Define the main build job
+  build-openimpala:
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
 
     steps:
+      # Step 1: Check out the repository code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Apptainer/Singularity
+
+      # Step 2: Set up Apptainer/Singularity environment
+      - name: Set up Apptainer
         uses: eWaterCycle/setup-apptainer@v2
         with:
-          apptainer-version: 1.2.5 # Use consistent version
+          apptainer-version: 1.2.5 # Use a consistent version
 
-      - name: Generate Cache Key
-        id: cache-key-step
-        # Key based on hash of the dependency recipe file + runner OS + date part
-        run: |
-          RECIPE_FILE="containers/Singularity.deps.def" # Path to the definition file
-          CACHE_DATE=$(date +'%Y-%m') # Add month to key to allow periodic refresh
-          # Corrected: Use string literal in hashFiles()
-          echo "key=deps-cache-${{ runner.os }}-${CACHE_DATE}-$(echo -n ${{ hashFiles('containers/Singularity.deps.def') }} | md5sum | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-
-      - name: Cache Dependencies Sandbox (Restore Attempt)
-        id: cache-deps
-        uses: actions/cache@v4
+      # Step 3: Attempt to restore the cached SIF image
+      - name: Restore Dependency SIF Cache
+        id: cache-restore-sif # Assign an ID to reference cache hit status
+        uses: actions/cache/restore@v4 # Use the specific restore action
         with:
-          path: ./dependency_sandbox # Directory to cache/restore
-          key: ${{ steps.cache-key-step.outputs.key }}
-          # Optional: allow restoring slightly older caches if exact key misses
-          # restore-keys: |
-          #   deps-cache-${{ runner.os }}-
+          path: dependency_image.sif # File to restore
+          # Key for lookup: OS + hash of the definition file
+          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
+          # Fallback key if exact match not found
+          restore-keys: |
+            ${{ runner.os }}-apptainer-sif-
 
-      - name: Build Dependencies Sandbox (if cache miss)
-        # This step runs only if the exact cache key was not found in the previous step
-        if: steps.cache-deps.outputs.cache-hit != 'true'
+
+      # Step 4: Build the SIF image only if it wasn't restored from cache
+      - name: Build Dependency SIF Image Locally (if cache miss)
+        # Run only if the restore step did NOT find an exact match
+        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
         run: |
           RECIPE_FILE="containers/Singularity.deps.def"
-          # Basic check that the definition file exists
+          TARGET_SIF="dependency_image.sif"
+          # Check if the definition file exists
           if [ ! -f "$RECIPE_FILE" ]; then
-             echo "Error: Recipe file $RECIPE_FILE not found!"
-             exit 1
-          fi
-          echo "Building dependencies sandbox from $RECIPE_FILE..."
-
-          # Build into a sandbox directory (folder) using sudo
-          # Corrected: Use sudo instead of --fakeroot for privilege
-          sudo apptainer build --sandbox ./dependency_sandbox "$RECIPE_FILE"
-
-          # Corrected: Change ownership AFTER successful build to allow caching by runner user
-          echo "Changing sandbox ownership for caching..."
-          # Use $(id -u):$(id -g) to get current runner user/group ID
-          sudo chown -R $(id -u):$(id -g) ./dependency_sandbox
-          echo "Ownership change complete."
-
-  # Job 2: Build OpenImpala using the cached dependencies
-  build-openimpala:
-    needs: cache-dependencies # Run after dependencies are cached/restored
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Apptainer/Singularity
-        uses: eWaterCycle/setup-apptainer@v2
-        with:
-          apptainer-version: 1.2.5 # Use consistent version
-
-      - name: Restore Dependencies Sandbox
-        id: cache-deps-restore # Changed ID slightly to avoid potential reuse confusion
-        uses: actions/cache@v4
-        with:
-          path: ./dependency_sandbox
-          # Use the exact key generated and outputted by the first job
-          key: ${{ needs.cache-dependencies.outputs.cache-key }}
-          # No restore-keys needed here, we require the exact match built/cached previously
-
-      - name: Check if sandbox exists after restore
-        # This check verifies the cache restore worked OR the build in Job 1 succeeded
-        run: |
-          if [ ! -d "./dependency_sandbox" ]; then
-            echo "Error: Dependency sandbox not found after restore step."
-            echo "This likely means the build in the previous job failed or the cache could not be restored."
+            echo "Error: Dependency recipe file $RECIPE_FILE not found!"
             exit 1
           fi
-          echo "Dependency sandbox found successfully."
-
-      - name: Build OpenImpala using Cached Dependencies
-        run: |
-          echo "Building OpenImpala inside sandbox environment..."
-          # Execute 'make' inside the sandbox environment
-          # Mount the current checkout directory (containing the Makefile) into /opt/openImpala
-          # Assumes the sandbox contains necessary build tools and libraries (e.g., MPI, HDF5 in /usr/local or /opt)
-          # Run make clean first, then parallel make
-          apptainer exec --bind $PWD:/opt/openImpala \
-            ./dependency_sandbox \
-            bash -c 'cd /opt/openImpala && make clean && make -j$(nproc)'
-
-          # Check make exit status explicitly
-          if [ $? -ne 0 ]; then
-            echo "Error: OpenImpala 'make' command failed."
-            exit 1
+          echo "Cache miss or invalid. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
+          # Execute the build command using sudo
+          sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
+          # Check the exit code immediately
+          BUILD_EXIT_CODE=$?
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+              echo "Error: Apptainer SIF build failed with exit code $BUILD_EXIT_CODE."
+              exit $BUILD_EXIT_CODE # Exit if build failed
           fi
-          echo "OpenImpala built successfully."
+          echo "Apptainer SIF build successful."
+          ls -lh ./dependency_image.sif # Verify file exists and size
 
-      # Optional: Add steps here to run tests using the sandbox
-      # - name: Run Tests
+      # Step 5: Verify the SIF file exists (either restored or built)
+      - name: Verify SIF exists after cache/build step
+        run: |
+          if [ ! -f "./dependency_image.sif" ]; then
+            echo "Error: dependency_image.sif not found after cache/build steps!"
+            exit 1
+          else
+            echo "dependency_image.sif found."
+            ls -lh ./dependency_image.sif
+          fi
+
+      # Step 6: Build OpenImpala code using the SIF environment
+      - name: Build OpenImpala using Dependency SIF (with make debug)
+        id: make_build
+        continue-on-error: true
+        run: |
+          # --- START ENHANCED DEBUG STEP ---
+          echo "DEBUG: Printing environment inside container before make..."
+          # Add the find command INSIDE the bash -c '...' block below
+          sudo apptainer exec --bind $PWD:/src ./dependency_image.sif bash -c ' \
+            echo "--- USER & GROUP ---"; \
+            id; \
+            echo "--- SCRIPT SHELL ---"; \
+            ps -p $$ -o comm=; \
+            echo "--- SCL ACTIVE? (Look for _SCL_ variables) ---"; \
+            env | grep SCL || echo "No SCL variables found"; \
+            echo "--- FULL PATH ---"; \
+            echo "$PATH"; \
+            echo "--- which mpicc ---"; \
+            which mpicc || echo "mpicc NOT FOUND"; \
+            echo "--- which mpic++ ---"; \
+            which mpic++ || echo "mpic++ NOT FOUND"; \
+            echo "--- mpic++ --version ---"; \
+            mpic++ --version || echo "mpic++ --version FAILED"; \
+            echo "--- Contents of /usr/local/bin ---"; \
+            ls -l /usr/local/bin || echo "ls /usr/local/bin FAILED"; \
+            echo "--- Expected Lib Dirs ---"; \
+            ls -ld /opt/amrex/23.11/lib /opt/hypre/v2.30.0/lib /opt/hdf5/1.12.3/lib /usr/local/lib || echo "ls lib dirs FAILED"; \
+            echo "--- LD_LIBRARY_PATH ---"; \
+            echo "$LD_LIBRARY_PATH"; \
+            echo "--- Environment Variables ---"; \
+            echo "DEBUG AMREX_HOME=[$AMREX_HOME]"; \
+            echo "DEBUG HYPRE_HOME=[$HYPRE_HOME]"; \
+            echo "DEBUG HDF5_HOME=[$HDF5_HOME]"; \
+            echo "DEBUG H5CPP_HOME=[$H5CPP_HOME]"; \
+            echo "DEBUG TIFF_HOME=[$TIFF_HOME]"; \
+            echo "--- Check H5Cpp.h ---"; \
+            find /opt/hdf5 /usr/include -name H5Cpp.h || echo "H5Cpp.h NOT FOUND in /opt/hdf5 or /usr/include"; \
+            echo "--- Check amrex utils ---"; \
+            find /opt/amrex -name AMReX_Utility.H || echo "AMReX_Utility.H NOT FOUND in /opt/amrex"; \
+            # <<< ADD THE CHECK HERE >>> \
+            echo "--- Check AMReX_ParallelFor.H ---"; \
+            find /opt/amrex/23.11/include -name AMReX_ParallelFor.H || echo "AMReX_ParallelFor.H NOT FOUND"; \
+          ' # <<< Make sure this closing quote is the end of the bash -c block
+          echo "DEBUG: Environment print finished."
+          # --- END ENHANCED DEBUG STEP ---
+
+          # --- Make Clean Step ---
+          echo "Building OpenImpala using SIF image environment (with make clean)..."
+          sudo apptainer exec --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make clean'
+
+          # Execute 'make -d' - explicitly source SCL and capture output
+          echo "Running make -d to capture debug output..."
+          sudo apptainer exec --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1
+
+
+          # Capture the exit code of make -d
+          MAKE_EXIT_CODE=$?
+          echo "Make exit code: $MAKE_EXIT_CODE"
+          # Explicitly fail the step if make failed (important for outcome check)
+          if [ $MAKE_EXIT_CODE -ne 0 ]; then exit $MAKE_EXIT_CODE; fi
+          echo "OpenImpala build command finished (check logs)."
+
+      # Step 7: Upload the make debug log artifact
+      - name: Upload Make Debug Log
+        # Run this step always, even if make_build failed (due to continue-on-error)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: make-debug-log-${{ github.run_id }} # Unique artifact name per run
+          path: make_debug_output.log # Path to the log file generated above
+          retention-days: 5 # Keep logs for 5 days
+
+      # Step 8: Explicitly fail the job if the make step failed
+      - name: Fail job if make failed
+        # Check the outcome of the step with id 'make_build'
+        if: steps.make_build.outcome == 'failure'
+        run: |
+          echo "Make command failed. See uploaded 'make-debug-log' artifact for details."
+          exit 1
+
+      # Step 9: Save the SIF to cache (runs last, even on failure)
+      # This step runs AFTER the potential job failure in the previous step,
+      # ensuring the cache is saved if the SIF exists.
+      - name: Save Dependency SIF Image Cache
+        uses: actions/cache/save@v4 # Use the specific save action
+        if: always() # Ensure this step runs even if prior steps (like make or explicit fail) failed
+        with:
+          path: dependency_image.sif # File to save
+          # Key MUST match the key used in the restore step
+          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
+
+      # Optional: Add steps here to run tests using the SIF image IF make succeeded
+      # - name: Run Tests (if build succeeded)
+      #   if: steps.make_build.outcome == 'success'
       #   run: |
-      #     apptainer exec --bind $PWD:/opt/openImpala \
-      #       ./dependency_sandbox \
-      #       bash -c 'cd /opt/openImpala/build/tests && ./tSomeTest'
+      #     sudo apptainer exec --bind $PWD:/src \
+      #         ./dependency_image.sif \
+      #         bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src/build/tests && ./tSomeTest'
