@@ -26,6 +26,7 @@
 #include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier
 #include <AMReX_ParallelFor.H>      // For ParallelFor
 
+
 // Default relative path to the sample HDF5 file
 const std::string default_hdf5_filename = "data/SampleData_2Phase.h5";
 // Default dataset path within the HDF5 file
@@ -47,7 +48,6 @@ int main (int argc, char* argv[])
         bool write_plotfile = false; // Default: don't write plotfile
 
         { // Use ParmParse to read parameters from command line
-            // Example: ./executable hdf5file=path/to/file.h5 dataset=path/in/h5 write_plotfile=1
             amrex::ParmParse pp;
             pp.query("hdf5file", hdf5_filename);
             pp.query("dataset", hdf5_dataset);
@@ -63,7 +63,6 @@ int main (int argc, char* argv[])
             }
         }
 
-        // Use __DATE__ and __TIME__ which are standard C macros
         amrex::Print() << "Starting tHDF5Reader Test (Compiled: " << __DATE__ << " " << __TIME__ << ")\n";
         amrex::Print() << "Input HDF5 file: " << hdf5_filename << "\n";
         amrex::Print() << "Input dataset path: " << hdf5_dataset << "\n";
@@ -71,22 +70,17 @@ int main (int argc, char* argv[])
 
         // --- Test HDF5Reader ---
         std::unique_ptr<OpenImpala::HDF5Reader> reader_ptr;
-        // Expected properties for default SampleData_2Phase.h5 at exchange/data
         int expected_width = 100;
         int expected_height = 100;
         int expected_depth = 100;
-        // int expected_bps = 8;       // Example value - REMOVED Check below
-        // int expected_format = 1;  // Example value - REMOVED Check below
-        // int expected_spp = 1;       // Example value - REMOVED Check below
 
-        // <<< FIX 1: Declare threshold_value with a concrete type >>>
-        // Assuming threshold value is double. Need 'using DataType = ...;' in HDF5Reader.H for original code.
-        const double threshold_value = 1.0;
+        // <<< FIX 1: Declare threshold_value as int (more appropriate for labels) >>>
+        // Still requires HDF5Reader::DataType to be defined in HDF5Reader.H eventually.
+        // HDF5Reader::threshold() currently takes double, so implicit conversion happens.
+        const int threshold_value = 1;
 
         try {
-            // Assuming constructor reads file/dataset and throws std::runtime_error on failure
             reader_ptr = std::make_unique<OpenImpala::HDF5Reader>(hdf5_filename, hdf5_dataset);
-
         } catch (const std::exception& e) {
             amrex::Abort("Error creating HDF5Reader: " + std::string(e.what()));
         }
@@ -97,22 +91,23 @@ int main (int argc, char* argv[])
         int actual_height = reader_ptr->height();
         int actual_depth = reader_ptr->depth();
 
-        // <<< FIX 2: Comment out calls to non-existent member functions >>>
-        // The HDF5Reader class needs bitsPerSample(), sampleFormat(), samplesPerPixel()
-        // methods implemented (or these checks removed/adapted)
+        // <<< FIX 2: Keep calls to non-existent member functions commented out >>>
         // int actual_bps = reader_ptr->bitsPerSample();
         // int actual_format = reader_ptr->sampleFormat();
         // int actual_spp = reader_ptr->samplesPerPixel();
 
         amrex::Print() << "  Read dimensions: " << actual_width << "x" << actual_height << "x" << actual_depth << "\n";
-        // amrex::Print() << "  Read metadata: BPS=" << actual_bps << ", Format=" << actual_format << ", SPP=" << actual_spp << "\n";
+        // amrex::Print() << "  Read metadata: BPS=" << actual_bps << ", Format=" << actual_format << ", SPP=" << actual_spp << "\n"; // Commented out
 
         if (actual_width != expected_width || actual_height != expected_height || actual_depth != expected_depth) {
             amrex::Abort("FAIL: Read dimensions do not match expected dimensions (100x100x100).");
         }
 
-        // <<< FIX 2: Comment out checks related to non-existent member functions >>>
+        // <<< FIX 2: Keep checks related to non-existent member functions commented out >>>
         /*
+        // int expected_bps = 8; // Example value
+        // int expected_format = 1; // Example value
+        // int expected_spp = 1; // Example value
         if (actual_bps != expected_bps) {
              amrex::Abort("FAIL: Read BitsPerSample (" + std::to_string(actual_bps) +
                           ") does not match expected value (" + std::to_string(expected_bps) + ").");
@@ -126,18 +121,15 @@ int main (int argc, char* argv[])
                           ") does not match expected value (" + std::to_string(expected_spp) + ").");
         }
         */
-        amrex::Print() << "  Dimension check passed.\n"; // Modified message
+        amrex::Print() << "  Dimension check passed.\n";
         amrex::Print() << "  (Skipping metadata checks for BPS, Format, SPP as methods are not implemented in HDF5Reader).\n";
-
-        // TODO: Add tests for HDF5Reader attribute reading if implemented.
-        // TODO: Add tests for HDF5Reader getValue(i,j,k) against known data points.
 
         // --- Setup AMReX Data Structures ---
         amrex::Geometry geom;
-        amrex::Box domain_box = reader_ptr->box(); // Use reader's box
+        amrex::Box domain_box = reader_ptr->box();
         {
-            amrex::RealBox rb({0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}); // Dummy physical domain
-            amrex::Array<int,AMREX_SPACEDIM> is_periodic{0, 0, 0}; // Non-periodic
+            amrex::RealBox rb({0.0, 0.0, 0.0}, {1.0, 1.0, 1.0});
+            amrex::Array<int,AMREX_SPACEDIM> is_periodic{0, 0, 0};
             amrex::Geometry::Setup(&rb, 0, is_periodic.data());
             geom.define(domain_box);
         }
@@ -146,44 +138,33 @@ int main (int argc, char* argv[])
         ba.maxSize(BOX_SIZE);
         amrex::DistributionMapping dm(ba);
 
-        // Create iMultiFab to hold thresholded data
-        amrex::iMultiFab mf(ba, dm, 1, 0); // 1 component, 0 ghost cells
-        mf.setVal(0); // Initialize
+        amrex::iMultiFab mf(ba, dm, 1, 0);
+        mf.setVal(0);
 
         // --- Test Thresholding ---
-        // Ensure threshold_value is declared (Fix 1 applied above)
         amrex::Print() << "Performing threshold > " << threshold_value << "...\n";
         try {
-            // Assuming threshold takes double and iMultiFab&, and is const
+            // Pass the threshold value (now int, will convert to double for the method)
             reader_ptr->threshold(threshold_value, mf);
         } catch (const std::exception& e) {
             amrex::Abort("Error during threshold operation: " + std::string(e.what()));
         }
 
-        // Check results (min/max across all processors)
-        int min_val = mf.min(0); // Component 0
-        int max_val = mf.max(0); // Component 0
-
+        int min_val = mf.min(0);
+        int max_val = mf.max(0);
         amrex::Print() << "  Threshold result min value: " << min_val << "\n";
         amrex::Print() << "  Threshold result max value: " << max_val << "\n";
 
-        // Expect only 0s and 1s if thresholding works and data spans the threshold
         if (min_val != 0 || max_val != 1) {
              amrex::Print() << "Warning: Thresholded data min/max (" << min_val << "/" << max_val
                             << ") not the expected 0/1. Check threshold value or sample data.\n";
-             // Decide if this is a fatal error for the test
-             // amrex::Abort("FAIL: Threshold result unexpected.");
         } else {
              amrex::Print() << "  Threshold value range looks plausible (0 and 1 found).\n";
         }
-        // TODO: Add tests for threshold overload with custom true/false values.
-        // TODO: Add separate tests for error conditions (bad file, bad dataset path).
 
         // --- Optional: Write Plotfile ---
         if (write_plotfile) {
             amrex::Print() << "Writing plot file...\n";
-
-            // Create output directory relative to executable location
             if (amrex::ParallelDescriptor::IOProcessor()) {
                  if (!amrex::UtilCreateDirectory(test_output_dir, 0755)) {
                      amrex::Warning("Could not create output directory: " + test_output_dir);
@@ -191,39 +172,28 @@ int main (int argc, char* argv[])
             }
             amrex::ParallelDescriptor::Barrier();
 
-            // Get datetime string for filename
             std::string datetime_str;
             {
-                std::time_t strt_time;
-                std::tm* timeinfo;
-                char datetime_buf [80];
-                std::time(&strt_time);
-                timeinfo = std::localtime(&strt_time);
+                std::time_t strt_time; std::tm* timeinfo; char datetime_buf [80];
+                std::time(&strt_time); timeinfo = std::localtime(&strt_time);
                 std::strftime(datetime_buf, sizeof(datetime_buf),"%Y%m%d%H%M",timeinfo);
                 datetime_str = datetime_buf;
             }
-
-            // Construct filename
             std::string plotfilename = test_output_dir + "/hdf5readertest_" + datetime_str;
 
-            // Copy integer data to float MultiFab for plotting
             amrex::MultiFab mfv(ba, dm, 1, 0);
             for (amrex::MFIter mfi(mfv, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
             {
                 const amrex::Box& box = mfi.tilebox();
                 auto const& int_fab = mf.const_array(mfi);
-
-                // <<< FIX 3: Change auto& to auto >>>
-                auto real_fab = mfv.array(mfi); // Get copy or non-const array
+                // <<< FIX 3: Changed auto& to auto >>>
+                auto real_fab = mfv.array(mfi);
 
                 amrex::ParallelFor(box, [&] (int i, int j, int k) noexcept
                 {
-                    // Use IntVect for consistency/safety
                     real_fab(amrex::IntVect(i,j,k)) = static_cast<amrex::Real>(int_fab(amrex::IntVect(i,j,k)));
                 });
             }
-
-            // Write plot file
             amrex::WriteSingleLevelPlotfile(plotfilename, mfv, {"phase_threshold"}, geom, 0.0, 0);
             amrex::Print() << "  Plot file written to: " << plotfilename << "\n";
         }
