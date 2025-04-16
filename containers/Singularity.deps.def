@@ -30,7 +30,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
     # Add ldconfig paths early if needed
     echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
-    # echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf # If building HDF5
+    echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf # If building HDF5
 
     # --- Install Repositories and Packages ---
     echo "--- Updating system and installing EPEL ---"
@@ -131,23 +131,51 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     which h5pcc && h5pcc -showconfig || { echo "*** ERROR: h5pcc not found or failed after HDF5 source install!"; exit 1; }
     ldconfig -p | grep libhdf5 || echo "WARNING: libhdf5 not found in ldconfig cache"
 
-
     # --- Install AMReX ---
-    echo "--- Building AMReX ---"
+    # Note: Ensure SCL is sourced and mpicc/mpicxx/mpif90 are in PATH before this step
+    echo "--- Building AMReX ${AMREX_VERSION} ---"
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
-    cd amrex && mkdir build && cd build
-    # Update CMAKE_PREFIX_PATH to include source-built HDF5 and OpenMPI
-    cmake .. -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
+    cd amrex
+    mkdir build && cd build
+
+    echo "--- Configuring AMReX ---"
+    # Explicitly set MPI compilers via `which` to use the correct ones from PATH
+    # Explicitly enable shared library building
+    # Only list HDF5 in CMAKE_PREFIX_PATH as MPI should be found via compilers
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
-        -DAMReX_MPI=ON -DAMReX_OMP=ON -DAMReX_EB=ON \
+        -DAMReX_MPI=ON \
+        -DAMReX_OMP=ON \
+        -DAMReX_EB=ON \
+        -DAMReX_FORTRAN=ON \
+        -DCMAKE_C_COMPILER=$(which mpicc) \
+        -DCMAKE_CXX_COMPILER=$(which mpicxx) \
+        -DCMAKE_Fortran_COMPILER=$(which mpif90) \
+        -DBUILD_SHARED_LIBS=ON \
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${OPENMPI_INSTALL_PREFIX};${HDF5_INSTALL_PREFIX}" # Point to our installs
-    make -j$(nproc) && make install # Serial install
-    # ADD THIS LINE BACK:
-    echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"; ls -lR ${AMREX_INSTALL_PREFIX} || echo "!!! ERROR: Failed to list AMReX install directory!"
-    cd ../.. && rm -rf amrex
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}" \
+    || { echo "*** AMReX Configure Failed!"; exit 1; }
+
+    echo "--- Building AMReX (make) ---"
+    make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
+
+    echo "--- Installing AMReX (make install) ---"
+    make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
+
+    # Verification step (recommended during debugging)
+    echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"
+    ls -lR ${AMREX_INSTALL_PREFIX} || echo "!!! WARNING: Failed to list AMReX install directory!"
+    find ${AMREX_INSTALL_PREFIX} -name "libamrex*.so" || echo "--- WARNING: No libamrex*.so files found in AMReX install directory ---"
+    echo "--- Finished checking AMReX installation ---"
+
+    # Go back to the main build source directory
+    cd ../..
+
+    echo "--- Cleaning up AMReX source ---"
+    rm -rf amrex
 
     # --- Install HYPRE ---
     echo "--- Building HYPRE ---"
