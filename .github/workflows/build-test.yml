@@ -80,12 +80,12 @@ jobs:
 
       # Step 6: Build OpenImpala code using the SIF environment
       - name: Build OpenImpala using Dependency SIF (with make debug)
-        id: make_build # Assign an ID to check the outcome later
-        continue-on-error: true # Allow this step to fail so logs can still be uploaded
+        id: make_build
+        continue-on-error: true
         run: |
           # --- START ENHANCED DEBUG STEP ---
-          # (Prints environment details inside the container before make)
           echo "DEBUG: Printing environment inside container before make..."
+          # Add the find command INSIDE the bash -c '...' block below
           sudo apptainer exec --bind $PWD:/src ./dependency_image.sif bash -c ' \
             echo "--- USER & GROUP ---"; \
             id; \
@@ -117,12 +117,15 @@ jobs:
             find /opt/hdf5 /usr/include -name H5Cpp.h || echo "H5Cpp.h NOT FOUND in /opt/hdf5 or /usr/include"; \
             echo "--- Check amrex utils ---"; \
             find /opt/amrex -name AMReX_Utility.H || echo "AMReX_Utility.H NOT FOUND in /opt/amrex"; \
-          '
+            # <<< ADD THE CHECK HERE >>> \
+            echo "--- Check AMReX_ParallelFor.H ---"; \
+            find /opt/amrex/23.11/include -name AMReX_ParallelFor.H || echo "AMReX_ParallelFor.H NOT FOUND"; \
+          ' # <<< Make sure this closing quote is the end of the bash -c block
           echo "DEBUG: Environment print finished."
           # --- END ENHANCED DEBUG STEP ---
 
+          # --- Make Clean Step ---
           echo "Building OpenImpala using SIF image environment (with make clean)..."
-          # Execute 'make clean' - explicitly source SCL
           sudo apptainer exec --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make clean'
