@@ -1,5 +1,7 @@
 #include "HDF5Reader.H"
 
+#include <cstddef>   // <<< FIX: Added for size_t >>>
+#include <sstream>   // <<< FIX: Added for ostringstream (used in helper) >>>
 #include <fstream>   // Not strictly needed now, using HDF5 API
 #include <vector>
 #include <string>
@@ -17,8 +19,7 @@
 #include <AMReX_IntVect.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_GpuContainers.H> // For amrex::LoopOnCpu
-#include <AMReX_Utility.H>       // Maybe needed?
-// AMReX_Extension.H might be needed for AMREX_LIKELY, but we remove it instead
+#include <AMReX_Utility.H>       // For amrex::Warning overload check, potentially other utils
 
 // --- HDF5 C++ API Include ---
 #include <H5Cpp.h>
@@ -88,21 +89,21 @@ std::string readAttributeAsString(const H5::H5Object& obj, const std::string& at
         H5::Attribute attr = obj.openAttribute(attr_name);
         H5::DataType type = attr.getDataType();
 
-        // *** FIX: Check H5T_STRING class instead of specific PredTypes ***
+        // Check if it's a string type
         if (type.getClass() == H5T_STRING)
         {
-             // If it's a string type, read it directly into std::string
-             // Note: Might need adjustment if dealing with fixed-size strings, but variable is common
-             H5::StrType str_type = attr.getStrType(); // Can use this to get more details if needed
-             attr.read(type, value);
+            // If it's a string type, read it directly into std::string
+            H5::StrType str_type = attr.getStrType(); // Can use this to get more details if needed
+            attr.read(type, value);
         } else {
-            // Handle non-string types (simplified - robust solution needs type checking)
+            // Handle non-string types (simplified - could try to convert common types)
             value = "<Non-string Attribute>";
         }
     } catch (H5::Exception& error) {
-        // Attribute might not exist, treat as non-fatal here
+        // Attribute might not exist, treat as non-fatal here, return indicative string
+        // Suppress verbose warnings unless debugging attribute issues
         // std::string warn_msg = "HDF5 Warning: Could not read attribute '" + attr_name + "': " + error.getDetailMsg();
-        // amrex::Warning(warn_msg);
+        // amrex::Warning(warn_msg.c_str());
         value = "<Attribute not found or read error>";
     }
     return value;
@@ -125,9 +126,7 @@ HDF5Reader::HDF5Reader() :
 HDF5Reader::HDF5Reader(const std::string& filename, const std::string& hdf5dataset) :
     HDF5Reader() // Delegate for default member initialization
 {
-    // Try reading the file; rely on readFile to set members and print errors.
     if (!readFile(filename, hdf5dataset)) {
-        // Construct a meaningful error message
         throw std::runtime_error("HDF5Reader: Failed to read dataset '" + hdf5dataset +
                                  "' from file '" + filename + "' during construction.");
     }
@@ -149,9 +148,7 @@ bool HDF5Reader::readHDF5FileInternal()
 {
     // Reset state before reading
     m_raw.clear();
-    m_width = 0;
-    m_height = 0;
-    m_depth = 0;
+    m_width = 0; m_height = 0; m_depth = 0;
     m_is_read = false;
 
     try {
@@ -226,7 +223,9 @@ bool HDF5Reader::readHDF5FileInternal()
              amrex::Print() << "Successfully read HDF5 Dataset: " << m_filename << " [" << m_hdf5dataset << "]"
                             << " (Dimensions: " << m_width << "x" << m_height << "x" << m_depth << ")\n";
         } else {
-             amrex::Warning("HDF5Reader: Read operation completed but resulted in zero dimensions.");
+             // This case should ideally be caught earlier by dimension checks
+             std::string warn_msg = "HDF5Reader: Read operation completed but resulted in zero dimensions.";
+             amrex::Warning(warn_msg.c_str()); // <<< FIX: Use .c_str() for safety
              m_is_read = false; // Treat as not successfully read if dimensions are zero
              return false;
         }
@@ -244,7 +243,7 @@ bool HDF5Reader::readHDF5FileInternal()
     } catch (std::exception& std_err) {
         // Catch potential standard exceptions (e.g., from memory allocation)
         std::string err_msg = "Standard Exception in HDF5Reader processing: " + std::string(std_err.what());
-        amrex::Warning(err_msg); // Corrected amrex::Warning call
+        amrex::Warning(err_msg.c_str()); // <<< FIX: Use .c_str() for safety
         m_raw.clear();
         m_width = m_height = m_depth = 0;
         m_is_read = false;
@@ -255,64 +254,47 @@ bool HDF5Reader::readHDF5FileInternal()
 //-----------------------------------------------------------------------
 // Getter Implementations
 //-----------------------------------------------------------------------
-
-int HDF5Reader::width() const {
-    return m_width;
-}
-
-int HDF5Reader::height() const {
-    return m_height;
-}
-
-int HDF5Reader::depth() const {
-    return m_depth;
-}
-
+// (No changes from previous version)
+int HDF5Reader::width() const { return m_width; }
+int HDF5Reader::height() const { return m_height; }
+int HDF5Reader::depth() const { return m_depth; }
 amrex::Box HDF5Reader::box() const {
-    if (!m_is_read) {
-        return amrex::Box(); // Return default (empty) box
-    }
-    // Box is cell-centered, index from 0 to dim-1
+    if (!m_is_read) return amrex::Box();
     return amrex::Box(amrex::IntVect(0, 0, 0), amrex::IntVect(m_width - 1, m_height - 1, m_depth - 1));
 }
-
-const std::vector<HDF5Reader::InternalDataType>& HDF5Reader::getRawData() const {
-    return m_raw;
-}
+const std::vector<HDF5Reader::InternalDataType>& HDF5Reader::getRawData() const { return m_raw; }
 
 HDF5Reader::InternalDataType HDF5Reader::getRawValue(int i, int j, int k) const {
     if (!m_is_read) {
         throw std::out_of_range("[HDF5Reader::getRawValue] Data not read yet.");
     }
-    // Check indices against stored dimensions
     if (i < 0 || i >= m_width || j < 0 || j >= m_height || k < 0 || k >= m_depth) {
         throw std::out_of_range("[HDF5Reader::getRawValue] Index ("
-                                 + std::to_string(i) + "," + std::to_string(j) + "," + std::to_string(k)
-                                 + ") out of bounds (W:" + std::to_string(m_width)
-                                 + ", H:" + std::to_string(m_height) + ", D:" + std::to_string(m_depth) + ").");
+                                + std::to_string(i) + "," + std::to_string(j) + "," + std::to_string(k)
+                                + ") out of bounds (W:" + std::to_string(m_width)
+                                + ", H:" + std::to_string(m_height) + ", D:" + std::to_string(m_depth) + ").");
     }
-
-    // Calculate 1D index (assuming XYZ layout where Z varies slowest)
     amrex::Long idx = static_cast<amrex::Long>(k) * m_width * m_height +
-                       static_cast<amrex::Long>(j) * m_width +
-                       static_cast<amrex::Long>(i);
-
-    // Bounds check for calculated index (safety)
+                      static_cast<amrex::Long>(j) * m_width +
+                      static_cast<amrex::Long>(i);
     if (idx >= static_cast<amrex::Long>(m_raw.size())) {
          throw std::out_of_range("[HDF5Reader::getRawValue] Calculated index (" + std::to_string(idx)
-                                + ") exceeds raw data vector size (" + std::to_string(m_raw.size()) + ").");
+                                 + ") exceeds raw data vector size (" + std::to_string(m_raw.size()) + ").");
     }
-
     return m_raw[static_cast<size_t>(idx)];
 }
 
 //-----------------------------------------------------------------------
-// Attribute Reading Implementations (Examples)
+// Attribute Reading Implementations
 //-----------------------------------------------------------------------
 
 std::string HDF5Reader::getAttribute(const std::string& attr_name) const {
     if (!m_is_read) {
-        throw std::runtime_error("[HDF5Reader::getAttribute] Cannot read attribute, file/dataset not successfully read.");
+        // Maybe return an empty string or a specific error string instead of throwing?
+        // Throwing might be unexpected if just checking optional attributes.
+        // Let's return an indicative error string.
+        return "<Attribute read error: Data not read>";
+        // throw std::runtime_error("[HDF5Reader::getAttribute] Cannot read attribute, file/dataset not successfully read.");
     }
     std::string value = "<Attribute Error>"; // Default error value
     try {
@@ -320,10 +302,10 @@ std::string HDF5Reader::getAttribute(const std::string& attr_name) const {
         H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
         value = readAttributeAsString(dataset, attr_name); // Use helper
     } catch (H5::Exception& error) {
-         // Make slightly less noisy - return error string instead of printing/throwing again
-         value = "<HDF5 Error reading attr '" + attr_name + "'>";
+        // Return error string instead of printing/throwing from getter
+        value = "<HDF5 Error reading attr '" + attr_name + "'>";
     } catch (std::exception& std_err) {
-         value = "<Error reading attr '" + attr_name + "': " + std_err.what() + ">";
+        value = "<Error reading attr '" + attr_name + "': " + std_err.what() + ">";
     }
     return value;
 }
@@ -347,13 +329,13 @@ std::map<std::string, std::string> HDF5Reader::getAllAttributes() const {
         }
     } catch (H5::Exception& error) {
         std::string warn_msg = "HDF5 Warning in HDF5Reader::getAllAttributes for file '" + m_filename +
-                              "', dataset '" + m_hdf5dataset + "':\n  " + error.getDetailMsg();
-        amrex::Warning(warn_msg); // Corrected amrex::Warning call
-        attributes.clear();
+                               "', dataset '" + m_hdf5dataset + "':\n  " + error.getDetailMsg();
+        amrex::Warning(warn_msg.c_str()); // <<< FIX: Use .c_str() for safety
+        attributes.clear(); // Return empty on error
     } catch (std::exception& std_err) {
         std::string err_msg = "Standard Exception in HDF5Reader::getAllAttributes: " + std::string(std_err.what());
-        amrex::Warning(err_msg); // Corrected amrex::Warning call
-        attributes.clear();
+        amrex::Warning(err_msg.c_str()); // <<< FIX: Use .c_str() for safety
+        attributes.clear(); // Return empty on error
     }
     return attributes;
 }
@@ -361,19 +343,14 @@ std::map<std::string, std::string> HDF5Reader::getAllAttributes() const {
 //-----------------------------------------------------------------------
 // Threshold Implementation
 //-----------------------------------------------------------------------
-
-// Overload with customizable true/false values
+// (No changes needed here, uses double threshold and corrected IArrayBox syntax)
 void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
 {
     if (!m_is_read) {
         amrex::Abort("[HDF5Reader::threshold] Cannot threshold, data not read successfully.");
     }
-
-    // Get raw pointer for potentially faster access inside loop
     const InternalDataType* const AMREX_RESTRICT data_ptr = m_raw.data();
     const amrex::Long raw_data_size = static_cast<amrex::Long>(m_raw.size());
-
-    // Capture necessary members by value/reference for the lambda
     const int current_width = m_width;
     const int current_height = m_height;
     const int current_depth = m_depth;
@@ -383,37 +360,22 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
 #endif
     for (amrex::MFIter mfi(mf); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& box = mfi.validbox(); // Get the valid box for this FAB
-        amrex::IArrayBox& fab = mf[mfi];        // Get the FAB to write to
-
-        // Use amrex::LoopOnCpu for efficient iteration over the box
+        const amrex::Box& box = mfi.validbox();
+        amrex::IArrayBox& fab = mf[mfi];
         amrex::LoopOnCpu(box, [&] (int i, int j, int k)
         {
-            // Perform bounds check against the original image dimensions
-            // *** FIX 2 Applied: Remove AMREX_LIKELY ***
             if (i >= 0 && i < current_width && j >= 0 && j < current_height && k >= 0 && k < current_depth)
             {
-                // Calculate 1D index (assuming XYZ layout where Z varies slowest)
                 amrex::Long idx = static_cast<amrex::Long>(k) * current_width * current_height +
                                   static_cast<amrex::Long>(j) * current_width +
                                   static_cast<amrex::Long>(i);
-
-                // Check calculated index against actual data size (safety check)
-                // *** FIX 2 Applied: Remove AMREX_LIKELY *** (Implicitly, was likely here too)
                 if (idx >= 0 && idx < raw_data_size)
                 {
-                    // Apply threshold condition (>) on the internal double data
-                    // *** FIX 3 Applied: Use amrex::IntVect for fab access ***
                     fab(amrex::IntVect(i, j, k), 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false;
                 } else {
-                    // Should not happen if dimensions/logic are correct, but handle defensively
-                    // *** FIX 3 Applied: Use amrex::IntVect for fab access ***
                     fab(amrex::IntVect(i, j, k), 0) = value_if_false;
                 }
             } else {
-                 // If the iMultiFab's valid box extends beyond the HDF5 image dimensions,
-                 // fill the outside region with the 'false' value.
-                 // *** FIX 3 Applied: Use amrex::IntVect for fab access ***
                  fab(amrex::IntVect(i, j, k), 0) = value_if_false;
             }
         });
