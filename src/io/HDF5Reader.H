@@ -40,8 +40,14 @@ namespace OpenImpala {
 class HDF5Reader
 {
 public:
+    // <<< FIX: Define the public DataType alias >>>
+    // IMPORTANT: Verify this matches the actual dataset type in your HDF5 file!
+    // Common types for segmented data: std::uint8_t, std::uint16_t, std::int32_t
+    using DataType = std::uint16_t; // Example: Assuming 16-bit unsigned integer labels
+
     // Define the internal storage type. Converting to double provides flexibility
     // but uses more memory and might lose precision for large integer types.
+    // Consider changing this to match DataType if appropriate.
     using InternalDataType = double;
 
     /**
@@ -165,6 +171,11 @@ public:
     /** @brief Check if data has been successfully read. */
     bool isRead() const { return m_is_read; }
 
+    // Consider adding metadata methods if needed by tests/application:
+    // H5::DataType getNativeDataType() const; // Example returning HDF5 type object
+    // size_t getDataTypeSize() const; // Example returning size in bytes
+
+
 private:
     /**
      * @brief Internal implementation for reading the HDF5 file and dataset.
@@ -175,9 +186,9 @@ private:
     bool readHDF5FileInternal();
 
     // --- Member Variables ---
-    std::string m_filename;                     /**< Filename of the source HDF5 file */
-    std::string m_hdf5dataset;                  /**< Path to the dataset within the HDF5 file */
-    std::vector<InternalDataType> m_raw;      /**< Vector containing the raw data (converted to double) */
+    std::string m_filename;                   /**< Filename of the source HDF5 file */
+    std::string m_hdf5dataset;                /**< Path to the dataset within the HDF5 file */
+    std::vector<InternalDataType> m_raw;    /**< Vector containing the raw data (converted to double) */
     int m_width = 0;                          /**< Width of the domain (X) */
     int m_height = 0;                         /**< Height of the domain (Y) */
     int m_depth = 0;                          /**< Depth of the domain (Z) */
