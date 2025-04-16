@@ -36,9 +36,10 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
+        wget \
         gcc-toolset-11 \
         cmake3 \
-        wget git patch python3 python3-pip hostname \
+        git patch python3 python3-pip hostname \
         infiniband-diags libibverbs-devel libtiff-devel boost-devel \
         hwloc-devel libevent-devel flex bison flex-devel \
         which ca-certificates zlib-devel && \
