@@ -1,3 +1,4 @@
+
 # .github/workflows/build-test.yml
 name: Build and Test OpenImpala Makefile with SIF Cache
 
@@ -16,6 +17,7 @@ on:
   workflow_dispatch: # Allows manual triggering
 
 jobs:
+
   # Define the main build job
   build-openimpala:
     runs-on: ubuntu-latest # Use the latest Ubuntu runner
@@ -24,6 +26,7 @@ jobs:
       # Step 1: Check out the repository code
       - name: Checkout repository
         uses: actions/checkout@v4
+
 
       # Step 2: Set up Apptainer/Singularity environment
       - name: Set up Apptainer
@@ -42,6 +45,7 @@ jobs:
           # Fallback key if exact match not found
           restore-keys: |
             ${{ runner.os }}-apptainer-sif-
+
 
       # Step 4: Build the SIF image only if it wasn't restored from cache
       - name: Build Dependency SIF Image Locally (if cache miss)
@@ -135,6 +139,7 @@ jobs:
           sudo apptainer exec --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1
+
 
           # Capture the exit code of make -d
           MAKE_EXIT_CODE=$?

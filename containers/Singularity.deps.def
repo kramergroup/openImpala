@@ -72,6 +72,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         zlib-devel && \
     dnf clean all -y
 
+
     # --- Verification Step (Your existing check) ---
     echo "--- Verifying wget installation post dnf ---"
     which wget || { echo "!!! ERROR: wget command not found right after dnf install!"; exit 1; }
@@ -115,7 +116,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     tar -xzf hdf5-${HDF5_VERSION}.tar.gz && cd hdf5-${HDF5_VERSION}
     # Configure HDF5 for parallel I/O using the MPI wrappers now in PATH
     # Ensure zlib is found (installed via dnf into /usr)
-    CC=mpicc CXX=mpicxx FC=mpifort ./configure \
+    CC=mpicc CXX=mpicxx FC=mpifort ./configure 
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
         --enable-shared \
@@ -195,6 +196,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "=== Final PATH: $PATH ==="
     cd / && rm -rf /tmp/build_src
     dnf clean all
+
+    echo "--- %post section completed successfully ---"
 
 %environment
     # Define environment referencing the FINAL locations
