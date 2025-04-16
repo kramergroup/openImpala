@@ -121,6 +121,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         --enable-shared \
         --enable-hl \
         --enable-cxx \
+        --enable-unsupported \
         --with-zlib=${ZLIB_ROOT}
     make -j$(nproc)
     make install # Serial install
