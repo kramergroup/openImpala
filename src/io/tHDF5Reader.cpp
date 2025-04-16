@@ -74,10 +74,8 @@ int main (int argc, char* argv[])
         int expected_height = 100;
         int expected_depth = 100;
 
-        // <<< FIX 1: Declare threshold_value as int (more appropriate for labels) >>>
-        // Still requires HDF5Reader::DataType to be defined in HDF5Reader.H eventually.
-        // HDF5Reader::threshold() currently takes double, so implicit conversion happens.
-        const int threshold_value = 1;
+        // <<< FIX: Declare threshold_value using the DataType alias from HDF5Reader.H >>>
+        const OpenImpala::HDF5Reader::DataType threshold_value = 1; // Use the type defined in HDF5Reader.H
 
         try {
             reader_ptr = std::make_unique<OpenImpala::HDF5Reader>(hdf5_filename, hdf5_dataset);
@@ -91,7 +89,7 @@ int main (int argc, char* argv[])
         int actual_height = reader_ptr->height();
         int actual_depth = reader_ptr->depth();
 
-        // <<< FIX 2: Keep calls to non-existent member functions commented out >>>
+        // Keep calls to non-existent member functions commented out
         // int actual_bps = reader_ptr->bitsPerSample();
         // int actual_format = reader_ptr->sampleFormat();
         // int actual_spp = reader_ptr->samplesPerPixel();
@@ -103,7 +101,7 @@ int main (int argc, char* argv[])
             amrex::Abort("FAIL: Read dimensions do not match expected dimensions (100x100x100).");
         }
 
-        // <<< FIX 2: Keep checks related to non-existent member functions commented out >>>
+        // Keep checks related to non-existent member functions commented out
         /*
         // int expected_bps = 8; // Example value
         // int expected_format = 1; // Example value
@@ -142,10 +140,10 @@ int main (int argc, char* argv[])
         mf.setVal(0);
 
         // --- Test Thresholding ---
+        // threshold_value is now HDF5Reader::DataType, but threshold() takes double. C++ handles implicit conversion.
         amrex::Print() << "Performing threshold > " << threshold_value << "...\n";
         try {
-            // Pass the threshold value (now int, will convert to double for the method)
-            reader_ptr->threshold(threshold_value, mf);
+            reader_ptr->threshold(static_cast<double>(threshold_value), mf); // Pass as double explicitly if needed, else rely on implicit conversion
         } catch (const std::exception& e) {
             amrex::Abort("Error during threshold operation: " + std::string(e.what()));
         }
@@ -186,7 +184,7 @@ int main (int argc, char* argv[])
             {
                 const amrex::Box& box = mfi.tilebox();
                 auto const& int_fab = mf.const_array(mfi);
-                // <<< FIX 3: Changed auto& to auto >>>
+                // Keep fix changing auto& to auto
                 auto real_fab = mfv.array(mfi);
 
                 amrex::ParallelFor(box, [&] (int i, int j, int k) noexcept
