@@ -28,24 +28,51 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     export ZLIB_ROOT=/usr # Assuming using system zlib
 
-    # Add ldconfig path for locally built OpenMPI
+    # Add ldconfig paths early if needed
     echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
-    # Add ldconfig path for locally built HDF5
-    echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf
+    # echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf # If building HDF5
 
+    # --- Install Repositories and Packages ---
+    echo "--- Updating system and installing EPEL ---"
+    dnf update -y
+    # Install tools for managing repos and EPEL itself
+    # epel-release provides the EPEL repo definitions
+    dnf install -y dnf-utils epel-release
+
+    echo "--- Enabling PowerTools repository ---"
+    # Enable the PowerTools repository (needed for hwloc-devel, flex-devel on Rocky 8)
+    # Note: On Rocky 9+ this would be 'crb'
+    dnf config-manager --set-enabled powertools
+
+    echo "--- Installing Development Tools and Core Packages ---"
+    # Now install all required packages, including those from BaseOS, AppStream, EPEL, and PowerTools
+    # Ensure backslashes (\) are correct for line continuation
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
-        wget \
         gcc-toolset-11 \
         cmake3 \
-        git patch python3 python3-pip hostname \
-        infiniband-diags libibverbs-devel libtiff-devel boost-devel \
-        hwloc-devel libevent-devel flex bison flex-devel \
-        which ca-certificates zlib-devel && \
+        wget \
+        git \
+        patch \
+        python3 \
+        python3-pip \
+        hostname \
+        infiniband-diags \
+        libibverbs-devel \
+        libtiff-devel \
+        boost-devel \
+        hwloc-devel \
+        libevent-devel \
+        flex \
+        bison \
+        flex-devel \
+        which \
+        ca-certificates \
+        zlib-devel && \
     dnf clean all -y
 
-    # ADD THIS CHECK HERE:
+    # --- Verification Step (Your existing check) ---
     echo "--- Verifying wget installation post dnf ---"
     which wget || { echo "!!! ERROR: wget command not found right after dnf install!"; exit 1; }
     echo "--- wget found, continuing build ---"
