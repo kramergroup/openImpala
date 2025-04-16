@@ -38,7 +38,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         gcc-gfortran \
         gcc-toolset-11 \
         cmake3 \
-        # Ensure the line ABOVE wget ends with a backslash! \
+        \# Ensure the line ABOVE wget ends with a backslash! \
         wget git patch python3 python3-pip hostname \
         infiniband-diags libibverbs-devel libtiff-devel boost-devel \
         hwloc-devel libevent-devel flex bison flex-devel \
