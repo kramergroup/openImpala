@@ -1,5 +1,5 @@
 # .github/workflows/build-test.yml
-name: Build and Test OpenImpala Makefile (NO CACHE TEST)
+name: Build and Test OpenImpala Makefile with SIF Cache
 
 on:
   push:
@@ -15,9 +15,8 @@ on:
   workflow_dispatch: # Allows manual triggering
 
 jobs:
-  # Only one job now: Build SIF and then build OpenImpala
-  build-openimpala-no-cache:
-    # Removed 'needs: cache-dependencies'
+  # Renamed job to reflect caching
+  build-openimpala:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,11 +28,23 @@ jobs:
         with:
           apptainer-version: 1.2.5 # Use consistent version
 
-      # Removed 'Restore Dependency SIF Image' step (actions/cache)
-      # Removed 'Check if Dependency SIF exists' step
+      # <<< ADD CACHING STEP HERE >>>
+      - name: Cache Dependency SIF Image
+        id: cache-sif # Give the step an ID to check its output
+        uses: actions/cache@v4
+        with:
+          # Path to the file to cache
+          path: dependency_image.sif
+          # Cache key: OS + hash of the definition file
+          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
+          # Fallback key if exact match not found
+          restore-keys: |
+            ${{ runner.os }}-apptainer-sif-
 
-      - name: Build Dependency SIF Image Locally
-        # Builds the SIF file directly in this job
+      # <<< MODIFY SIF BUILD STEP TO BE CONDITIONAL >>>
+      - name: Build Dependency SIF Image Locally (if cache miss)
+        # Only run this step if the cache step above did NOT find a match
+        if: steps.cache-sif.outputs.cache-hit != 'true'
         run: |
           RECIPE_FILE="containers/Singularity.deps.def"
           TARGET_SIF="dependency_image.sif"
@@ -41,8 +52,8 @@ jobs:
             echo "Error: Dependency recipe file $RECIPE_FILE not found!"
             exit 1
           fi
-          echo "Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
-          # Removed --timeout flag as it's incompatible with Apptainer 1.2.5
+          echo "Cache miss. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
+          # Build the SIF
           sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
           # Check build exit status IMMEDIATELY
           BUILD_EXIT_CODE=$?
@@ -52,14 +63,25 @@ jobs:
           fi
           echo "Apptainer SIF build successful."
           ls -lh ./dependency_image.sif # Verify file exists and size
+      - name: Verify SIF exists after cache/build step
+        run: |
+          if [ ! -f "./dependency_image.sif" ]; then
+            echo "Error: dependency_image.sif not found after cache/build steps!"
+            exit 1
+          else
+            echo "dependency_image.sif found."
+            ls -lh ./dependency_image.sif
+          fi
 
+      # <<< OPENIMPALA BUILD STEP REMAINS LARGELY THE SAME >>>
+      # This step runs whether the SIF was cached or built fresh
       - name: Build OpenImpala using Dependency SIF (with make debug)
         id: make_build # Give step an id
         continue-on-error: true # Allow step to fail so logs can be uploaded
         run: |
           # --- START ENHANCED DEBUG STEP ---
           echo "DEBUG: Printing environment inside container before make..."
-          # Run debug commands using the freshly built SIF
+          # Run debug commands using the SIF (might be cached or newly built)
           sudo apptainer exec --bind $PWD:/src ./dependency_image.sif bash -c ' \
             echo "--- USER & GROUP ---"; \
             id; \
@@ -87,6 +109,10 @@ jobs:
             echo "DEBUG HDF5_HOME=[$HDF5_HOME]"; \
             echo "DEBUG H5CPP_HOME=[$H5CPP_HOME]"; \
             echo "DEBUG TIFF_HOME=[$TIFF_HOME]"; \
+            echo "--- Check H5Cpp.h ---"; \
+            find /opt/hdf5 /usr/include -name H5Cpp.h || echo "H5Cpp.h NOT FOUND in /opt/hdf5 or /usr/include"; \
+            echo "--- Check amrex utils ---"; \
+            find /opt/amrex -name AMReX_Utility.H || echo "AMReX_Utility.H NOT FOUND in /opt/amrex"; \
           '
           echo "DEBUG: Environment print finished."
           # --- END ENHANCED DEBUG STEP ---
@@ -110,6 +136,7 @@ jobs:
           if [ $MAKE_EXIT_CODE -ne 0 ]; then exit $MAKE_EXIT_CODE; fi
           echo "OpenImpala build command finished (check logs)."
 
+      # <<< LOG UPLOAD AND FAILURE CHECK STEPS REMAIN THE SAME >>>
       - name: Upload Make Debug Log
         # Run this step always after the make attempt to capture log on success or failure
         if: always()
@@ -127,9 +154,4 @@ jobs:
           exit 1
 
       # Optional: Add steps here to run tests using the SIF image IF make succeeded
-      # - name: Run Tests (if build succeeded)
-      #   if: steps.make_build.outcome == 'success'
-      #   run: |
-      #     sudo apptainer exec --bind $PWD:/src \
-      #         ./dependency_image.sif \
-      #         bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src/build/tests && ./tSomeTest'
+      # ...

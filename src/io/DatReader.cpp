@@ -242,17 +242,17 @@ void DatReader::threshold(DataType raw_threshold, int value_if_true, int value_i
                 if (idx >= 0 && idx < raw_data_size) // idx should always be >= 0 here
                 {
                     // Apply threshold condition (>)
-                    fab(i, j, k, 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false;
+                    fab(amrex::IntVect(i, j, k), 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false;
                 } else {
                     // Voxel (i,j,k) is within dimensions but calculated index is bad (should not happen if logic is correct)
                     // OR voxel is outside original dimensions covered by mf Box (handled below)
-                    fab(i, j, k, 0) = value_if_false; // Or some error value? Defaulting to false seems reasonable.
+                    fab(amrex::IntVect(i, j, k), 0) = value_if_false; // Or some error value? Defaulting to false seems reasonable.
                     // Consider adding a warning here if idx check fails unexpectedly
                     // amrex::Warning("Index calculation error in threshold");
                 }
             } else {
                  // The box associated with this fab extends beyond the original image dimensions
-                 fab(i, j, k, 0) = value_if_false; // Assign 'false' value to regions outside image
+                 fab(amrex::IntVect(i, j, k), 0) = value_if_false; // Assign 'false' value to regions outside image
             }
         });
     }
