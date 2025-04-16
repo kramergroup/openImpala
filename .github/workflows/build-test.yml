@@ -28,9 +28,8 @@ jobs:
         with:
           apptainer-version: 1.2.5 # Use consistent version
 
-      # <<< ADD CACHING STEP HERE >>>
       - name: Cache Dependency SIF Image
-        id: cache-sif # Give the step an ID to check its output
+        id: cache-sif
         uses: actions/cache@v4
         with:
           # Path to the file to cache
@@ -40,6 +39,8 @@ jobs:
           # Fallback key if exact match not found
           restore-keys: |
             ${{ runner.os }}-apptainer-sif-
+          # <<< ADD THIS LINE >>>
+          save-always: true
 
       # <<< MODIFY SIF BUILD STEP TO BE CONDITIONAL >>>
       - name: Build Dependency SIF Image Locally (if cache miss)
