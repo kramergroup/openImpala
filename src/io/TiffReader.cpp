@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <limits>
 #include <cmath>
+#include <sstream>
 #include <cstring>   // For std::memcpy
 #include <algorithm> // For std::min
 #include <sstream>   // For filename generation
@@ -136,8 +137,11 @@ bool TiffReader::readTiffInternal() {
             bytes_read_total_in_slice += bytes_read_this_strip;
         }
          if (bytes_read_total_in_slice != static_cast<tsize_t>(slice_bytes)) {
-               amrex::Warning() << "Warning: [TiffReader] Bytes read (" << bytes_read_total_in_slice
-                              << ") does not match expected slice size (" << slice_bytes << ") for " << m_filename << ".\n";
+               std::ostringstream warning_msg;
+                    warning_msg << "Warning: [TiffReader] Bytes read (" << bytes_read_total_in_slice
+                    << ") does not match expected (" << bytes_per_slice
+                    << ") for slice " << i << ". File: " << m_filename; // Adjust variables as needed
+                amrex::Warning(warning_msg.str());
          }
     }
     // File automatically closed by TiffPtr going out of scope via RAII
