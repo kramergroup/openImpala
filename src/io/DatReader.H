@@ -1,6 +1,7 @@
 #ifndef DAT_READER_H // Corrected header guard style
 #define DAT_READER_H
 
+#include <cstddef> // <--- ADD THIS LINE
 #include <vector>
 #include <string>
 #include <cstdint> // Use <cstdint> for fixed-width types
