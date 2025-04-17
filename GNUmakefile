@@ -23,6 +23,7 @@ F90FLAGS      := -g -O3
 
 # Include project source dir and dependency includes
 INCLUDE       := -Isrc \
+		 -Isrc/props \
                  -I$(AMREX_HOME)/include \
                  -I$(HYPRE_HOME)/include \
                  -I$(HDF5_HOME)/include \
