@@ -132,7 +132,7 @@ bool DatReader::readFile(const std::string& filename)
     }
 
     try {
-        if (num_voxels > std::numeric_limits<size_t>::max()) {
+        if (static_cast<size_t>(num_voxels) > std::numeric_limits<size_t>::max()) {
              throw std::overflow_error("DatReader: Voxel count exceeds vector size limit.");
         }
         m_raw.resize(static_cast<size_t>(num_voxels));
