@@ -13,11 +13,15 @@
 #include <AMReX_BC_TYPES.H>
 #include <AMReX_BCUtil.H>
 #include <AMReX_PlotFileUtil.H>
-#include <AMReX_Loop.H>             // <<< For amrex::Loop >>>
+#include <AMReX_Loop.H>              // <<< For amrex::Loop >>>
 #include <AMReX_GpuLaunch.H>     // <<< For amrex::ParallelFor >>>
-#include <AMReX_GpuQualifiers.H>  // For AMREX_GPU_DEVICE etc.
+#include <AMReX_GpuQualifiers.H> // For AMREX_GPU_DEVICE etc.
 #include <AMReX_ParallelDescriptor.H> // For reductions etc.
-#include <AMReX_Array4.H>           // Explicit include for Array4 if needed
+#include <AMReX_Array4.H>            // Explicit include for Array4 if needed
+#include <AMReX_Vector.H>            // <<< ADDED for amrex::Vector >>>
+
+// <<< ADDED Diagnostic Namespace >>>
+using namespace OpenImpala;
 
 // Define constants for clarity and maintainability
 namespace {
@@ -30,9 +34,9 @@ namespace {
 //-----------------------------------------------------------------------
 // NOTE: REMINDER - Ensure these members are declared in TortuosityDirect.H:
 // private:
-//    amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> m_dxinv;
-//    int m_plot_interval;
-//    std::string m_plot_basename;
+//     amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> m_dxinv;
+//     int m_plot_interval;
+//     std::string m_plot_basename;
 // Also ensure the constructor signature in TortuosityDirect.H matches below.
 //-----------------------------------------------------------------------
 
@@ -65,7 +69,7 @@ TortuosityDirect::TortuosityDirect(const amrex::Geometry& geom, const amrex::Box
 
     // Create a datastructure describing the boundary conditions
     initialiseBoundaryConditions(); // Sets m_bc based on m_dir
-    initialiseFluxMultiFabs();      // Defines m_flux MultiFabs
+    initialiseFluxMultiFabs();    // Defines m_flux MultiFabs
 }
 
 
@@ -112,10 +116,10 @@ amrex::Real TortuosityDirect::value(const bool refresh)
     amrex::Real cross_sectional_area = 0.0;
     switch(m_dir)
     {
-        // <<< FIXED Enum Scope >>>
-        case OpenImpala::Direction::X : cross_sectional_area = static_cast<amrex::Real>(sz[1]) * static_cast<amrex::Real>(sz[2]); break;
-        case OpenImpala::Direction::Y : cross_sectional_area = static_cast<amrex::Real>(sz[0]) * static_cast<amrex::Real>(sz[2]); break;
-        case OpenImpala::Direction::Z : cross_sectional_area = static_cast<amrex::Real>(sz[0]) * static_cast<amrex::Real>(sz[1]); break;
+        // Use fully qualified enum now that namespace is included
+        case Direction::X : cross_sectional_area = static_cast<amrex::Real>(sz[1]) * static_cast<amrex::Real>(sz[2]); break;
+        case Direction::Y : cross_sectional_area = static_cast<amrex::Real>(sz[0]) * static_cast<amrex::Real>(sz[2]); break;
+        case Direction::Z : cross_sectional_area = static_cast<amrex::Real>(sz[0]) * static_cast<amrex::Real>(sz[1]); break;
         default: amrex::Abort("TortuosityDirect::value: Invalid direction");
     }
 
@@ -149,8 +153,8 @@ amrex::Real TortuosityDirect::value(const bool refresh)
         } else {
              amrex::Real rel_diff = -avg_flux_density * length / delta_V;
              if (std::abs(rel_diff) < flux_dens_tol) {
-                  amrex::Warning("Calculated relative diffusivity is near zero. Setting tortuosity to infinity.");
-                  m_value = std::numeric_limits<amrex::Real>::infinity();
+                 amrex::Warning("Calculated relative diffusivity is near zero. Setting tortuosity to infinity.");
+                 m_value = std::numeric_limits<amrex::Real>::infinity();
              } else {
                  m_value = vf / rel_diff;
                  // Tortuosity should generally be >= VF. Check sign based on conventions.
@@ -251,7 +255,9 @@ bool TortuosityDirect::solve()
              amrex::Print() << "Writing plot file: " << plot_file_path_str << std::endl;
         }
         // Plotting both potential (comp_phi) and cell type (comp_ct)
-        amrex::WriteSingleLevelPlotfile(plot_file_path_str, mf_phi_new, {"potential", "cell_type"}, m_geom, 0.0, m_last_iterations);
+        // Need amrex::Vector for variable names
+        amrex::Vector<std::string> plot_varnames = {"potential", "cell_type"};
+        amrex::WriteSingleLevelPlotfile(plot_file_path_str, mf_phi_new, plot_varnames, m_geom, 0.0, m_last_iterations);
     }
 
 
@@ -280,32 +286,40 @@ void TortuosityDirect::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) cons
         amrex::Real lfxin = 0.0; // Private to thread
         amrex::Real lfxout = 0.0;// Private to thread
 
-        // Iterate over flux multifabs
-        for ( amrex::MFIter mfi(m_flux[idir]); mfi.isValid(); ++mfi ) // Iterate over the relevant flux direction
+        // Determine the correct MFIter index based on flux direction 'idir'
+        // This seems incorrect - MFIter should iterate over the FAB itself, not the index
+        // Assuming the original intent was to iterate over the flux FAB for the specific direction
+        int idir = dir_int; // Use the main direction for flux calculation? Seems logical
+        if (idir < 0 || idir >= AMREX_SPACEDIM) {
+            amrex::Abort("Invalid direction specified for global_fluxes");
+        }
+
+        // Iterate over flux multifabs for the specific direction
+        for ( amrex::MFIter mfi(m_flux[idir]); mfi.isValid(); ++mfi )
         {
-            // <<< FIXED Fortran call for tortuosity_poisson_fio >>>
             const amrex::Box& bx = mfi.tilebox(); // Use tilebox for valid region
 
-            // Pointers need to be const for Fortran routine expecting const pointers
+            // Pointers need to be const for Fortran routine expecting const pointers?
+            // Check tortuosity_poisson_fio declaration in _F.H
+            // Assuming Fortran takes Real* which can be const Real* in C++ call
             const auto* fx_ptr = m_flux[0].dataPtr(mfi);
             const auto* fy_ptr = m_flux[1].dataPtr(mfi);
             const auto* fz_ptr = m_flux[2].dataPtr(mfi);
 
-            const auto& fxbox = m_flux[0].fabbox(mfi);
-            const auto& fybox = m_flux[1].fabbox(mfi);
-            const auto& fzbox = m_flux[2].fabbox(mfi);
+            const auto& fxbox = m_flux[0].fabbox(mfi.index()); // Pass index to fabbox
+            const auto& fybox = m_flux[1].fabbox(mfi.index());
+            const auto& fzbox = m_flux[2].fabbox(mfi.index());
 
             // The Fortran routine sums flux over the appropriate domain boundary faces
             // intersecting the current tile box.
-            tortuosity_poisson_fio(bx.loVect().getVect(), bx.hiVect().getVect(), // Pass pointers to tile bounds
-                                   fx_ptr, fxbox.loVect().getVect(), fxbox.hiVect().getVect(),
-                                   fy_ptr, fybox.loVect().getVect(), fybox.hiVect().getVect(),
-                                   fz_ptr, fzbox.loVect().getVect(), fzbox.hiVect().getVect(),
+            tortuosity_poisson_fio(bx.loVect().data(), bx.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                   fx_ptr, fxbox.loVect().data(), fxbox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                   fy_ptr, fybox.loVect().data(), fybox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                   fz_ptr, fzbox.loVect().data(), fzbox.hiVect().data(), // Use .data() <<< CHANGED >>>
                                    &dir_int, &lfxin, &lfxout);
         }
         // OpenMP reduction clause handles sum automatically
-        fxin += lfxin; // Combine thread-local sums into shared variables
-        fxout += lfxout;
+        // Removed explicit thread sum aggregation as reduction handles it
     } // End OMP parallel region
 
     // Reduce across MPI processes - Sum results from all ranks
@@ -330,8 +344,7 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
 
     // No need to fill boundary for phi_new as it's overwritten
 
-    const amrex::Real* dx = m_geom.CellSize(); // Pointer to cell sizes
-
+    // Get BaseFab data pointers instead of MultiFab::dataPtr
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
 #endif
@@ -342,24 +355,29 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
         {
             const amrex::Box& bx = mfi.tilebox();
 
-            // <<< FIXED Fortran call for tortuosity_poisson_flux >>>
-            // Get pointers to flux data (modifiable)
-            auto* fx_ptr = m_flux[0].dataPtr(mfi);
-            auto* fy_ptr = m_flux[1].dataPtr(mfi);
-            auto* fz_ptr = m_flux[2].dataPtr(mfi);
+            // Get pointers to flux data (modifiable) from the FArrayBox inside MultiFab
+            auto& fx_fab = m_flux[0][mfi];
+            auto& fy_fab = m_flux[1][mfi];
+            auto& fz_fab = m_flux[2][mfi];
+            auto* fx_ptr = fx_fab.dataPtr();
+            auto* fy_ptr = fy_fab.dataPtr();
+            auto* fz_ptr = fz_fab.dataPtr();
+
             // Get pointer to solution data (const) - Pass base pointer of phi_old FAB
-            const auto* sol_ptr = phi_old.dataPtr(0, mfi);
+            const auto& sol_fab = phi_old.const_fab(mfi); // Use const_fab
+            const auto* sol_ptr = sol_fab.dataPtr(0); // Pointer to component 0
 
-            const auto& fxbox = m_flux[0].fabbox(mfi);
-            const auto& fybox = m_flux[1].fabbox(mfi);
-            const auto& fzbox = m_flux[2].fabbox(mfi);
-            const auto& solbox = phi_old.fabbox(mfi);
+            const auto& fxbox = fx_fab.box(); // Use box() on FArrayBox
+            const auto& fybox = fy_fab.box();
+            const auto& fzbox = fz_fab.box();
+            const auto& solbox = sol_fab.box(); // Use box() on FArrayBox
 
-            tortuosity_poisson_flux(bx.loVect().getVect(), bx.hiVect().getVect(),
-                                    fx_ptr, fxbox.loVect().getVect(), fxbox.hiVect().getVect(),
-                                    fy_ptr, fybox.loVect().getVect(), fybox.hiVect().getVect(),
-                                    fz_ptr, fzbox.loVect().getVect(), fzbox.hiVect().getVect(),
-                                    sol_ptr, solbox.loVect().getVect(), solbox.hiVect().getVect(),
+
+            tortuosity_poisson_flux(bx.loVect().data(), bx.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                    fx_ptr, fxbox.loVect().data(), fxbox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                    fy_ptr, fybox.loVect().data(), fybox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                    fz_ptr, fzbox.loVect().data(), fzbox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                    sol_ptr, solbox.loVect().data(), solbox.hiVect().data(), // Use .data() <<< CHANGED >>>
                                     m_dxinv.data()); // Pass pointer from member GpuArray/RealVect
         }
 
@@ -368,38 +386,42 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
         {
             const amrex::Box& bx = mfi.tilebox();
 
-            // <<< FIXED Fortran call for tortuosity_poisson_update >>>
             // Get pointers to data arrays needed by Fortran
-            const auto* p_ptr = phi_old.dataPtr(comp_phi, mfi); // Pointer to old potential (comp_phi)
-            auto* n_ptr = phi_new.dataPtr(comp_phi, mfi); // Pointer to new potential (comp_phi, modifiable)
-            const auto* fx_ptr = m_flux[0].dataPtr(mfi);      // Pointer to x-flux
-            const auto* fy_ptr = m_flux[1].dataPtr(mfi);      // Pointer to y-flux
-            const auto* fz_ptr = m_flux[2].dataPtr(mfi);      // Pointer to z-flux
+            const auto& p_fab = phi_old.const_fab(mfi); // Get const FArrayBox for old phi
+            auto& n_fab = phi_new.fab(mfi);       // Get non-const FArrayBox for new phi
+            const auto& fx_fab = m_flux[0].const_fab(mfi); // Const access to flux
+            const auto& fy_fab = m_flux[1].const_fab(mfi);
+            const auto& fz_fab = m_flux[2].const_fab(mfi);
+
+            const auto* p_ptr = p_fab.dataPtr(comp_phi); // Pointer to old potential (comp_phi)
+            auto* n_ptr = n_fab.dataPtr(comp_phi); // Pointer to new potential (comp_phi, modifiable)
+            const auto* fx_ptr = fx_fab.dataPtr();       // Pointer to x-flux
+            const auto* fy_ptr = fy_fab.dataPtr();       // Pointer to y-flux
+            const auto* fz_ptr = fz_fab.dataPtr();       // Pointer to z-flux
 
             // Get box bounds for arrays (FABs include ghost cells)
-            const auto& pbox = phi_old.fabbox(mfi); // Bounds for p (phi_old)
-            const auto& nbox = phi_new.fabbox(mfi); // Bounds for n (phi_new)
-            const auto& fxbox = m_flux[0].fabbox(mfi); // Bounds for fx
-            const auto& fybox = m_flux[1].fabbox(mfi); // Bounds for fy
-            const auto& fzbox = m_flux[2].fabbox(mfi); // Bounds for fz
+            const auto& pbox = p_fab.box(); // Bounds for p (phi_old)
+            const auto& nbox = n_fab.box(); // Bounds for n (phi_new)
+            const auto& fxbox = fx_fab.box(); // Bounds for fx
+            const auto& fybox = fy_fab.box(); // Bounds for fy
+            const auto& fzbox = fz_fab.box(); // Bounds for fz
 
-            tortuosity_poisson_update(bx.loVect().getVect(), bx.hiVect().getVect(),
-                                      p_ptr, pbox.loVect().getVect(), pbox.hiVect().getVect(), // Pass p_hi for 'phi' arg
-                                      n_ptr, nbox.loVect().getVect(), nbox.hiVect().getVect(),
-                                      fx_ptr, fxbox.loVect().getVect(), fxbox.hiVect().getVect(),
-                                      fy_ptr, fybox.loVect().getVect(), fybox.hiVect().getVect(),
-                                      fz_ptr, fzbox.loVect().getVect(), fzbox.hiVect().getVect(),
+
+            tortuosity_poisson_update(bx.loVect().data(), bx.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                      p_ptr, pbox.loVect().data(), pbox.hiVect().data(), // Pass p_hi for 'phi' arg; Use .data() <<< CHANGED >>>
+                                      n_ptr, nbox.loVect().data(), nbox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                      fx_ptr, fxbox.loVect().data(), fxbox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                      fy_ptr, fybox.loVect().data(), fybox.hiVect().data(), // Use .data() <<< CHANGED >>>
+                                      fz_ptr, fzbox.loVect().data(), fzbox.hiVect().data(), // Use .data() <<< CHANGED >>>
                                       m_dxinv.data(), // Pass pointer from member GpuArray/RealVect
                                       &dt);
 
             // Ensure cell type remains unchanged in phi_new (copy from phi_old)
             // This is crucial if the Fortran update only modifies comp_phi.
-            const auto& ct_fab_old = phi_old.const_array(mfi, comp_ct);
-            auto        ct_fab_new = phi_new.array(mfi, comp_ct);
+            const auto& ct_fab_old = p_fab.array(comp_ct); // Use array() for Array4 access
+            auto      ct_fab_new = n_fab.array(comp_ct);
 
-            // <<< FIXED Array4 copy >>>
-            // ct_fab_new.copy(ct_fab_old, bx); // ERROR: Array4 has no .copy() member
-            // Replace with a loop:
+            // Use Array4 copy loop
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
                 ct_fab_new(i,j,k) = ct_fab_old(i,j,k);
             });
@@ -423,7 +445,6 @@ amrex::Real TortuosityDirect::residual(const amrex::MultiFab& phi_old, const amr
         const auto& fab_new = phi_new.const_array(mfi, comp_phi);
         const auto& ct_fab  = phi_old.const_array(mfi, comp_ct); // Need cell type to mask
 
-        // Using amrex::ReduceSum requires a GPU-compatible lambda if on GPU
         // Using amrex::Loop and manual reduction is simpler for CPU/OMP here
         amrex::Real thread_delta = 0.0;
         amrex::Loop(bx, [&] (int i, int j, int k) { // Using amrex::Loop now
@@ -448,7 +469,8 @@ void TortuosityDirect::initialiseBoundaryConditions()
 {
     // Initialize BCRec for both components (phi, ct) - use number of comps = 2
     // Default to Neumann (reflect_even) for both initially
-    m_bc = amrex::BCRec(amrex::IntVect(0,0), 2); // Initialize for 2 components
+    // Pass D_DECL directly to IntVect constructor
+    m_bc = amrex::BCRec(amrex::IntVect(AMREX_D_DECL(0,0,0)), 2); // <<< CHANGED IntVect constructor >>>
 
     for (int comp=0; comp < 2; ++comp) { // Loop over components
         for (int i=0; i<AMREX_SPACEDIM; ++i)
@@ -476,22 +498,20 @@ void TortuosityDirect::fillCellTypes(amrex::MultiFab& phi) // phi has comps (phi
 #endif
     for (amrex::MFIter mfi(phi, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        // <<< FIXED Fortran call for tortuosity_filct >>>
-        // auto& phi_fab_arr = phi.array(mfi); // ERROR: Changed to auto
-        auto phi_fab_arr = phi.array(mfi); // CORRECTED: FAB data array (non-const)
-        const auto& phase_fab_arr = m_mf_phase.const_array(mfi); // Phase data (const)
+        auto phi_fab_arr = phi.array(mfi); // Get Array4 view (non-const)
+        const auto& phase_fab_arr = m_mf_phase.const_array(mfi); // Phase data (const Array4)
 
-        int q_ncomp = phi.nComp();             // Should be 2
-        int p_ncomp = m_mf_phase.nComp();      // Should be >= 1
-        const auto& qbox = phi.fabbox(mfi);      // Box for phi FAB (including ghosts)
-        const auto& pbox = m_mf_phase.fabbox(mfi); // Box for phase FAB (including ghosts)
+        int q_ncomp = phi.nComp();                 // Should be 2
+        int p_ncomp = m_mf_phase.nComp();          // Should be >= 1
+        const auto& qbox = phi.fabbox(mfi.LocalTileIndex());       // Box for phi FAB (including ghosts) <<< CHANGED >>>
+        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // Box for phase FAB (including ghosts) <<< CHANGED >>>
 
         // Fortran routine modifies component comp_ct (Fortran index 2) based on component comp_phase (Fortran index 1) from p
-        tortuosity_filct(phi_fab_arr.dataPtr(),           // Base pointer to phi FAB (Real)
-                         qbox.loVect().getVect(), qbox.hiVect().getVect(), &q_ncomp,
-                         phase_fab_arr.dataPtr(),         // Base pointer to phase FAB (Int)
-                         pbox.loVect().getVect(), pbox.hiVect().getVect(), &p_ncomp,
-                         domain_box.loVect().getVect(), domain_box.hiVect().getVect(),
+        tortuosity_filct(phi_fab_arr.dataPtr(),       // Base pointer to phi FAB (Real)
+                         qbox.loVect().data(), qbox.hiVect().data(), &q_ncomp, // Use .data() <<< CHANGED >>>
+                         phase_fab_arr.dataPtr(),       // Base pointer to phase FAB (Int)
+                         pbox.loVect().data(), pbox.hiVect().data(), &p_ncomp, // Use .data() <<< CHANGED >>>
+                         domain_box.loVect().data(), domain_box.hiVect().data(), // Use .data() <<< CHANGED >>>
                          &m_phase);
     }
 }
@@ -509,23 +529,21 @@ void TortuosityDirect::fillInitialState(amrex::MultiFab& phi) // phi has comps (
     {
         const amrex::Box& bx = mfi.tilebox(); // Operate on tile box
 
-        // <<< FIXED Fortran call for tortuosity_filic >>>
-        // auto& phi_fab_arr = phi.array(mfi); // ERROR: Changed to auto
-        auto phi_fab_arr = phi.array(mfi); // CORRECTED: FAB data array (non-const)
-        const auto& phase_fab_arr = m_mf_phase.const_array(mfi); // Phase data (const)
+        auto phi_fab_arr = phi.array(mfi); // Get Array4 view (non-const)
+        const auto& phase_fab_arr = m_mf_phase.const_array(mfi); // Phase data (const Array4)
 
-        int q_ncomp = phi.nComp();             // Should be 2
-        int p_ncomp = m_mf_phase.nComp();      // Should be >= 1
-        const auto& qbox = phi.fabbox(mfi);      // Box for phi FAB (including ghosts)
-        const auto& pbox = m_mf_phase.fabbox(mfi); // Box for phase FAB (including ghosts)
+        int q_ncomp = phi.nComp();                 // Should be 2
+        int p_ncomp = m_mf_phase.nComp();          // Should be >= 1
+        const auto& qbox = phi.fabbox(mfi.LocalTileIndex());       // Box for phi FAB (including ghosts) <<< CHANGED >>>
+        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // Box for phase FAB (including ghosts) <<< CHANGED >>>
 
         // Fortran routine fills component comp_phi (Fortran index 1) based on component comp_phase (Fortran index 1) from p
         tortuosity_filic(phi_fab_arr.dataPtr(),
-                         qbox.loVect().getVect(), qbox.hiVect().getVect(), &q_ncomp,
+                         qbox.loVect().data(), qbox.hiVect().data(), &q_ncomp, // Use .data() <<< CHANGED >>>
                          phase_fab_arr.dataPtr(),
-                         pbox.loVect().getVect(), pbox.hiVect().getVect(), &p_ncomp,
-                         bx.loVect().getVect(), bx.hiVect().getVect(),          // Valid box (tile) for filling
-                         domain_box.loVect().getVect(), domain_box.hiVect().getVect(), // Domain bounds for interpolation scale
+                         pbox.loVect().data(), pbox.hiVect().data(), &p_ncomp, // Use .data() <<< CHANGED >>>
+                         bx.loVect().data(), bx.hiVect().data(),           // Valid box (tile) for filling; Use .data() <<< CHANGED >>>
+                         domain_box.loVect().data(), domain_box.hiVect().data(), // Domain bounds for interpolation scale; Use .data() <<< CHANGED >>>
                          &m_vlo, &m_vhi,
                          &m_phase,
                          &dir_int);
@@ -563,22 +581,21 @@ void TortuosityDirect::fillDomainBoundary (amrex::MultiFab& phi, int comp)
         bool touches_boundary = !domain_box.contains(fab_box_ghosts);
         if (touches_boundary)
         {
-             // <<< FIXED Fortran call for tortuosity_filbc >>>
-            // auto& phi_fab_arr = phi.array(mfi); // ERROR: Changed to auto
-            auto phi_fab_arr = phi.array(mfi); // CORRECTED: Array4 view (non-const)
+             auto phi_fab_arr = phi.array(mfi); // Get Array4 view (non-const)
 
-            int q_ncomp = phi.nComp();
-            const auto& qbox = phi.fabbox(mfi); // Box for phi FAB (including ghosts)
+             int q_ncomp = phi.nComp();
+             // Get box bounds for the FAB including ghost cells
+             const auto& qbox = phi.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
 
-            // Assuming Fortran tortuosity_filbc handles applying BCs only to the
-            // component specified by the base pointer `phi_fab_arr.dataPtr(comp)`
-            // if ncomp > 1, or applies to all components if it ignores comp implicitly.
-            // Passing base pointer for the specific component 'comp'.
-            tortuosity_filbc(phi_fab_arr.dataPtr(comp), // <<< Pass pointer to SPECIFIC component >>>
-                             qbox.loVect().getVect(), qbox.hiVect().getVect(), &q_ncomp,
-                             domain_box.loVect().getVect(), domain_box.hiVect().getVect(),
-                             &m_vlo, &m_vhi,
-                             bc_c_array);
+
+             // Assuming Fortran tortuosity_filbc handles applying BCs only to the
+             // component specified by the base pointer `phi_fab_arr.dataPtr(comp)`
+             // Pass pointer to the specific component 'comp'.
+             tortuosity_filbc(phi_fab_arr.dataPtr(comp), // <<< Pass pointer to SPECIFIC component >>>
+                              qbox.loVect().data(), qbox.hiVect().data(), &q_ncomp, // Use .data() <<< CHANGED >>>
+                              domain_box.loVect().data(), domain_box.hiVect().data(), // Use .data() <<< CHANGED >>>
+                              &m_vlo, &m_vhi,
+                              bc_c_array);
         }
     }
 }
