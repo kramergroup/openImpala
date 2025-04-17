@@ -9,11 +9,11 @@
 #include <AMReX_Geometry.H> // Include Geometry explicitly
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Array.H>     // For amrex::Array
-#include <AMReX_GpuContainers.H> // For amrex::GpuArray (used for m_dxinv)
+#include <AMReX_GpuContainers.H> // <<< ADDED for amrex::GpuArray (used for m_dxinv) >>>
 #include "Tortuosity.H"      // Includes base class and enums under OpenImpala namespace
 
-#include <string>            // For std::string if needed (result paths etc.)
-#include <limits>            // For numeric_limits if using error codes like infinity
+#include <string>            // For std::string
+#include <limits>            // For numeric_limits
 
 // Forward declaration if needed, although includes seem sufficient
 // namespace amrex { class MultiFab; class iMultiFab; ... }
@@ -54,9 +54,9 @@ public:
      * @param phase The integer identifier of the phase for which tortuosity is calculated.
      * @param dir The principal direction (X, Y, or Z) for applying boundary conditions to drive flux.
      * @param eps Convergence criterion (e.g., relative residual norm) for the iterative solver.
-     * @param n_steps Maximum number of iterations allowed for the solver. <<< Changed from size_t to int for consistency >>>
-     * @param plot_interval Frequency for checking residual and optionally plotting (0 disables). <<< ADDED Argument >>>
-     * @param plot_basename Base filename for diagnostic plotfiles. <<< ADDED Argument >>>
+     * @param n_steps Maximum number of iterations allowed for the solver. <<< Changed from size_t to int >>>
+     * @param plot_interval Frequency for checking residual and optionally plotting (0 disables). <<< ADDED >>>
+     * @param plot_basename Base filename for diagnostic plotfiles. <<< ADDED >>>
      * @param vlo Potential value applied at the low boundary in the specified direction.
      * @param vhi Potential value applied at the high boundary in the specified direction.
      */
@@ -68,8 +68,8 @@ public:
                        const OpenImpala::Direction dir,
                        const amrex::Real eps,
                        // const size_t max_steps, // Original was size_t
-                       const int n_steps,         // <<< Changed to int >>>
-                       const int plot_interval,         // <<< ADDED >>>
+                       const int n_steps,            // <<< Changed to int >>>
+                       const int plot_interval,      // <<< ADDED >>>
                        const std::string& plot_basename, // <<< ADDED >>>
                        const amrex::Real vlo,
                        const amrex::Real vhi);
@@ -87,7 +87,7 @@ public:
      * Computes or retrieves the cached tortuosity. Calls the internal solver if needed.
      *
      * @param refresh If true, forces a recalculation. If false (default), returns cached value if available.
-     * @return The calculated tortuosity. Returns cached value if refresh=false and calculation was already done.
+     * @return The calculated tortuosity. Returns cached value if refresh=false and calculation was already done. Returns NaN on failure.
      */
     amrex::Real value(const bool refresh = false) override;
 
@@ -101,7 +101,7 @@ public:
 
     /**
      * @brief Returns the final residual norm achieved during the last call to solve().
-     * @return Final residual norm, or a negative value if solve() hasn't been called.
+     * @return Final residual norm, or a negative value if solve() hasn't been called or failed early.
      */
     amrex::Real getFinalResidual() const { return m_last_residual; }
 
@@ -167,7 +167,7 @@ private:
      * @param phi_new Output: Updated potential field for the current iteration.
      * @param dt Timestep or relaxation parameter used in the update.
      */
-    void advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_new, const amrex::Real& dt); // Added dt param
+    void advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_new, const amrex::Real& dt);
 
 
     // --- Member Variables ---
@@ -187,8 +187,7 @@ private:
     const OpenImpala::Direction m_dir;       // Principal direction for flux
 
     // Solver Control Parameters (set via constructor)
-    // const size_t m_n_steps; // Original was size_t
-    const int m_n_steps;           // <<< Changed to int >>> Max iterations
+    const int m_n_steps;           // <<< Changed type >>> Max iterations
     const amrex::Real m_eps;       // Convergence tolerance
 
     // Boundary Condition Values (set via constructor)
