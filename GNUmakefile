@@ -1,15 +1,15 @@
 # GNU MakeFile for OpenImpala Diffusion Application and Tests
-# Corrected paths based on user-provided structure (src/io, src/props).
+# Corrected version: Removed explicit builddirs target, relying on mkdir -p in rules.
 
 # ============================================================
 # Environment Setup (Defaults set for the Singularity container)
 # ============================================================
 # Default paths matching the Singularity container build.
 # Can still be overridden by setting environment variables before running make.
-AMREX_HOME    ?= /opt/amrex/23.11           # Base AMReX install directory
+AMREX_HOME    ?= /opt/amrex/23.11          # Base AMReX install directory
 HYPRE_HOME    ?= /opt/hypre/v2.30.0         # Base HYPRE install directory
-HDF5_HOME     ?= /opt/hdf5/1.12.3           # Base HDF5 install directory (built from source)
-H5CPP_HOME    ?= $(HDF5_HOME)               # Base H5CPP install directory
+HDF5_HOME     ?= /opt/hdf5/1.12.3         # Base HDF5 install directory (built from source)
+H5CPP_HOME    ?= $(HDF5_HOME)              # Base H5CPP install directory
 TIFF_HOME     ?= /usr                       # Base LibTIFF install directory (dnf package)
 
 # ============================================================
@@ -47,7 +47,7 @@ PROPS_DIR     := build/props   # For Props object files
 
 MODULES       := io props
 SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
-BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
+BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props # Still useful for clean?
 
 # ============================================================
 # Source and Object Files
@@ -76,24 +76,21 @@ OBJECTS_APP_F90 := $(OBJECTS_PRP_F90)
 OBJECTS_APP     := $(OBJECTS_APP_CPP) $(OBJECTS_APP_F90)
 
 # Let Make search for source files in relevant directories
-# <<< Corrected VPATH >>>
 VPATH := $(subst $(space),:,$(SRC_DIRS)):src
 
 # ============================================================
 # Main Targets
 # ============================================================
-.PHONY: all main tests builddirs clean debug release
+.PHONY: all main tests clean debug release
 
 all: main tests
 
 # Main application executable (Diffusion)
-# <<< Corrected Source Path >>>
-main: builddirs $(APP_DIR)/Diffusion
+main: $(APP_DIR)/Diffusion # <<< Removed builddirs dependency
 
 # Define test executables based on found test sources
-# <<< Corrected TEST_EXECS definition >>>
 TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
-tests: builddirs $(TEST_EXECS)
+tests: $(TEST_EXECS) # <<< Removed builddirs dependency
 
 # ============================================================
 # Compilation Rules (Using Standard Pattern Rules)
@@ -101,21 +98,21 @@ tests: builddirs $(TEST_EXECS)
 # These rules should correctly find sources via VPATH
 
 # Rule for C++ objects in build/io
-$(IO_DIR)/%.o : %.cpp | $(IO_DIR)
+$(IO_DIR)/%.o : %.cpp
 	@echo "Compiling (IO) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for C++ objects (including tests) in build/props
-$(PROPS_DIR)/%.o : %.cpp | $(PROPS_DIR)
+$(PROPS_DIR)/%.o : %.cpp
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Rule for F90 objects in build/props
-$(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
+$(PROPS_DIR)/%.o : %.F90
 	@echo "Compiling (Props Fortran) $< ..."
-	@mkdir -p $(@D)
+	@mkdir -p $(@D) $(INC_DIR) # <<< Ensure both obj and mod dirs exist
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
 
 # ============================================================
@@ -127,41 +124,27 @@ $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
 APP_OBJS          := $(OBJECTS_APP)
 
 # Specific objects needed for each test (adjust based on actual dependencies)
-# These likely need refinement depending on what each test actually includes/uses
 # Using OBJECTS_APP includes all non-test code objects, which might be simplest
-# Or list specific dependencies like: $(PROPS_DIR)/MyClass.o $(IO_DIR)/Reader.o etc.
-TEST_DEPS_BASE      := $(OBJECTS_APP) # Assume most tests need most app objects for now
-# TEST_DEPS_TiffReader       := $(IO_DIR)/TiffReader.o # Example if only reader needed
-# TEST_DEPS_DatReader        := $(IO_DIR)/DatReader.o
-# TEST_DEPS_HDF5Reader       := $(IO_DIR)/HDF5Reader.o
-# TEST_DEPS_VolumeFraction   := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
-# TEST_DEPS_TortuosityHypre  := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o $(OBJECTS_APP_F90) $(OBJECTS_IO_CPP)
-# TEST_DEPS_TortuosityDirect := $(PROPS_DIR)/TortuosityDirect.o $(PROPS_DIR)/VolumeFraction.o $(OBJECTS_APP_F90) $(OBJECTS_IO_CPP)
-
+TEST_DEPS_BASE    := $(OBJECTS_APP) # Assume most tests need most app objects for now
 
 # Main application
-# <<< Corrected Source Path >>>
-$(APP_DIR)/Diffusion: src/props/Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
+$(APP_DIR)/Diffusion: src/props/Diffusion.cpp $(APP_OBJS)
 	@echo "Linking $@ ..."
+	@mkdir -p $(@D) # <<< ADDED mkdir
 	$(CXX) $(CXXFLAGS) -o $@ $< $(APP_OBJS) $(LDFLAGS) # Link source + objects
 
 # Test executables (General rule using specific test object + base dependencies)
 # This links the specific t*.o file with TEST_DEPS_BASE
-$(TST_DIR)/t%: $(PROPS_DIR)/t%.o $(TEST_DEPS_BASE) | $(TST_DIR)
+$(TST_DIR)/t%: $(PROPS_DIR)/t%.o $(TEST_DEPS_BASE)
 	@echo "Linking $@ ..."
+	@mkdir -p $(@D) # <<< ADDED mkdir
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 # ============================================================
 # Supporting Targets
 # ============================================================
 
-# Target to create all necessary build directories
-builddirs: $(APP_DIR) $(TST_DIR) $(INC_DIR) $(BUILD_DIRS)
-
-# General rule for creating build directories
-$(APP_DIR) $(TST_DIR) $(INC_DIR) $(BUILD_DIRS):
-	@echo "Creating directory $@"
-	@mkdir -p $@
+# <<< REMOVED explicit builddirs target and mkdir rule >>>
 
 # Build environments (simple examples)
 debug: CXXFLAGS += -DDEBUG # Example C++ debug flag
