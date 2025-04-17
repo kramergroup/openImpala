@@ -27,7 +27,6 @@ INCLUDE       := -Isrc \
                  -I$(AMREX_HOME)/include \
                  -I$(HYPRE_HOME)/include \
                  -I$(HDF5_HOME)/include \
-                 -I$(H5CPP_HOME)/include \
                  -I$(TIFF_HOME)/include
 
 # Linker Flags
