@@ -165,10 +165,17 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Building AMReX (make) ---"
     make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
 
-    echo "--- Installing AMReX (make install) ---"
-    make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
+    # --- NEW PRE-INSTALL CHECK ---
+    echo "--- Checking for AMReX_ParallelFor.H in build tree BEFORE install ---"
+    # Use find within the current directory (build directory)
+    find . -name AMReX_ParallelFor.H -ls || echo "--- WARNING: AMReX_ParallelFor.H not found in build tree before install! ---"
+    # --- END PRE-INSTALL CHECK ---
 
-    # --- BEGIN NEW VERIFICATION ---
+    echo "--- Installing AMReX (make install) ---"
+    # Add VERBOSE=1 to the make install command
+    make install VERBOSE=1 || { echo "*** AMReX Make Install Failed!"; exit 1; }
+
+    # --- Keep the existing post-install verification ---
     echo "--- Verifying AMReX header installation ---"
     # Check specifically for the problematic header
     find ${AMREX_INSTALL_PREFIX}/include -name AMReX_ParallelFor.H -print -quit | grep -q . || \
@@ -177,9 +184,10 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         ls -lR ${AMREX_INSTALL_PREFIX}/include; \
         exit 1; }
     echo "--- AMReX_ParallelFor.H found in ${AMREX_INSTALL_PREFIX}/include ---"
-    # --- END NEW VERIFICATION ---
+    # --- END VERIFICATION ---
 
-    # Verification step (Your existing checks are still good)
+
+    # Verification step (Your original checks are still good)
     echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"
     ls -lR ${AMREX_INSTALL_PREFIX} || echo "!!! WARNING: Failed to list AMReX install directory!"
     find ${AMREX_INSTALL_PREFIX} -name "libamrex*.so" || echo "--- WARNING: No libamrex*.so files found in AMReX install directory ---"
