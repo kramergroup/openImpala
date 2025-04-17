@@ -30,7 +30,6 @@
 #include "../io/DatReader.H"
 #include "../io/HDF5Reader.H"
 #include "../io/TiffReader.H"
-#include "../io/TiffStackReader.H" // Assuming this exists and works as intended
 #include "TortuosityHypre.H"
 #include "VolumeFraction.H"
 
