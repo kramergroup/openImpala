@@ -16,41 +16,35 @@ on:
   workflow_dispatch: # Allows manual triggering
 
 jobs:
-  # Define the main build job
-  build-openimpala:
-    # Use the latest Ubuntu runner provided by GitHub Actions
-    runs-on: ubuntu-latest
+  build-openimpala: # Indent Level 1 (2 spaces)
+    runs-on: ubuntu-latest # Indent Level 2 (4 spaces)
 
-    steps:
+    steps: # Indent Level 2 (4 spaces)
       # Step 1: Check out the repository code to the runner workspace
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout repository # Indent Level 3 (6 spaces for '-')
+        uses: actions/checkout@v4 # Indent Level 4 (8 spaces)
 
       # Step 2: Install the specified version of Apptainer (Singularity successor)
       - name: Set up Apptainer
         uses: eWaterCycle/setup-apptainer@v2
-        with:
-          apptainer-version: 1.2.5 # Pinning version ensures consistency
+        with: # Indent Level 4 (8 spaces)
+          apptainer-version: 1.2.5 # Indent Level 5 (10 spaces)
 
       # Step 3: Attempt to restore the cached SIF image to speed up builds
       - name: Restore Dependency SIF Cache
-        id: cache-restore-sif # Used in subsequent steps to check if cache was hit
+        id: cache-restore-sif
         uses: actions/cache/restore@v4
         with:
-          # The file to cache/restore
-          path: dependency_image.sif
-          # The primary cache key: combines OS and a hash of the Singularity definition file.
-          # Changes to the .def file will invalidate the cache, triggering a rebuild.
+          path: dependency_image.sif # Indent Level 5 (10 spaces)
           key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
-          # A less specific fallback key (useful if exact match isn't found but an older cache exists)
-          restore-keys: |
-            ${{ runner.os }}-apptainer-sif-
+          restore-keys: | # Indent Level 5 (10 spaces)
+            ${{ runner.os }}-apptainer-sif- # Indent Level 6 (12 spaces)
 
       # Step 4: Build the SIF image using the .def file IF it wasn't restored from cache
       - name: Build Dependency SIF Image Locally (if cache miss)
-        # This step only runs if the previous cache-restore step did NOT find a match for the key
         if: steps.cache-restore-sif.outputs.cache-hit != 'true'
-        run: |
+        run: | # Indent Level 4 (8 spaces)
+          # Lines below indented relative to 'run:' (Level 5 = 10 spaces)
           RECIPE_FILE="containers/Singularity.deps.def"
           TARGET_SIF="dependency_image.sif"
           # Verify the recipe file exists
@@ -74,6 +68,7 @@ jobs:
       # Step 5: Verify the SIF file exists (essential check before trying to use it)
       - name: Verify SIF exists after cache/build step
         run: |
+          # Lines below indented relative to 'run:' (Level 5 = 10 spaces)
           if [ ! -f "./dependency_image.sif" ]; then
             echo "Error: dependency_image.sif not found after cache/build steps!"
             exit 1 # Fail the job if the SIF isn't present
@@ -82,9 +77,12 @@ jobs:
             ls -lh ./dependency_image.sif # List file size
           fi
 
-      # <<< NEW DEBUG STEP CORRECTLY ADDED HERE >>>
+      # <<< NEW DEBUG STEP - Check Indentation Carefully >>>
+      # '-' below should align with '-' of step above (Level 3 = 6 spaces)
       - name: Debug: Find AMReX Assert Header in Container
+        # 'run:' below should indent relative to '-' (Level 4 = 8 spaces)
         run: |
+          # Lines below should indent relative to 'run:' (Level 5 = 10 spaces)
           echo "--- Searching for *assert*.H within AMReX include directory in the container ---"
           # Execute find inside the container using sudo (as build step uses sudo)
           sudo apptainer exec ./dependency_image.sif find /opt/amrex/23.11/include -name '*assert*.H' || echo "Find command potentially failed or found nothing."
@@ -92,14 +90,12 @@ jobs:
       # <<< END OF NEW DEBUG STEP >>>
 
       # Step 6: Build the main OpenImpala application code using the SIF environment
+      # '-' below should align with '-' of step above (Level 3 = 6 spaces)
       - name: Build OpenImpala using Dependency SIF
         id: make_build # ID to reference the outcome of this step later
-        # Allow this step to fail without stopping the workflow immediately,
-        # so we can upload logs in the next step.
         continue-on-error: true
         run: |
-          # Export environment variables needed by the Makefile inside the container.
-          # These ensure the Makefile finds the correct headers/libraries installed in the SIF.
+          # Lines below indented relative to 'run:' (Level 5 = 10 spaces)
           echo "Setting environment variables for Make..."
           export AMREX_HOME=/opt/amrex/23.11
           export HYPRE_HOME=/opt/hypre/v2.30.0
@@ -107,33 +103,24 @@ jobs:
           export H5CPP_HOME=${HDF5_HOME}
           export TIFF_HOME=/usr
 
-          # Optional: Verify exports are set in this script's environment
           echo "Using AMREX_HOME=${AMREX_HOME}"
           echo "Using HYPRE_HOME=${HYPRE_HOME}"
           echo "Using HDF5_HOME=${HDF5_HOME}"
 
-          # --- Make Clean Step ---
-          # Clean previous build artifacts within the source directory inside the container
           echo "Running make clean..."
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make clean'
 
-          # --- Make Build Step ---
-          # Execute make with debug flags (-d) inside the container.
-          # Source the SCL environment first. Redirect stdout/stderr to a log file.
           echo "Running make -d..."
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make -d -j$(nproc)' > make_debug_output.log 2>&1
 
-          # Capture the exit code of the make command
           MAKE_EXIT_CODE=$?
           echo "Make exit code: $MAKE_EXIT_CODE"
-          # Crucially, exit this script with the make command's exit code.
-          # This ensures the step is marked as failed if make failed, even with continue-on-error.
           if [ $MAKE_EXIT_CODE -ne 0 ]; then
             echo "Make command failed."
             exit $MAKE_EXIT_CODE
@@ -142,42 +129,33 @@ jobs:
 
       # Step 7: Upload the detailed make debug log as a workflow artifact
       - name: Upload Make Debug Log
-        # always() ensures this runs even if the make_build step failed (due to continue-on-error)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # Name the artifact uniquely per run
-          name: make-debug-log-${{ github.run_id }}
-          # Path to the log file generated in the previous step
+          name: make-debug-log-${{ github.run_id }} # Indent Level 5 (10 spaces)
           path: make_debug_output.log
-          # How long to keep the artifact
           retention-days: 5
 
       # Step 8: Explicitly fail the JOB if the make step failed
       - name: Fail job if make failed
-        # Check the 'outcome' of the step with id 'make_build'.
-        # The outcome reflects the exit code of the run script in that step.
         if: steps.make_build.outcome == 'failure'
         run: |
+          # Lines below indented relative to 'run:' (Level 5 = 10 spaces)
           echo "Make command failed. See uploaded 'make-debug-log' artifact for details."
           exit 1 # Exit with non-zero code to fail the entire job run
 
       # Step 9: Save the SIF image to the cache if it was built locally
       - name: Save Dependency SIF Image Cache
-        uses: actions/cache/save@v4
-        # Always run this step to attempt saving, even if subsequent steps failed.
-        # However, it only saves if the 'key' matches exactly and the 'path' exists.
         if: always()
+        uses: actions/cache/save@v4
         with:
-          path: dependency_image.sif # File to save
-          # Key MUST match the key used in the restore step exactly for cache save to work.
+          path: dependency_image.sif # Indent Level 5 (10 spaces)
           key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
 
       # Optional: Add steps here to run tests using the SIF image IF make succeeded
       # - name: Run Tests
       #   if: steps.make_build.outcome == 'success'
       #   run: |
-      #     # Remember to export *_HOME variables here too if tests use make or need them
       #     export AMREX_HOME=/opt/amrex/23.11
       #     export HYPRE_HOME=/opt/hypre/v2.30.0
       #     export HDF5_HOME=/opt/hdf5/1.12.3
