@@ -22,8 +22,7 @@
 #include <AMReX_GpuQualifiers.H>
 #include <AMReX_Utility.H>          // Included for AMREX_ASSERT*
 #include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier
-#include <AMReX_ParallelFor.H>      // For ParallelFor
-
+#include <AMReX_Loop.H> // For LoopOnCpu
 
 namespace OpenImpala {
 

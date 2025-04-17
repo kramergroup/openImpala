@@ -139,13 +139,6 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Building AMReX ${AMREX_VERSION} ---"
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
-
-    # --- Check Source Tree --- ADDED THIS BLOCK ---
-    echo "--- Checking for AMReX_ParallelFor.H in SOURCE tree ---"
-    # Use find within the current directory (source directory)
-    find . -name AMReX_ParallelFor.H -ls || echo "--- WARNING: AMReX_ParallelFor.H not found in SOURCE tree! ---"
-    # --- End Source Check ---
-
     mkdir build && cd build
 
     echo "--- Configuring AMReX ---"
@@ -172,27 +165,12 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Building AMReX (make) ---"
     make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
 
-    # --- Pre-Install Check (in build directory) --- Retained ---
-    echo "--- Checking for AMReX_ParallelFor.H in build tree BEFORE install ---"
-    # Use find within the current directory (build directory)
-    find . -name AMReX_ParallelFor.H -ls || echo "--- WARNING: AMReX_ParallelFor.H not found in build tree before install! ---"
-    # --- End Pre-Install Check ---
-
     echo "--- Installing AMReX (make install) ---"
-    # Add VERBOSE=1 to the make install command
-    make install VERBOSE=1 || { echo "*** AMReX Make Install Failed!"; exit 1; }
+    # Removed VERBOSE=1
+    make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
 
-    # --- Post-Install Check (in install directory) --- Retained ---
-    echo "--- Verifying AMReX header installation ---"
-    # Check specifically for the problematic header
-    find ${AMREX_INSTALL_PREFIX}/include -name AMReX_ParallelFor.H -print -quit | grep -q . || \
-      { echo "*** CRITICAL ERROR: AMReX_ParallelFor.H not found after install in ${AMREX_INSTALL_PREFIX}/include !"; \
-        echo "Listing contents of ${AMREX_INSTALL_PREFIX}/include:"; \
-        ls -lR ${AMREX_INSTALL_PREFIX}/include; \
-        exit 1; }
-    echo "--- AMReX_ParallelFor.H found in ${AMREX_INSTALL_PREFIX}/include ---"
-    # --- End Verification ---
-
+    # Removed specific checks for AMReX_ParallelFor.H
+    # Kept original general checks
 
     # Verification step (Your original checks are still good)
     echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"
@@ -292,11 +270,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "Checking HYPRE lib (${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so)..."; ldd "${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so"
     echo "Checking OpenMPI lib (${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so)..."; ldd "${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so"
 
-    # Check AMReX header presence again in test, just in case
-    echo "--- Verifying AMReX header presence in test ---"
-    find ${AMREX_INSTALL_PREFIX}/include -name AMReX_ParallelFor.H -print -quit | grep -q . || \
-      { echo "*** TEST ERROR: AMReX_ParallelFor.H not found in ${AMREX_INSTALL_PREFIX}/include during test phase!"; exit 1; }
-    echo "--- AMReX_ParallelFor.H found during test phase ---"
+    # Removed the specific check for AMReX_ParallelFor.H in the test section
 
     echo "--- Basic dependency container tests passed. ---"
 

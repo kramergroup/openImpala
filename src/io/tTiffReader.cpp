@@ -24,7 +24,7 @@
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_Utility.H>     // For amrex::UtilCreateDirectory
 #include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier
-#include <AMReX_ParallelFor.H> // For ParallelFor copy
+#include <AMReX_GpuLaunch.H> // Provides amrex::ParallelFor
 
 // Default relative path to the sample TIFF file
 const std::string default_tiff_filename = "data/SampleData_2Phase.tif";
