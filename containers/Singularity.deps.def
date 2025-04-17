@@ -139,6 +139,13 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Building AMReX ${AMREX_VERSION} ---"
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
+
+    # --- Check Source Tree --- ADDED THIS BLOCK ---
+    echo "--- Checking for AMReX_ParallelFor.H in SOURCE tree ---"
+    # Use find within the current directory (source directory)
+    find . -name AMReX_ParallelFor.H -ls || echo "--- WARNING: AMReX_ParallelFor.H not found in SOURCE tree! ---"
+    # --- End Source Check ---
+
     mkdir build && cd build
 
     echo "--- Configuring AMReX ---"
@@ -165,17 +172,17 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Building AMReX (make) ---"
     make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
 
-    # --- NEW PRE-INSTALL CHECK ---
+    # --- Pre-Install Check (in build directory) --- Retained ---
     echo "--- Checking for AMReX_ParallelFor.H in build tree BEFORE install ---"
     # Use find within the current directory (build directory)
     find . -name AMReX_ParallelFor.H -ls || echo "--- WARNING: AMReX_ParallelFor.H not found in build tree before install! ---"
-    # --- END PRE-INSTALL CHECK ---
+    # --- End Pre-Install Check ---
 
     echo "--- Installing AMReX (make install) ---"
     # Add VERBOSE=1 to the make install command
     make install VERBOSE=1 || { echo "*** AMReX Make Install Failed!"; exit 1; }
 
-    # --- Keep the existing post-install verification ---
+    # --- Post-Install Check (in install directory) --- Retained ---
     echo "--- Verifying AMReX header installation ---"
     # Check specifically for the problematic header
     find ${AMREX_INSTALL_PREFIX}/include -name AMReX_ParallelFor.H -print -quit | grep -q . || \
@@ -184,7 +191,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         ls -lR ${AMREX_INSTALL_PREFIX}/include; \
         exit 1; }
     echo "--- AMReX_ParallelFor.H found in ${AMREX_INSTALL_PREFIX}/include ---"
-    # --- END VERIFICATION ---
+    # --- End Verification ---
 
 
     # Verification step (Your original checks are still good)
