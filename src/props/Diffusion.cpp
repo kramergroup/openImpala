@@ -1,16 +1,3 @@
-Okay, this is a significant rewrite of Diffusion.cpp aiming to address the errors and incorporate many of the suggested improvements.
-
-Disclaimer:
-
-This code assumes the existence and correct signatures of classes like OpenImpala::TiffReader, DatReader, HDF5Reader, TiffStackReader, VolumeFraction, TortuosityHypre.
-It introduces std::filesystem (requires C++17 and linking against appropriate library if needed).
-It assumes the existence of enums OpenImpala::Direction (with X, Y, Z) and OpenImpala::TortuosityHypre::SolverType (with FlexGMRES, etc.). You'll need to ensure these exist.
-The full reader abstraction using a base class is not implemented here due to its complexity requiring changes to reader classes, but the structure is improved to handle initialization correctly.
-Error handling for specific reader failures (e.g., incorrect HDF5 path) might need further refinement within the reader classes themselves.
-Generated on Tuesday, March 25, 2025, at 10:21 PM GMT in Oxford.
-
-C++
-
 #include <cmath>
 #include <cstdlib> // Prefer over <stdlib.h>
 #include <filesystem> // Requires C++17
