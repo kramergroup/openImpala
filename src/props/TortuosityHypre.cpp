@@ -16,7 +16,7 @@
 #include <AMReX_ParallelDescriptor.H> // <<< CORRECTED HEADER >>>
 #include <AMReX_Print.H>
 #include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory
-#include <AMReX_Assert.H>           // <<< ADDED Include >>>
+#include <AMReX/AMReX_BLassert.H>           // <<< ADDED Include >>>
 #include <AMReX_GpuContainers.H>    // For GpuArray used in constructor
 
 // HYPRE includes (already in TortuosityHypre.H but good practice here too)
