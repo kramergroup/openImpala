@@ -1,5 +1,5 @@
 # GNU MakeFile for OpenImpala Diffusion Application and Tests
-# Improved version incorporating fixes for make errors and portability.
+# Corrected paths based on user-provided structure (src/io, src/props).
 
 # ============================================================
 # Environment Setup (Defaults set for the Singularity container)
@@ -9,10 +9,8 @@
 AMREX_HOME    ?= /opt/amrex/23.11           # Base AMReX install directory
 HYPRE_HOME    ?= /opt/hypre/v2.30.0         # Base HYPRE install directory
 HDF5_HOME     ?= /opt/hdf5/1.12.3           # Base HDF5 install directory (built from source)
-# Assuming official HDF5 C++ bindings are installed with HDF5 C library
 H5CPP_HOME    ?= $(HDF5_HOME)               # Base H5CPP install directory
 TIFF_HOME     ?= /usr                       # Base LibTIFF install directory (dnf package)
-# BOOST_HOME    ?= /usr                       # Base Boost install directory (if needed & non-std)
 
 # ============================================================
 # Compilers and Flags
@@ -20,38 +18,32 @@ TIFF_HOME     ?= /usr                       # Base LibTIFF install directory (dn
 CXX           := mpic++
 F90           := mpif90
 
-# Base Flags + Auto-Dependency Generation for C++ (-MMD -MP) + C++17
-# Add -DOMPI_SKIP_MPICXX if needed by your MPI implementation
 CXXFLAGS      := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
 F90FLAGS      := -g -O3
 
-# <<< ADDED -Isrc for easier project includes >>>
+# Include project source dir and dependency includes
 INCLUDE       := -Isrc \
                  -I$(AMREX_HOME)/include \
                  -I$(HYPRE_HOME)/include \
                  -I$(HDF5_HOME)/include \
                  -I$(H5CPP_HOME)/include \
                  -I$(TIFF_HOME)/include
-#                -I$(BOOST_HOME)/include  # If Boost headers are needed and non-standard
 
-# Linker Flags (using variables for portability)
-# Rely on MPI wrappers to link MPI libs and potentially Fortran runtime
-# List required application libraries
-# <<< Using updated *_HOME defaults >>>
+# Linker Flags
 LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
                  -L$(HYPRE_HOME)/lib -lHYPRE \
                  -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
                  -L$(TIFF_HOME)/lib64 -ltiff \
-                 -lm # Link math library
+                 -lm
 
 # ============================================================
 # Project Structure
 # ============================================================
-INC_DIR       := build/include
-APP_DIR       := build/apps
-TST_DIR       := build/tests
-IO_DIR        := build/io
-PROPS_DIR     := build/props
+INC_DIR       := build/include # For Fortran modules
+APP_DIR       := build/apps    # For main executable
+TST_DIR       := build/tests   # For test executables
+IO_DIR        := build/io      # For IO object files
+PROPS_DIR     := build/props   # For Props object files
 
 MODULES       := io props
 SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
@@ -62,23 +54,30 @@ BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
 # ============================================================
 # Find source files
 SOURCES_IO_CPP  := $(wildcard src/io/*.cpp)
-SOURCES_PRP_CPP := $(wildcard src/props/*.cpp)
+# All non-test CPP files in src/props (includes Diffusion.cpp, Tortuosity*.cpp etc.)
+SOURCES_PRP_CPP_ALL := $(wildcard src/props/*.cpp)
+# Test CPP files in src/props (assuming they start with 't')
+SOURCES_TST_CPP := $(filter src/props/t%.cpp, $(SOURCES_PRP_CPP_ALL))
+# Non-test CPP files in src/props
+SOURCES_PRP_CPP := $(filter-out $(SOURCES_TST_CPP), $(SOURCES_PRP_CPP_ALL))
+# Fortran files
 SOURCES_PRP_F90 := $(wildcard src/props/*.F90)
-SOURCES_APP_CPP := $(wildcard src/*.cpp) # Find any .cpp files directly in src/ (like Diffusion.cpp if moved)
-SOURCES_TST_CPP := $(wildcard tests/*.cpp) # Find test files in tests/ directory
 
 # Define object file targets based on source locations
 OBJECTS_IO_CPP  := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_CPP))
 OBJECTS_PRP_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_CPP))
 OBJECTS_PRP_F90 := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_PRP_F90))
+# Test objects (compile test sources to the props build dir as well)
+OBJECTS_TST_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_TST_CPP))
 
-OBJECTS_CPP := $(OBJECTS_IO_CPP) $(OBJECTS_PRP_CPP)
-OBJECTS_F90 := $(OBJECTS_PRP_F90)
-OBJECTS       := $(OBJECTS_CPP) $(OBJECTS_F90)
+# Consolidate non-test objects
+OBJECTS_APP_CPP := $(OBJECTS_IO_CPP) $(OBJECTS_PRP_CPP)
+OBJECTS_APP_F90 := $(OBJECTS_PRP_F90)
+OBJECTS_APP     := $(OBJECTS_APP_CPP) $(OBJECTS_APP_F90)
 
 # Let Make search for source files in relevant directories
-# Adding src and tests directories to VPATH
-VPATH := $(subst $(space),:,$(SRC_DIRS)):src:tests
+# <<< Corrected VPATH >>>
+VPATH := $(subst $(space),:,$(SRC_DIRS)):src
 
 # ============================================================
 # Main Targets
@@ -87,18 +86,19 @@ VPATH := $(subst $(space),:,$(SRC_DIRS)):src:tests
 
 all: main tests
 
-# Assume main application source is src/Diffusion.cpp
+# Main application executable (Diffusion)
+# <<< Corrected Source Path >>>
 main: builddirs $(APP_DIR)/Diffusion
 
-# Define test executables explicitly
-TEST_EXECS := $(patsubst tests/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
+# Define test executables based on found test sources
+# <<< Corrected TEST_EXECS definition >>>
+TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
 tests: builddirs $(TEST_EXECS)
 
 # ============================================================
 # Compilation Rules (Using Standard Pattern Rules)
 # ============================================================
-# Order-only prerequisites (| $(DIR)) ensure directory exists before compiling
-# Added @mkdir -p $(@D) in recipes for extra safety
+# These rules should correctly find sources via VPATH
 
 # Rule for C++ objects in build/io
 $(IO_DIR)/%.o : %.cpp | $(IO_DIR)
@@ -106,7 +106,7 @@ $(IO_DIR)/%.o : %.cpp | $(IO_DIR)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
-# Rule for C++ objects in build/props
+# Rule for C++ objects (including tests) in build/props
 $(PROPS_DIR)/%.o : %.cpp | $(PROPS_DIR)
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
@@ -118,62 +118,38 @@ $(PROPS_DIR)/%.o : %.F90 | $(PROPS_DIR) $(INC_DIR)
 	@mkdir -p $(@D)
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
 
-# Rule for top-level src/*.cpp files (if any exist) - goes to build/ dir perhaps?
-# Or adjust if main app source is elsewhere. Assuming main app source might be in src/
-# build/%.o : %.cpp | build
-# 	@echo "Compiling (Main) $< ..."
-# 	@mkdir -p $(@D)
-# 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
-
 # ============================================================
 # Linking Executables
 # ============================================================
 
 # Define object lists needed by the main application and tests
-# Main App depends on all C++ and Fortran objects
-APP_OBJS          := $(OBJECTS)
+# Main App depends on all non-test C++ and Fortran objects
+APP_OBJS          := $(OBJECTS_APP)
 
 # Specific objects needed for each test (adjust based on actual dependencies)
-# Assumes test sources are named like tests/t<ClassName>.cpp
-TEST_OBJS_TiffReader       := $(IO_DIR)/TiffReader.o
-TEST_OBJS_DatReader        := $(IO_DIR)/DatReader.o
-TEST_OBJS_HDF5Reader       := $(IO_DIR)/HDF5Reader.o
-TEST_OBJS_VolumeFraction   := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o # Example dependency
-TEST_OBJS_TortuosityHypre  := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o $(OBJECTS_PRP_F90) $(OBJECTS_IO_CPP) # Depends on most things
-TEST_OBJS_TortuosityDirect := $(PROPS_DIR)/TortuosityDirect.o $(PROPS_DIR)/VolumeFraction.o $(OBJECTS_PRP_F90) $(OBJECTS_IO_CPP) # Depends on most things
+# These likely need refinement depending on what each test actually includes/uses
+# Using OBJECTS_APP includes all non-test code objects, which might be simplest
+# Or list specific dependencies like: $(PROPS_DIR)/MyClass.o $(IO_DIR)/Reader.o etc.
+TEST_DEPS_BASE      := $(OBJECTS_APP) # Assume most tests need most app objects for now
+# TEST_DEPS_TiffReader       := $(IO_DIR)/TiffReader.o # Example if only reader needed
+# TEST_DEPS_DatReader        := $(IO_DIR)/DatReader.o
+# TEST_DEPS_HDF5Reader       := $(IO_DIR)/HDF5Reader.o
+# TEST_DEPS_VolumeFraction   := $(PROPS_DIR)/VolumeFraction.o $(IO_DIR)/TiffReader.o
+# TEST_DEPS_TortuosityHypre  := $(PROPS_DIR)/TortuosityHypre.o $(PROPS_DIR)/VolumeFraction.o $(OBJECTS_APP_F90) $(OBJECTS_IO_CPP)
+# TEST_DEPS_TortuosityDirect := $(PROPS_DIR)/TortuosityDirect.o $(PROPS_DIR)/VolumeFraction.o $(OBJECTS_APP_F90) $(OBJECTS_IO_CPP)
 
 
-# Main application (Assuming src/Diffusion.cpp)
-$(APP_DIR)/Diffusion: src/Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
+# Main application
+# <<< Corrected Source Path >>>
+$(APP_DIR)/Diffusion: src/props/Diffusion.cpp $(APP_OBJS) | $(APP_DIR)
 	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use CXX for linking C++/Fortran with MPI wrapper
+	$(CXX) $(CXXFLAGS) -o $@ $< $(APP_OBJS) $(LDFLAGS) # Link source + objects
 
-# Test executables (using specific object lists)
-$(TST_DIR)/tTiffReader: tests/tTiffReader.cpp $(TEST_OBJS_TiffReader) | $(TST_DIR)
+# Test executables (General rule using specific test object + base dependencies)
+# This links the specific t*.o file with TEST_DEPS_BASE
+$(TST_DIR)/t%: $(PROPS_DIR)/t%.o $(TEST_DEPS_BASE) | $(TST_DIR)
 	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
-
-$(TST_DIR)/tDatReader: tests/tDatReader.cpp $(TEST_OBJS_DatReader) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
-
-$(TST_DIR)/tHDF5Reader: tests/tHDF5Reader.cpp $(TEST_OBJS_HDF5Reader) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
-
-$(TST_DIR)/tVolumeFraction: tests/tVolumeFraction.cpp $(TEST_OBJS_VolumeFraction) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
-
-# Combine Tortuosity tests if they share many objects, or keep separate
-$(TST_DIR)/tTortuosityDirect: tests/tTortuosityDirect.cpp $(TEST_OBJS_TortuosityDirect) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
-
-$(TST_DIR)/tTortuosityHypre: tests/tTortuosityHypre.cpp $(TEST_OBJS_TortuosityHypre) | $(TST_DIR)
-	@echo "Linking $@ ..."
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -o $@ $^ $(LDFLAGS)
-
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 # ============================================================
 # Supporting Targets
@@ -206,13 +182,13 @@ clean:
 # ============================================================
 # Include Auto-Generated Dependencies
 # ============================================================
-# Include the .d files generated by CXXFLAGS -MMD -MP
-# Put this near the end so Make knows all explicit rules first
--include $(OBJECTS_CPP:.o=.d)
+# Include the .d files generated by CXXFLAGS -MMD -MP for C++ files
+# Includes both app and test objects dependencies now
+-include $(OBJECTS_APP_CPP:.o=.d) $(OBJECTS_TST_CPP:.o=.d)
 
 # ============================================================
 # Debugging Help (Uncomment to use)
 # ============================================================
 # print-%:
 # 	@echo '$* = $($*)'
-# Example: make print-OBJECTS_CPP
+# Example: make print-OBJECTS_APP
