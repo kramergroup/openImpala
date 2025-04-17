@@ -49,19 +49,18 @@ jobs:
 
       # Step 4: Build the SIF image only if it wasn't restored from cache
       - name: Build Dependency SIF Image Locally (if cache miss)
-        # Run only if the restore step did NOT find an exact match
         if: steps.cache-restore-sif.outputs.cache-hit != 'true'
         run: |
           RECIPE_FILE="containers/Singularity.deps.def"
           TARGET_SIF="dependency_image.sif"
-          # Check if the definition file exists
           if [ ! -f "$RECIPE_FILE" ]; then
             echo "Error: Dependency recipe file $RECIPE_FILE not found!"
             exit 1
           fi
+          # Add --force to the build command
           echo "Cache miss or invalid. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
-          # Execute the build command using sudo
-          sudo apptainer build "$TARGET_SIF" "$RECIPE_FILE"
+          # v-- Add --force flag here vvvvvv
+          sudo apptainer build --force "$TARGET_SIF" "$RECIPE_FILE"
           # Check the exit code immediately
           BUILD_EXIT_CODE=$?
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
@@ -69,7 +68,7 @@ jobs:
               exit $BUILD_EXIT_CODE # Exit if build failed
           fi
           echo "Apptainer SIF build successful."
-          ls -lh ./dependency_image.sif # Verify file exists and size
+          ls -lh ./dependency_image.sif
 
       # Step 5: Verify the SIF file exists (either restored or built)
       - name: Verify SIF exists after cache/build step
