@@ -6,11 +6,11 @@
 # ============================================================
 # Default paths matching the Singularity container build.
 # Can still be overridden by setting environment variables before running make.
-AMREX_HOME    ?= /opt/amrex/23.11          # Base AMReX install directory
-HYPRE_HOME    ?= /opt/hypre/v2.30.0         # Base HYPRE install directory
-HDF5_HOME     ?= /opt/hdf5/1.12.3         # Base HDF5 install directory (built from source)
-H5CPP_HOME    ?= $(HDF5_HOME)              # Base H5CPP install directory
-TIFF_HOME     ?= /usr                       # Base LibTIFF install directory (dnf package)
+AMREX_HOME    ?= /opt/amrex/23.11
+HYPRE_HOME    ?= /opt/hypre/v2.30.0
+HDF5_HOME     ?= /opt/hdf5/1.12.3
+H5CPP_HOME    ?= $(HDF5_HOME)
+TIFF_HOME     ?= /usr
 
 # ============================================================
 # Compilers and Flags
@@ -39,15 +39,15 @@ LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
 # ============================================================
 # Project Structure
 # ============================================================
-INC_DIR       := build/include # For Fortran modules
-APP_DIR       := build/apps    # For main executable
-TST_DIR       := build/tests   # For test executables
-IO_DIR        := build/io      # For IO object files
-PROPS_DIR     := build/props   # For Props object files
+INC_DIR       := build/include# For Fortran modules
+APP_DIR       := build/apps# For main executable
+TST_DIR       := build/tests# For test executables
+IO_DIR        := build/io# For IO object files   <<< REMOVE SPACES BEFORE #
+PROPS_DIR     := build/props# For Props object files <<< REMOVE SPACES BEFORE #
 
 MODULES       := io props
-SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
-BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
+SRC_DIRS      := $(addprefix src/,$(MODULES))# src/io src/props
+BUILD_DIRS    := $(addprefix build/,$(MODULES))# build/io build/props
 
 # ============================================================
 # Source and Object Files
@@ -91,9 +91,6 @@ main: $(APP_DIR)/Diffusion
 # Define test executables based on found test sources
 TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
 tests: $(TEST_EXECS)
-
-$(info *** Debug: IO_DIR = [${IO_DIR}])
-$(info *** Debug: OBJECTS_IO_CPP = [${OBJECTS_IO_CPP}])
 
 # ============================================================
 # Compilation Rules (Using Static Pattern Rules - Adjusted Syntax) # <<< SECTION REVISED >>>
