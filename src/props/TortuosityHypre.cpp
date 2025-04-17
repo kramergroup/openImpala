@@ -18,8 +18,8 @@
 #include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory
 #include <AMReX_BLassert.H>          // Corrected include path
 #include <AMReX_GpuContainers.H>     // For GpuArray used in constructor
-#include <AMReX_ParmParse.H>         // <<< ADDED for ParmParse >>>
-#include <AMReX_Vector.H>            // <<< ADDED for amrex::Vector (needed for plotfile fix) >>>
+#include <AMReX_ParmParse.H>         // Added for ParmParse
+#include <AMReX_Vector.H>            // Added for amrex::Vector (needed for plotfile fix)
 
 
 // HYPRE includes (already in TortuosityHypre.H but good practice here too)
@@ -84,8 +84,8 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
       m_grid(NULL), m_stencil(NULL), m_A(NULL), m_b(NULL), m_x(NULL)
 {
     // --- Read potential missing params from ParmParse (Example) ---
-    amrex::ParmParse pp("hypre"); // <<< Now OK due to include >>> Look for params under "hypre." prefix
-    pp.query("eps", m_eps);      // <<< Now OK due to include >>>
+    amrex::ParmParse pp("hypre");
+    pp.query("eps", m_eps);
     pp.query("maxiter", m_maxiter);
     // pp.query("verbose", m_verbose); // Already set from argument default
 
@@ -258,9 +258,8 @@ void TortuosityHypre::setupMatrixEquation()
         const amrex::Box& bx = mfi.tilebox(); // Operate on tile box
         const int npts = static_cast<int>(bx.numPts()); // Use int
 
-        // Check for potential overflow - note warning may still occur if amrex::Long > INT_MAX
-        // but functionally safe if npts fits in int. Consider disabling warning locally if needed.
-        // Original warning line 260: if (static_cast<size_t>(npts) != bx.numPts())
+        // Warning for potential overflow (from previous log) can be ignored if npts is reasonably small
+        // if (static_cast<size_t>(npts) != bx.numPts()) { ... }
 
         if (npts == 0) continue; // Skip empty boxes
 
@@ -272,21 +271,28 @@ void TortuosityHypre::setupMatrixEquation()
         // Get phase data pointer and bounds
         const amrex::IArrayBox& phase_iab = m_mf_phase[mfi]; // Get IArrayBox
         const int* p_ptr = phase_iab.dataPtr();
-        // Pass FAB box bounds (incl. ghost cells) to Fortran if it needs to index into ghost cells
-        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
+        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // Use index for fabbox
 
-        // --- CORRECTED Fortran Call for tortuosity_fillmtx ---
+        // <<< CHANGED: Store IntVect refs explicitly before calling .data() >>>
+        const amrex::IntVect& pbox_lo = pbox.loVect();
+        const amrex::IntVect& pbox_hi = pbox.hiVect();
+        const amrex::IntVect& bx_lo = bx.loVect();
+        const amrex::IntVect& bx_hi = bx.hiVect();
+        const amrex::IntVect& domain_lo = domain.loVect();
+        const amrex::IntVect& domain_hi = domain.hiVect();
+
+        // --- Fortran Call for tortuosity_fillmtx ---
         tortuosity_fillmtx(matrix_values.data(),       // a
                            rhs_values.data(),          // rhs
                            initial_guess.data(),       // xinit
                            &npts,                      // nval (int*)
                            p_ptr,                      // p (int*)
-                           pbox.loVect().data(),       // p_lo (int*) <<< CHANGED >>>
-                           pbox.hiVect().data(),       // p_hi (int*) <<< CHANGED >>>
-                           bx.loVect().data(),         // bxlo (int*) - Use tile box <<< CHANGED >>>
-                           bx.hiVect().data(),         // bxhi (int*) - Use tile box <<< CHANGED >>>
-                           domain.loVect().data(),     // domlo (int*) <<< CHANGED >>>
-                           domain.hiVect().data(),     // domhi (int*) <<< CHANGED >>>
+                           pbox_lo.data(),             // p_lo (int*)
+                           pbox_hi.data(),             // p_hi (int*)
+                           bx_lo.data(),               // bxlo (int*) - Use tile box
+                           bx_hi.data(),               // bxhi (int*) - Use tile box
+                           domain_lo.data(),           // domlo (int*)
+                           domain_hi.data(),           // domhi (int*)
                            dxinv_sq.data(),            // dxinv (Real*) - Pass inverse SQUARED
                            &m_vlo,                     // vlo (Real*)
                            &m_vhi,                     // vhi (Real*)
@@ -467,17 +473,18 @@ bool TortuosityHypre::solve()
 
         // Construct filename
         std::string plotfilename = m_resultspath + "/hypre_soln_" + std::string(datetime);
-        const std::vector<std::string> varnames = {"potential", "cell_type"}; // Use component names
+        // Correctly use std::vector here, convert before passing
+        const std::vector<std::string> std_varnames = {"potential", "cell_type"};
 
-        // <<< CHANGED to convert std::vector to amrex::Vector >>>
-        amrex::Vector<std::string> amrex_varnames(varnames.size());
-        for (std::size_t i = 0; i < varnames.size(); ++i) {
-            amrex_varnames[i] = varnames[i];
+        // <<< Convert std::vector to amrex::Vector >>>
+        amrex::Vector<std::string> amrex_varnames(std_varnames.size());
+        for (std::size_t i = 0; i < std_varnames.size(); ++i) {
+            amrex_varnames[i] = std_varnames[i];
         }
 
         if (m_verbose > 0) amrex::Print() << "Writing plotfile: " << plotfilename << std::endl;
         // Pass converted vector to plotfile function
-        amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, amrex_varnames, m_geom, 0.0, 0); // <<< Pass converted vector
+        amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, amrex_varnames, m_geom, 0.0, 0);
     }
 
 
@@ -660,12 +667,20 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // Also assumes Fortran handles component indexing correctly based on base pointers.
         int q_ncomp = fab_target.nComp();
         int p_ncomp = fab_phase_src.nComp();
-        const auto& qbox = phi.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
-        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
+        const auto& qbox = phi.fabbox(mfi.LocalTileIndex()); // Use index for fabbox
+        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // Use index for fabbox
         const auto& domain_box = m_geom.Domain(); // Domain bounds
 
         // Need to pass pointer to the specific component 'ncomp' of the target FAB
         amrex::Real* q_comp_ptr = fab_target.dataPtr(ncomp);
+
+        // <<< CHANGED: Store IntVect refs explicitly before calling .data() >>>
+        const amrex::IntVect& qbox_lo = qbox.loVect();
+        const amrex::IntVect& qbox_hi = qbox.hiVect();
+        const amrex::IntVect& pbox_lo = pbox.loVect();
+        const amrex::IntVect& pbox_hi = pbox.hiVect();
+        const amrex::IntVect& domain_box_lo = domain_box.loVect();
+        const amrex::IntVect& domain_box_hi = domain_box.hiVect();
 
         // Fortran modifies q(comp_ct) based on p(comp_phase)
         // C++ passes base pointer q_comp_ptr (for component ncomp)
@@ -674,11 +689,11 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // If it needs base pointer + ncomp, the call signature is slightly off.
         // Assuming Fortran operates on the single component pointed to by q_comp_ptr here.
         // The `ncomp` arguments passed are for bounds checking/array extent, not necessarily target component.
-        tortuosity_filct(q_comp_ptr, // Pass pointer to target component ncomp
-                         qbox.loVect().data(), qbox.hiVect().data(), &q_ncomp, // Bounds/ncomp of the multifab 'phi' <<< CHANGED >>>
-                         fab_phase_src.dataPtr(), // Pass pointer to int data (comp 0)
-                         pbox.loVect().data(), pbox.hiVect().data(), &p_ncomp, // Bounds/ncomp of the iMultiFab 'm_mf_phase' <<< CHANGED >>>
-                         domain_box.loVect().data(), domain_box.hiVect().data(), // <<< CHANGED >>>
+        tortuosity_filct(q_comp_ptr,                // Pass pointer to target component ncomp
+                         qbox_lo.data(), qbox_hi.data(), &q_ncomp, // Bounds/ncomp of the multifab 'phi'
+                         fab_phase_src.dataPtr(),   // Pass pointer to int data (comp 0)
+                         pbox_lo.data(), pbox_hi.data(), &p_ncomp, // Bounds/ncomp of the iMultiFab 'm_mf_phase'
+                         domain_box_lo.data(), domain_box_hi.data(),
                          &m_phase);
     }
 }
