@@ -82,6 +82,15 @@ jobs:
             ls -lh ./dependency_image.sif # List file size
           fi
 
+         # <<< ADD THIS NEW STEP BELOW >>>
+    - name: Debug: Find AMReX Assert Header in Container
+      run: |
+        echo "--- Searching for *assert*.H within AMReX include directory in the container ---"
+        # Execute find inside the container using sudo (as build step uses sudo)
+        sudo apptainer exec ./dependency_image.sif find /opt/amrex/23.11/include -name '*assert*.H' || echo "Find command potentially failed or found nothing."
+        echo "--- Finished search ---"
+    # <<< END OF NEW STEP >>>
+
       # Step 6: Build the main OpenImpala application code using the SIF environment
       - name: Build OpenImpala using Dependency SIF
         id: make_build # ID to reference the outcome of this step later
