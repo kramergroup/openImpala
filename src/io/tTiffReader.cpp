@@ -210,7 +210,7 @@ int main (int argc, char* argv[])
                 {
                     const amrex::Box& box = mfi.tilebox();
                     auto const& int_fab_arr = mf.const_array(mfi);
-                    auto&       real_fab_arr = mfv.array(mfi);
+                    auto       real_fab_arr = mfv.array(mfi);
                     amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
                     {
                         real_fab_arr(i, j, k) = static_cast<amrex::Real>(int_fab_arr(i, j, k));
