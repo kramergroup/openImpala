@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <algorithm> // Needed for std::transform
 
 // AMReX includes
 #include <AMReX.H>
@@ -27,16 +28,17 @@
 #include <AMReX_Utility.H> // For amrex::UtilCreateDirectory
 
 // OpenImpala includes (assuming namespace OpenImpala)
-#include "../io/DatReader.H"
+#include "../io/DatReader.H"      // Assuming DatReader.H includes needed types like RawDataType, parseRawDataType
 #include "../io/HDF5Reader.H"
 #include "../io/TiffReader.H"
-#include "TortuosityHypre.H"
+// #include "../io/TiffStackReader.H" // REMOVED - Deprecated
+#include "TortuosityHypre.H"      // Assuming TortuosityHypre.H includes nested SolverType enum
 #include "VolumeFraction.H"
 
 // Assume these enums exist in OpenImpala namespace
 namespace OpenImpala {
     enum class Direction { X = 0, Y = 1, Z = 2 };
-    // namespace TortuosityHypre { // Assuming SolverType is nested
+    // Namespace TortuosityHypre { // Assuming SolverType is nested
     //     enum class SolverType { FlexGMRES /*, other solvers */ };
     // }
 } // namespace OpenImpala
@@ -97,8 +99,8 @@ int main(int argc, char* argv[])
         std::string hdf5_dataset; // Optional: Path within HDF5 file
         pp.query("hdf5_dataset", hdf5_dataset);
 
-        int tiff_stack_size = 0; // Specify number of images if using TiffStackReader
-        pp.query("tiff_stack_size", tiff_stack_size);
+        // int tiff_stack_size = 0; // REMOVED - TiffStackReader deprecated
+        // pp.query("tiff_stack_size", tiff_stack_size); // REMOVED
 
         // RAW/DAT Reader Specific (Required if using these types)
         int raw_width = 0, raw_height = 0, raw_depth = 0;
@@ -154,19 +156,33 @@ int main(int argc, char* argv[])
             if (homeDir == nullptr) {
                 amrex::Warning("Could not get HOME directory; cannot expand '~' in results_dir.");
                 // Decide default behavior: use relative path or abort? Using relative for now.
-                results_dir = results_dir.string().substr(1); // Remove leading '~/'
+                results_dir = results_dir.string().substr(1); // Remove leading '~/' if present
+                 if (!results_dir.empty() && (results_dir.string().front() == '/' || results_dir.string().front() == '\\')) {
+                    results_dir = results_dir.string().substr(1); // Remove leading slash if present after removing ~
+                }
             } else {
-                results_dir = std::filesystem::path(homeDir) / results_dir.string().substr(1);
+                std::string subpath = results_dir.string().substr(1);
+                if (!subpath.empty() && (subpath.front() == '/' || subpath.front() == '\\')) {
+                     subpath = subpath.substr(1); // Remove leading slash if present after removing ~
+                 }
+                results_dir = std::filesystem::path(homeDir) / subpath;
             }
         }
-        // Handle '~' for data path similarly if needed, or assume relative/absolute paths.
+        // Handle '~' for data path similarly if needed
          if (!data_path.empty() && data_path.string().front() == '~') {
              const char* homeDir = getenv("HOME");
              if (homeDir == nullptr) {
                  amrex::Warning("Could not get HOME directory; cannot expand '~' in data_path.");
-                 data_path = data_path.string().substr(1);
+                 data_path = data_path.string().substr(1); // Remove leading '~/' if present
+                 if (!data_path.empty() && (data_path.string().front() == '/' || data_path.string().front() == '\\')) {
+                     data_path = data_path.string().substr(1); // Remove leading slash if present after removing ~
+                 }
              } else {
-                 data_path = std::filesystem::path(homeDir) / data_path.string().substr(1);
+                std::string subpath = data_path.string().substr(1);
+                if (!subpath.empty() && (subpath.front() == '/' || subpath.front() == '\\')) {
+                     subpath = subpath.substr(1); // Remove leading slash if present after removing ~
+                 }
+                 data_path = std::filesystem::path(homeDir) / subpath;
              }
          }
 
@@ -188,18 +204,18 @@ int main(int argc, char* argv[])
 
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Diffusion Calculation Setup ---\n";
-            amrex::Print() << " Input File:        " << full_input_path << "\n";
-            if (!hdf5_dataset.empty()) amrex::Print() << " HDF5 Dataset:      " << hdf5_dataset << "\n";
-            if (tiff_stack_size > 0) amrex::Print() << " TIFF Stack Size:   " << tiff_stack_size << "\n";
-            amrex::Print() << " Analysis Phase ID: " << phase_id << "\n";
-            amrex::Print() << " Threshold Value:   " << threshold_value << "\n";
-            amrex::Print() << " Direction(s):      " << direction_str << "\n";
-            amrex::Print() << " Results Directory: " << results_dir << "\n";
-            amrex::Print() << " Output Filename:   " << output_filename << "\n";
-            amrex::Print() << " Max Grid Size:     " << box_size << "\n";
-            amrex::Print() << " Solver:            " << solver_type_str << "\n";
-            amrex::Print() << " Solver Tol:        " << hypre_eps << "\n";
-            amrex::Print() << " Solver MaxIter:    " << hypre_maxiter << "\n";
+            amrex::Print() << " Input File:         " << full_input_path << "\n";
+            if (!hdf5_dataset.empty()) amrex::Print() << " HDF5 Dataset:       " << hdf5_dataset << "\n";
+            // if (tiff_stack_size > 0) amrex::Print() << " TIFF Stack Size:    " << tiff_stack_size << "\n"; // REMOVED
+            amrex::Print() << " Analysis Phase ID:  " << phase_id << "\n";
+            amrex::Print() << " Threshold Value:    " << threshold_value << "\n";
+            amrex::Print() << " Direction(s):       " << direction_str << "\n";
+            amrex::Print() << " Results Directory:  " << results_dir << "\n";
+            amrex::Print() << " Output Filename:    " << output_filename << "\n";
+            amrex::Print() << " Max Grid Size:      " << box_size << "\n";
+            amrex::Print() << " Solver:             " << solver_type_str << "\n";
+            amrex::Print() << " Solver Tol:         " << hypre_eps << "\n";
+            amrex::Print() << " Solver MaxIter:     " << hypre_maxiter << "\n";
             amrex::Print() << "-----------------------------------\n\n";
         }
 
@@ -220,29 +236,23 @@ int main(int argc, char* argv[])
 
             if (ext == ".tif" || ext == ".tiff") {
                 if (verbose > 0) amrex::Print() << " Reading TIFF file: " << full_input_path << "\n";
+                // Assumes TiffReader can handle multi-directory TIFFs for stacks
                 OpenImpala::TiffReader reader(full_input_path.string());
                 if (!reader.isRead()) throw std::runtime_error("TiffReader failed to read file.");
                 domain_box = reader.box();
                 reader_success = true;
                 // Define mf_phase now *before* reader goes out of scope if needed
-                // Or better: Ensure grid setup happens *after* this block
-                 // Define computational domain and index space post-read
                  ba.define(domain_box);
                  ba.maxSize(box_size);
                  dm.define(ba);
                  mf_phase.define(ba, dm, 1, 1); // 1 ghost cell for solver
                  reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase); // Assign phase_id to > T
 
-            } else if (ext == ".dat") { // || ext == ".raw" - Needs more info
-                 if (verbose > 0) amrex::Print() << " Reading DAT/RAW file: " << full_input_path << "\n";
-                 // For RAW/DAT, dimensions and type MUST be provided
-                 if (raw_width <= 0 || raw_height <= 0 || raw_depth <= 0 || raw_datatype_str.empty()) {
-                     throw std::runtime_error("raw_width, raw_height, raw_depth, and raw_datatype must be specified in inputs for DAT/RAW files.");
-                 }
-                 // TODO: Convert raw_datatype_str to appropriate enum/type needed by DatReader
-                 OpenImpala::RawDataType raw_type = OpenImpala::parseRawDataType(raw_datatype_str); // Assuming this helper exists
-
-                 OpenImpala::DatReader reader(full_input_path.string(), raw_width, raw_height, raw_depth, raw_type);
+            } else if (ext == ".dat") { // Separated RAW for clarity if needed later
+                 if (verbose > 0) amrex::Print() << " Reading DAT file: " << full_input_path << "\n";
+                 // For DAT, dimensions MUST be provided via file header (handled by reader)
+                 // Type is also fixed by DataType definition
+                 OpenImpala::DatReader reader(full_input_path.string());
                  if (!reader.isRead()) throw std::runtime_error("DatReader failed to read file.");
                  domain_box = reader.box();
                  reader_success = true;
@@ -251,7 +261,24 @@ int main(int argc, char* argv[])
                  ba.maxSize(box_size);
                  dm.define(ba);
                  mf_phase.define(ba, dm, 1, 1);
-                 reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
+                 // Assuming DatReader's threshold uses its internal DataType
+                 reader.threshold(static_cast<OpenImpala::DatReader::DataType>(threshold_value), phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
+
+            } else if (ext == ".raw") { // Example: Handle raw if needed distinctly
+                 if (verbose > 0) amrex::Print() << " Reading RAW file: " << full_input_path << "\n";
+                 if (raw_width <= 0 || raw_height <= 0 || raw_depth <= 0 || raw_datatype_str.empty()) {
+                     throw std::runtime_error("raw_width, raw_height, raw_depth, and raw_datatype must be specified in inputs for RAW files.");
+                 }
+                 // TODO: Implement or use appropriate RawReader assuming it takes dims/type
+                 // OpenImpala::RawDataType raw_type = OpenImpala::parseRawDataType(raw_datatype_str); // Assuming helper exists
+                 // OpenImpala::RawReader reader(full_input_path.string(), raw_width, raw_height, raw_depth, raw_type);
+                 // if (!reader.isRead()) throw std::runtime_error("RawReader failed to read file.");
+                 // domain_box = reader.box();
+                 // reader_success = true;
+                 // ... setup ba, dm, mf_phase ...
+                 // reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
+                 throw std::runtime_error("RAW file reading not fully implemented in this example.");
+
 
             } else if (ext == ".h5" || ext == ".hdf5") {
                  if (verbose > 0) amrex::Print() << " Reading HDF5 file: " << full_input_path << ", Dataset: " << hdf5_dataset << "\n";
@@ -269,26 +296,15 @@ int main(int argc, char* argv[])
                  mf_phase.define(ba, dm, 1, 1);
                  reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
 
-            } else if (tiff_stack_size > 0) { // Attempt TiffStackReader if size specified
-                 if (verbose > 0) amrex::Print() << " Reading TIFF Stack, Base: " << full_input_path << ", Size: " << tiff_stack_size << "\n";
-                 // TiffStackReader might take base path and size
-                 OpenImpala::TiffStackReader reader(full_input_path.string(), tiff_stack_size);
-                 if (!reader.isRead()) throw std::runtime_error("TiffStackReader failed to read file.");
-                 domain_box = reader.box();
-                 reader_success = true;
-                 // Define and threshold mf_phase
-                 ba.define(domain_box);
-                 ba.maxSize(box_size);
-                 dm.define(ba);
-                 mf_phase.define(ba, dm, 1, 1);
-                 reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
+            // REMOVED TiffStackReader block
+            // else if (tiff_stack_size > 0) { ... }
 
             } else {
-                amrex::Abort("File format not recognized or supported: " + filename);
+                 amrex::Abort("File format not recognized or supported: " + filename);
             }
 
             if (!reader_success || domain_box.isEmpty()) {
-                amrex::Abort("Failed to read valid domain box from input file.");
+                 amrex::Abort("Failed to read valid domain box from input file.");
             }
 
             // --- Setup Geometry and Fill Ghost Cells ---
@@ -327,7 +343,7 @@ int main(int argc, char* argv[])
              while (ss >> single_dir_str) {
                  directions_to_compute.push_back(string_to_direction(single_dir_str));
              }
-             if (directions_to_compute.empty()) { // Handle single direction case without spaces
+             if (directions_to_compute.empty() && !direction_str.empty()) { // Handle single direction case without spaces, check not empty
                  directions_to_compute.push_back(string_to_direction(direction_str));
              }
              // Remove duplicates if any (optional)
