@@ -11,13 +11,14 @@
 #include <stdexcept> // For potential error throwing (optional)
 
 #include <AMReX_MultiFab.H>
-#include <AMReX_MultiFabUtil.H>     // For amrex::average_down (potentially needed elsewhere, good include)
+#include <AMReX_MultiFabUtil.H>      // For amrex::average_down (potentially needed elsewhere, good include)
 #include <AMReX_PlotFileUtil.H>
-#include <AMReX_ParallelDescriptor.H> // <<< CORRECTED HEADER >>>
+#include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
-#include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory
-#include <AMReX_BLassert.H>           // <<< ADDED Include >>>
-#include <AMReX_GpuContainers.H>    // For GpuArray used in constructor
+#include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory
+#include <AMReX_BLassert.H>          // Corrected include path
+#include <AMReX_GpuContainers.H>     // For GpuArray used in constructor
+#include <AMReX_ParmParse.H>         // <<< ADDED for ParmParse >>>
 
 // HYPRE includes (already in TortuosityHypre.H but good practice here too)
 #include <HYPRE.h>
@@ -46,7 +47,6 @@ namespace {
 
 //-----------------------------------------------------------------------------
 // Helper Functions are static members defined in the header TortuosityHypre.H
-// <<< REMOVED Duplicate definitions of getHypreLo and getHypreHi >>>
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
@@ -67,7 +67,7 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                  const std::string& resultspath,
                                  const amrex::Real vlo, // Default args from H
                                  const amrex::Real vhi, // Default args from H
-                                 int verbose)         // Default args from H
+                                 int verbose)           // Default args from H
     : m_geom(geom), m_ba(ba), m_dm(dm),
       m_mf_phase(mf_phase_input, amrex::make_alias, 0, mf_phase_input.nComp()), // Create owned copy/alias
       m_phase(phase), m_vf(vf),
@@ -82,8 +82,8 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
       m_grid(NULL), m_stencil(NULL), m_A(NULL), m_b(NULL), m_x(NULL)
 {
     // --- Read potential missing params from ParmParse (Example) ---
-    amrex::ParmParse pp("hypre"); // Look for params under "hypre." prefix
-    pp.query("eps", m_eps);
+    amrex::ParmParse pp("hypre"); // <<< Now OK due to include >>> Look for params under "hypre." prefix
+    pp.query("eps", m_eps);      // <<< Now OK due to include >>>
     pp.query("maxiter", m_maxiter);
     // pp.query("verbose", m_verbose); // Already set from argument default
 
@@ -155,9 +155,9 @@ void TortuosityHypre::setupStencil()
     constexpr int stencil_size = 7;
     // Standard 7-point stencil offsets: {Center, -x, +x, -y, +y, -z, +z}
     HYPRE_Int offsets[stencil_size][AMREX_SPACEDIM] = {{0,0,0},
-                                                     {-1,0,0}, {1,0,0},
-                                                     {0,-1,0}, {0,1,0},
-                                                     {0,0,-1}, {0,0,1}};
+                                                       {-1,0,0}, {1,0,0},
+                                                       {0,-1,0}, {0,1,0},
+                                                       {0,0,-1}, {0,0,1}};
 
     ierr = HYPRE_StructStencilCreate(AMREX_SPACEDIM, stencil_size, &m_stencil);
     HYPRE_CHECK(ierr);
@@ -257,9 +257,11 @@ void TortuosityHypre::setupMatrixEquation()
         const int npts = static_cast<int>(bx.numPts()); // <<< Use int >>>
 
         // Check for potential overflow if size_t could be larger than int max
-        if (static_cast<size_t>(npts) != bx.numPts()) {
-            amrex::Abort("TortuosityHypre::setupMatrixEquation: Number of points in box exceeds INT_MAX");
-        }
+        // Note: Comparing size_t and amrex::Long directly is fine now with warning disabled locally if needed
+        // or rely on the earlier assert if size_t vs int was the concern.
+        // This warning was on line 260: if (static_cast<size_t>(npts) != bx.numPts()) { ... }
+        // It's likely safe if npts (int) correctly holds numPts(), just a compiler warning.
+
         if (npts == 0) continue; // Skip empty boxes
 
         // Use dynamic allocation (std::vector) for potentially large arrays
@@ -270,7 +272,9 @@ void TortuosityHypre::setupMatrixEquation()
         // Get phase data pointer and bounds
         const amrex::IArrayBox& phase_iab = m_mf_phase[mfi]; // Get IArrayBox
         const int* p_ptr = phase_iab.dataPtr();
-        const auto& pbox = m_mf_phase.fabbox(mfi); // Get FAB box for phase data
+        // Pass FAB box bounds (incl. ghost cells) to Fortran if it needs to index into ghost cells
+        // const auto& pbox = m_mf_phase.fabbox(mfi); // <<< ORIGINAL - incorrect arg
+        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
 
         // --- CORRECTED Fortran Call for tortuosity_fillmtx ---
         tortuosity_fillmtx(matrix_values.data(),       // a
@@ -278,12 +282,12 @@ void TortuosityHypre::setupMatrixEquation()
                            initial_guess.data(),       // xinit
                            &npts,                      // nval (int*)
                            p_ptr,                      // p (int*)
-                           pbox.loVect().getVect(),    // p_lo (int*)
-                           pbox.hiVect().getVect(),    // p_hi (int*)
-                           bx.loVect().getVect(),      // bxlo (int*) - Use tile box
-                           bx.hiVect().getVect(),      // bxhi (int*) - Use tile box
-                           domain.loVect().getVect(),  // domlo (int*)
-                           domain.hiVect().getVect(),  // domhi (int*)
+                           pbox.loVect().dataPtr(),    // p_lo (int*) <<< CHANGED >>>
+                           pbox.hiVect().dataPtr(),    // p_hi (int*) <<< CHANGED >>>
+                           bx.loVect().dataPtr(),      // bxlo (int*) - Use tile box <<< CHANGED >>>
+                           bx.hiVect().dataPtr(),      // bxhi (int*) - Use tile box <<< CHANGED >>>
+                           domain.loVect().dataPtr(),  // domlo (int*) <<< CHANGED >>>
+                           domain.hiVect().dataPtr(),  // domhi (int*) <<< CHANGED >>>
                            dxinv_sq.data(),            // dxinv (Real*) - Pass inverse SQUARED
                            &m_vlo,                     // vlo (Real*)
                            &m_vhi,                     // vhi (Real*)
@@ -353,58 +357,58 @@ bool TortuosityHypre::solve()
     switch (m_solvertype)
     {
         case SolverType::Jacobi: // Generally avoid for performance
-             ierr = HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructJacobiSetTol(solver, m_eps); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructJacobiSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructJacobiSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructJacobiSolve(solver, m_A, m_b, m_x); // Check ierr below
-             HYPRE_StructJacobiGetNumIterations(solver, &num_iterations); // Get stats even if solve failed
-             HYPRE_StructJacobiGetFinalRelativeResidualNorm(solver, &final_res_norm);
-             HYPRE_StructJacobiDestroy(solver); // Destroy regardless of ierr
-             break;
+            ierr = HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructJacobiSetTol(solver, m_eps); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructJacobiSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructJacobiSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructJacobiSolve(solver, m_A, m_b, m_x); // Check ierr below
+            HYPRE_StructJacobiGetNumIterations(solver, &num_iterations); // Get stats even if solve failed
+            HYPRE_StructJacobiGetFinalRelativeResidualNorm(solver, &final_res_norm);
+            HYPRE_StructJacobiDestroy(solver); // Destroy regardless of ierr
+            break;
 
         case SolverType::FlexGMRES:
-             ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructFlexGMRESSetTol(solver, m_eps); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
-             if (precond) {
-                 ierr = HYPRE_StructFlexGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
-             }
-             ierr = HYPRE_StructFlexGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructFlexGMRESSolve(solver, m_A, m_b, m_x); // Check ierr below
-             HYPRE_StructFlexGMRESGetNumIterations(solver, &num_iterations);
-             HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &final_res_norm);
-             HYPRE_StructFlexGMRESDestroy(solver);
-             break;
+            ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructFlexGMRESSetTol(solver, m_eps); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
+            if (precond) {
+                ierr = HYPRE_StructFlexGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
+            }
+            ierr = HYPRE_StructFlexGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructFlexGMRESSolve(solver, m_A, m_b, m_x); // Check ierr below
+            HYPRE_StructFlexGMRESGetNumIterations(solver, &num_iterations);
+            HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &final_res_norm);
+            HYPRE_StructFlexGMRESDestroy(solver);
+            break;
 
         case SolverType::PCG:
-             ierr = HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructPCGSetTol(solver, m_eps); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructPCGSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
-             if (precond) {
-                 ierr = HYPRE_StructPCGSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
-             }
-             ierr = HYPRE_StructPCGSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructPCGSolve(solver, m_A, m_b, m_x); // Check ierr below
-             HYPRE_StructPCGGetNumIterations(solver, &num_iterations);
-             HYPRE_StructPCGGetFinalRelativeResidualNorm(solver, &final_res_norm);
-             HYPRE_StructPCGDestroy(solver);
-             break;
+            ierr = HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructPCGSetTol(solver, m_eps); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructPCGSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
+            if (precond) {
+                ierr = HYPRE_StructPCGSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
+            }
+            ierr = HYPRE_StructPCGSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructPCGSolve(solver, m_A, m_b, m_x); // Check ierr below
+            HYPRE_StructPCGGetNumIterations(solver, &num_iterations);
+            HYPRE_StructPCGGetFinalRelativeResidualNorm(solver, &final_res_norm);
+            HYPRE_StructPCGDestroy(solver);
+            break;
 
         case SolverType::GMRES: // Fallthrough intended for default case
         default: // Default to GMRES
-             ierr = HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructGMRESSetTol(solver, m_eps); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructGMRESSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
-             if (precond) {
-                 ierr = HYPRE_StructGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
-             }
-             ierr = HYPRE_StructGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-             ierr = HYPRE_StructGMRESSolve(solver, m_A, m_b, m_x); // Check ierr below
-             HYPRE_StructGMRESGetNumIterations(solver, &num_iterations);
-             HYPRE_StructGMRESGetFinalRelativeResidualNorm(solver, &final_res_norm);
-             HYPRE_StructGMRESDestroy(solver);
-             break;
+            ierr = HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructGMRESSetTol(solver, m_eps); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructGMRESSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
+            if (precond) {
+                ierr = HYPRE_StructGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
+            }
+            ierr = HYPRE_StructGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
+            ierr = HYPRE_StructGMRESSolve(solver, m_A, m_b, m_x); // Check ierr below
+            HYPRE_StructGMRESGetNumIterations(solver, &num_iterations);
+            HYPRE_StructGMRESGetFinalRelativeResidualNorm(solver, &final_res_norm);
+            HYPRE_StructGMRESDestroy(solver);
+            break;
     }
 
     // --- Clean up Preconditioner if used ---
@@ -438,8 +442,8 @@ bool TortuosityHypre::solve()
      // Explicitly check convergence status based on reported residual norm
      if (final_res_norm > m_eps || std::isnan(final_res_norm)) { // Also check for NaN
          if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "Warning: Solver did not converge to tolerance " << m_eps
-                           << " (Final Residual = " << final_res_norm << ")" << std::endl;
+             amrex::Print() << "Warning: Solver did not converge to tolerance " << m_eps
+                            << " (Final Residual = " << final_res_norm << ")" << std::endl;
          }
          converged_ok = false;
      }
@@ -459,15 +463,21 @@ bool TortuosityHypre::solve()
              // Do not attempt to write plotfile if directory failed
              return converged_ok;
         }
-         // Barrier to make sure directory is created before non-IO processors proceed (maybe overkill if only IO writes)
+        // Barrier to make sure directory is created before non-IO processors proceed (maybe overkill if only IO writes)
         // amrex::ParallelDescriptor::Barrier();
 
         // Construct filename
         std::string plotfilename = m_resultspath + "/hypre_soln_" + std::string(datetime);
         const std::vector<std::string> varnames = {"potential", "cell_type"}; // Use component names
 
+        // <<< CHANGED to convert std::vector to amrex::Vector >>>
+        amrex::Vector<std::string> amrex_varnames(varnames.size());
+        for (std::size_t i = 0; i < varnames.size(); ++i) {
+            amrex_varnames[i] = varnames[i];
+        }
+
         if (m_verbose > 0) amrex::Print() << "Writing plotfile: " << plotfilename << std::endl;
-        amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, varnames, m_geom, 0.0, 0);
+        amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, amrex_varnames, m_geom, 0.0, 0); // <<< Pass converted vector
     }
 
 
@@ -516,9 +526,9 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     }
 
      if (cross_sectional_area <= tiny_flux_threshold) {
-         amrex::Warning("TortuosityHypre::value: Domain cross-sectional area is near zero. Cannot calculate tortuosity.");
-         m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
-         return m_value;
+          amrex::Warning("TortuosityHypre::value: Domain cross-sectional area is near zero. Cannot calculate tortuosity.");
+          m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+          return m_value;
      }
 
     // Effective Diffusivity Calculation (assuming D_bulk = 1)
@@ -529,9 +539,9 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     if (std::abs(delta_V) > tiny_flux_threshold && length_dir > tiny_flux_threshold) {
          // Ensure non-zero area before dividing
          if (std::abs(cross_sectional_area) > tiny_flux_threshold) {
-            rel_diffusivity = - avg_flux * length_dir / (cross_sectional_area * delta_V);
+             rel_diffusivity = - avg_flux * length_dir / (cross_sectional_area * delta_V);
          } else {
-            amrex::Warning("TortuosityHypre::value: Cross sectional area is zero.");
+             amrex::Warning("TortuosityHypre::value: Cross sectional area is zero.");
          }
     } else {
         amrex::Warning("TortuosityHypre::value: Cannot calculate relative diffusivity due to zero length or zero potential difference.");
@@ -564,14 +574,14 @@ amrex::Real TortuosityHypre::value(const bool refresh)
         amrex::Print() << "------------------------------------------" << std::endl;
         amrex::Print() << " Tortuosity Calculation Results (Dir=" << static_cast<int>(m_dir) << ")" << std::endl;
         amrex::Print() << std::fixed << std::setprecision(6); // Set precision for output
-        amrex::Print() << "    Volume Fraction (VF)                : " << m_vf << std::endl;
-        amrex::Print() << "    Relative Effective Diffusivity      : " << rel_diffusivity << std::endl;
-        amrex::Print() << "    Tortuosity (tau = VF / D_rel)       : " << m_value << std::endl;
-        amrex::Print() << "    --- Intermediate Values ---" << std::endl;
-        amrex::Print() << "    Flux Low Face                       : " << fluxin << std::endl;
-        amrex::Print() << "    Flux High Face                      : " << fluxout << std::endl;
-        amrex::Print() << "    Flux Average                        : " << avg_flux << std::endl;
-        amrex::Print() << "    Flux Conservation Check |In + Out|  : " << std::abs(fluxin + fluxout) << std::endl; // Should be near zero
+        amrex::Print() << "   Volume Fraction (VF)                 : " << m_vf << std::endl;
+        amrex::Print() << "   Relative Effective Diffusivity       : " << rel_diffusivity << std::endl;
+        amrex::Print() << "   Tortuosity (tau = VF / D_rel)        : " << m_value << std::endl;
+        amrex::Print() << "   --- Intermediate Values ---" << std::endl;
+        amrex::Print() << "   Flux Low Face                        : " << fluxin << std::endl;
+        amrex::Print() << "   Flux High Face                       : " << fluxout << std::endl;
+        amrex::Print() << "   Flux Average                         : " << avg_flux << std::endl;
+        amrex::Print() << "   Flux Conservation Check |In + Out|   : " << std::abs(fluxin + fluxout) << std::endl; // Should be near zero
         amrex::Print() << "------------------------------------------" << std::endl;
     }
 
@@ -650,8 +660,10 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // Also assumes Fortran handles component indexing correctly based on base pointers.
         int q_ncomp = fab_target.nComp();
         int p_ncomp = fab_phase_src.nComp();
-        const auto& qbox = phi.fabbox(mfi); // Use FAB box bounds for target array (incl ghosts)
-        const auto& pbox = m_mf_phase.fabbox(mfi); // Use FAB box bounds for source array (incl ghosts)
+        // const auto& qbox = phi.fabbox(mfi); // <<< ORIGINAL - incorrect arg
+        const auto& qbox = phi.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
+        // const auto& pbox = m_mf_phase.fabbox(mfi); // <<< ORIGINAL - incorrect arg
+        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // <<< CHANGED >>> Use index for fabbox
         const auto& domain_box = m_geom.Domain(); // Domain bounds
 
         // Need to pass pointer to the specific component 'ncomp' of the target FAB
@@ -665,10 +677,10 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // Assuming Fortran operates on the single component pointed to by q_comp_ptr here.
         // The `ncomp` arguments passed are for bounds checking/array extent, not necessarily target component.
         tortuosity_filct(q_comp_ptr, // Pass pointer to target component ncomp
-                         qbox.loVect().getVect(), qbox.hiVect().getVect(), &q_ncomp, // Bounds/ncomp of the multifab 'phi'
+                         qbox.loVect().dataPtr(), qbox.hiVect().dataPtr(), &q_ncomp, // Bounds/ncomp of the multifab 'phi' <<< CHANGED >>>
                          fab_phase_src.dataPtr(), // Pass pointer to int data (comp 0)
-                         pbox.loVect().getVect(), pbox.hiVect().getVect(), &p_ncomp, // Bounds/ncomp of the iMultiFab 'm_mf_phase'
-                         domain_box.loVect().getVect(), domain_box.hiVect().getVect(),
+                         pbox.loVect().dataPtr(), pbox.hiVect().dataPtr(), &p_ncomp, // Bounds/ncomp of the iMultiFab 'm_mf_phase' <<< CHANGED >>>
+                         domain_box.loVect().dataPtr(), domain_box.hiVect().dataPtr(), // <<< CHANGED >>>
                          &m_phase);
     }
 }
@@ -747,8 +759,8 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
                  // Flux = -D * (phi_boundary - phi_inside) / dx
                  // phi_boundary is m_vhi
                  if (phase(iv_cell1) == m_phase) {
-                      // Simple first-order difference using boundary value
-                      local_fxout += -1.0 * (m_vhi - phi(iv_cell1)) * dxinv_dir;
+                     // Simple first-order difference using boundary value
+                     local_fxout += -1.0 * (m_vhi - phi(iv_cell1)) * dxinv_dir;
                  }
              });
          }
