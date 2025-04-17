@@ -1,5 +1,5 @@
 # GNU MakeFile for OpenImpala Diffusion Application and Tests
-# Corrected version: Removed explicit builddirs target, relying on mkdir -p in rules.
+# Corrected version 2: Uses Static Pattern Rules for compilation.
 
 # ============================================================
 # Environment Setup (Defaults set for the Singularity container)
@@ -47,7 +47,7 @@ PROPS_DIR     := build/props   # For Props object files
 
 MODULES       := io props
 SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
-BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props # Still useful for clean?
+BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
 
 # ============================================================
 # Source and Object Files
@@ -86,34 +86,39 @@ VPATH := $(subst $(space),:,$(SRC_DIRS)):src
 all: main tests
 
 # Main application executable (Diffusion)
-main: $(APP_DIR)/Diffusion # <<< Removed builddirs dependency
+main: $(APP_DIR)/Diffusion
 
 # Define test executables based on found test sources
 TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
-tests: $(TEST_EXECS) # <<< Removed builddirs dependency
+tests: $(TEST_EXECS)
 
 # ============================================================
-# Compilation Rules (Using Standard Pattern Rules)
+# Compilation Rules (Using Static Pattern Rules) # <<< SECTION REPLACED >>>
 # ============================================================
-# These rules should correctly find sources via VPATH
 
-# Rule for C++ objects in build/io
-$(IO_DIR)/%.o : %.cpp
+# Static Pattern Rule for C++ objects in build/io
+$(OBJECTS_IO_CPP): $(IO_DIR)/%.o : src/io/%.cpp
 	@echo "Compiling (IO) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
-# Rule for C++ objects (including tests) in build/props
-$(PROPS_DIR)/%.o : %.cpp
+# Static Pattern Rule for non-test C++ objects in build/props
+$(OBJECTS_PRP_CPP): $(PROPS_DIR)/%.o : src/props/%.cpp
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
-# Rule for F90 objects in build/props
-$(PROPS_DIR)/%.o : %.F90
+# Static Pattern Rule for F90 objects in build/props
+$(OBJECTS_PRP_F90): $(PROPS_DIR)/%.o : src/props/%.F90
 	@echo "Compiling (Props Fortran) $< ..."
-	@mkdir -p $(@D) $(INC_DIR) # <<< Ensure both obj and mod dirs exist
+	@mkdir -p $(@D) $(INC_DIR) # Ensure both obj and mod dirs exist
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
+
+# Static Pattern Rule for test C++ objects (output to build/props)
+$(OBJECTS_TST_CPP): $(PROPS_DIR)/%.o : src/props/%.cpp
+	@echo "Compiling (Test) $< ..."
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # ============================================================
 # Linking Executables
@@ -130,21 +135,19 @@ TEST_DEPS_BASE    := $(OBJECTS_APP) # Assume most tests need most app objects fo
 # Main application
 $(APP_DIR)/Diffusion: src/props/Diffusion.cpp $(APP_OBJS)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D) # <<< ADDED mkdir
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(APP_OBJS) $(LDFLAGS) # Link source + objects
 
 # Test executables (General rule using specific test object + base dependencies)
 # This links the specific t*.o file with TEST_DEPS_BASE
 $(TST_DIR)/t%: $(PROPS_DIR)/t%.o $(TEST_DEPS_BASE)
 	@echo "Linking $@ ..."
-	@mkdir -p $(@D) # <<< ADDED mkdir
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 # ============================================================
 # Supporting Targets
 # ============================================================
-
-# <<< REMOVED explicit builddirs target and mkdir rule >>>
 
 # Build environments (simple examples)
 debug: CXXFLAGS += -DDEBUG # Example C++ debug flag
