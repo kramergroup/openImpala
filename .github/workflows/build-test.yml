@@ -79,7 +79,7 @@ jobs:
 
       # <<< NEW DEBUG STEP - Check Indentation Carefully >>>
       # '-' below should align with '-' of step above (Level 3 = 6 spaces)
-      - name: Debug: Find AMReX Assert Header in Container
+      - name: Debug Find AMReX Assert Header in Container
         # 'run:' below should indent relative to '-' (Level 4 = 8 spaces)
         run: |
           # Lines below should indent relative to 'run:' (Level 5 = 10 spaces)
