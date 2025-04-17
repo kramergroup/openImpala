@@ -93,29 +93,29 @@ TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
 tests: $(TEST_EXECS)
 
 # ============================================================
-# Compilation Rules (Using Static Pattern Rules) # <<< SECTION REPLACED >>>
+# Compilation Rules (Using Static Pattern Rules - Adjusted Syntax) # <<< SECTION REVISED >>>
 # ============================================================
 
 # Static Pattern Rule for C++ objects in build/io
-$(OBJECTS_IO_CPP): $(IO_DIR)/%.o : src/io/%.cpp
+$(OBJECTS_IO_CPP): $(IO_DIR)/%.o: src/io/%.cpp # <<< Removed space before second colon
 	@echo "Compiling (IO) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Static Pattern Rule for non-test C++ objects in build/props
-$(OBJECTS_PRP_CPP): $(PROPS_DIR)/%.o : src/props/%.cpp
+$(OBJECTS_PRP_CPP): $(PROPS_DIR)/%.o: src/props/%.cpp # <<< Removed space before second colon
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Static Pattern Rule for F90 objects in build/props
-$(OBJECTS_PRP_F90): $(PROPS_DIR)/%.o : src/props/%.F90
+$(OBJECTS_PRP_F90): $(PROPS_DIR)/%.o: src/props/%.F90 # <<< Removed space before second colon
 	@echo "Compiling (Props Fortran) $< ..."
 	@mkdir -p $(@D) $(INC_DIR) # Ensure both obj and mod dirs exist
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
 
 # Static Pattern Rule for test C++ objects (output to build/props)
-$(OBJECTS_TST_CPP): $(PROPS_DIR)/%.o : src/props/%.cpp
+$(OBJECTS_TST_CPP): $(PROPS_DIR)/%.o: src/props/%.cpp # <<< Removed space before second colon
 	@echo "Compiling (Test) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
