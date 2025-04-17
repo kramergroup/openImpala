@@ -14,7 +14,7 @@
 #include <AMReX_BCUtil.H>
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_Loop.H>             // <<< For amrex::Loop >>>
-#include <AMReX_ParallelFor.H>      // <<< For amrex::ParallelFor >>>
+#include <AMReX_GpuLaunch.H>     // <<< For amrex::ParallelFor >>>
 #include <AMReX_GpuQualifiers.H>  // For AMREX_GPU_DEVICE etc.
 #include <AMReX_ParallelDescriptor.H> // For reductions etc.
 #include <AMReX_Array4.H>           // Explicit include for Array4 if needed
