@@ -92,6 +92,9 @@ main: $(APP_DIR)/Diffusion
 TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
 tests: $(TEST_EXECS)
 
+$(info *** Debug: IO_DIR = [${IO_DIR}])
+$(info *** Debug: OBJECTS_IO_CPP = [${OBJECTS_IO_CPP}])
+
 # ============================================================
 # Compilation Rules (Using Static Pattern Rules - Adjusted Syntax) # <<< SECTION REVISED >>>
 # ============================================================
