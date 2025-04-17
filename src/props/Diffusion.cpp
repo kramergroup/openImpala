@@ -359,23 +359,15 @@ int main(int argc, char* argv[])
                 // Instantiate using global scope since class is not in OpenImpala namespace
                 TortuosityHypre tortuosity_solver(
                     geom, ba, dm, mf_phase,
-                    actual_vf,      // Pass calculated volume fraction
-                    phase_id,       // Phase of interest
-                    dir,            // Direction to compute
-                    solver_type,    // Use variable already holding TortuosityHypre::SolverType
-                    results_dir.string(), // Pass results dir for potential plotfiles
-                    verbose,
-                    // Assuming TortuosityHypre constructor handles these now
-                    // Check TortuosityHypre.H for exact signature regarding plotfile, eps, maxiter
-                    // Example: Pass them if they are constructor arguments
-                     1.0, // vlo = 1.0 (Example - Check constructor defaults/needs)
-                     0.0, // vhi = 0.0 (Example - Check constructor defaults/needs)
-                     write_plotfile // Example: Pass write_plotfile if constructor needs it
-                    // hypre_eps,      // Pass solver tolerance
-                    // hypre_maxiter   // Pass solver max iterations
-                    // NOTE: The constructor in TortuosityHypre.H provided earlier did NOT
-                    // take hypre_eps, hypre_maxiter, or write_plotfile. Adjust this call
-                    // or the TortuosityHypre constructor as needed. Using defaults from header now.
+                    actual_vf,
+                    phase_id,
+                      dir,
+                    solver_type,
+                    results_dir.string(), // resultspath
+                    // Use defaults for vlo, vhi, verbose, or pass them if needed
+                    0.0, // vlo example
+                    1.0, // vhi example
+                    verbose // verbose
                 );
 
                 // <<< FIXED Scope for tortuosity_solver >>>
