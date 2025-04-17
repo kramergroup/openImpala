@@ -116,7 +116,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     tar -xzf hdf5-${HDF5_VERSION}.tar.gz && cd hdf5-${HDF5_VERSION}
     # Configure HDF5 for parallel I/O using the MPI wrappers now in PATH
     # Ensure zlib is found (installed via dnf into /usr)
-    CC=mpicc CXX=mpicxx FC=mpifort ./configure 
+    CC=mpicc CXX=mpicxx FC=mpifort ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
         --enable-shared \
@@ -168,7 +168,18 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Installing AMReX (make install) ---"
     make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
 
-    # Verification step (recommended during debugging)
+    # --- BEGIN NEW VERIFICATION ---
+    echo "--- Verifying AMReX header installation ---"
+    # Check specifically for the problematic header
+    find ${AMREX_INSTALL_PREFIX}/include -name AMReX_ParallelFor.H -print -quit | grep -q . || \
+      { echo "*** CRITICAL ERROR: AMReX_ParallelFor.H not found after install in ${AMREX_INSTALL_PREFIX}/include !"; \
+        echo "Listing contents of ${AMREX_INSTALL_PREFIX}/include:"; \
+        ls -lR ${AMREX_INSTALL_PREFIX}/include; \
+        exit 1; }
+    echo "--- AMReX_ParallelFor.H found in ${AMREX_INSTALL_PREFIX}/include ---"
+    # --- END NEW VERIFICATION ---
+
+    # Verification step (Your existing checks are still good)
     echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"
     ls -lR ${AMREX_INSTALL_PREFIX} || echo "!!! WARNING: Failed to list AMReX install directory!"
     find ${AMREX_INSTALL_PREFIX} -name "libamrex*.so" || echo "--- WARNING: No libamrex*.so files found in AMReX install directory ---"
@@ -242,6 +253,11 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     # (Variables like HDF5_HOME will be set based on %environment)
     export HDF5_VERSION=1.12.3 # Make sure version matches if needed directly
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION} # Define prefix for test section too
+    export AMREX_VERSION=23.11 # Define AMReX version for test section
+    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION} # Define AMReX prefix for test section
+    export HYPRE_VERSION=v2.30.0 # Define HYPRE version for test section
+    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION} # Define HYPRE prefix for test section
+    export OPENMPI_INSTALL_PREFIX=/usr/local # Define OpenMPI prefix for test section
 
     echo "--- Verifying Tool Versions ---";
     echo "Checking mpicc..."; which mpicc; mpicc --version
@@ -260,6 +276,12 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "Checking AMReX lib (${AMREX_INSTALL_PREFIX}/lib/libamrex.so)..."; ldd "${AMREX_INSTALL_PREFIX}/lib/libamrex.so"
     echo "Checking HYPRE lib (${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so)..."; ldd "${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so"
     echo "Checking OpenMPI lib (${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so)..."; ldd "${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so"
+
+    # Check AMReX header presence again in test, just in case
+    echo "--- Verifying AMReX header presence in test ---"
+    find ${AMREX_INSTALL_PREFIX}/include -name AMReX_ParallelFor.H -print -quit | grep -q . || \
+      { echo "*** TEST ERROR: AMReX_ParallelFor.H not found in ${AMREX_INSTALL_PREFIX}/include during test phase!"; exit 1; }
+    echo "--- AMReX_ParallelFor.H found during test phase ---"
 
     echo "--- Basic dependency container tests passed. ---"
 
