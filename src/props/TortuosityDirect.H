@@ -8,11 +8,12 @@
 #include <AMReX_BoxArray.H>
 #include <AMReX_Geometry.H> // Include Geometry explicitly
 #include <AMReX_DistributionMapping.H>
-#include <AMReX_Array.H>    // For amrex::Array
-#include "Tortuosity.H"   // Includes base class and enums under OpenImpala namespace
+#include <AMReX_Array.H>     // For amrex::Array
+#include <AMReX_GpuContainers.H> // For amrex::GpuArray (used for m_dxinv)
+#include "Tortuosity.H"      // Includes base class and enums under OpenImpala namespace
 
-#include <string>       // For std::string if needed (result paths etc.)
-#include <limits>       // For numeric_limits if using error codes like infinity
+#include <string>            // For std::string if needed (result paths etc.)
+#include <limits>            // For numeric_limits if using error codes like infinity
 
 // Forward declaration if needed, although includes seem sufficient
 // namespace amrex { class MultiFab; class iMultiFab; ... }
@@ -53,20 +54,25 @@ public:
      * @param phase The integer identifier of the phase for which tortuosity is calculated.
      * @param dir The principal direction (X, Y, or Z) for applying boundary conditions to drive flux.
      * @param eps Convergence criterion (e.g., relative residual norm) for the iterative solver.
-     * @param max_steps Maximum number of iterations allowed for the solver.
+     * @param n_steps Maximum number of iterations allowed for the solver. <<< Changed from size_t to int for consistency >>>
+     * @param plot_interval Frequency for checking residual and optionally plotting (0 disables). <<< ADDED Argument >>>
+     * @param plot_basename Base filename for diagnostic plotfiles. <<< ADDED Argument >>>
      * @param vlo Potential value applied at the low boundary in the specified direction.
      * @param vhi Potential value applied at the high boundary in the specified direction.
      */
     TortuosityDirect(const amrex::Geometry& geom,
-                     const amrex::BoxArray& ba,
-                     const amrex::DistributionMapping& dm,
-                     const amrex::iMultiFab& mf_phase, // Phase data input requires >= 1 ghost cell (verify!)
-                     const int phase,
-                     const OpenImpala::Direction dir,
-                     const amrex::Real eps,
-                     const size_t max_steps,
-                     const amrex::Real vlo,
-                     const amrex::Real vhi);
+                       const amrex::BoxArray& ba,
+                       const amrex::DistributionMapping& dm,
+                       const amrex::iMultiFab& mf_phase, // Phase data input
+                       const int phase,
+                       const OpenImpala::Direction dir,
+                       const amrex::Real eps,
+                       // const size_t max_steps, // Original was size_t
+                       const int n_steps,         // <<< Changed to int >>>
+                       const int plot_interval,         // <<< ADDED >>>
+                       const std::string& plot_basename, // <<< ADDED >>>
+                       const amrex::Real vlo,
+                       const amrex::Real vhi);
 
     // Override the virtual destructor from the base class
     ~TortuosityDirect() override = default; // Default is sufficient if no raw resources owned
@@ -102,7 +108,7 @@ public:
 
 private:
 
-    /** @brief Executes the iterative solver loop until convergence or max iterations. */
+    /** @brief Executes the iterative solver loop until convergence or max iterations. Returns true if converged. */
     bool solve();
 
     /**
@@ -114,7 +120,7 @@ private:
     void global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const;
 
     /**
-     * @brief Computes a residual norm (e.g., L2 norm of change) between two solution states.
+     * @brief Computes a residual norm (e.g., L1 norm of change) between two solution states.
      * Used as a convergence check in the iterative solver.
      * @param phiold MultiFab containing the solution from the previous iteration.
      * @param phinew MultiFab containing the solution from the current iteration.
@@ -129,36 +135,40 @@ private:
     void initializeFluxMultiFabs();
 
     /**
-     * @brief Applies boundary conditions to the ghost cells of the potential MultiFab.
-     * Uses the geometry and m_bc settings.
+     * @brief Applies boundary conditions to the ghost cells of the potential MultiFab for a specific component.
+     * Uses the geometry and m_bc settings. Primarily handles external Dirichlet.
      * @param phi The MultiFab whose ghost cells need filling based on BCs.
+     * @param comp The component index to fill boundary conditions for.
      */
-    void fillDomainBoundary(amrex::MultiFab& phi);
+    void fillDomainBoundary (amrex::MultiFab& phi, int comp);
+
 
     /**
-     * @brief Fills a component of a MultiFab with CellType information.
-     * This data can be used by kernels (like in advance()) to apply different logic
-     * based on cell location (e.g., near boundary, blocked, free).
-     * @param phi The MultiFab to fill (typically fills component PhaseComp).
-     * Requires at least numComponents components.
+     * @brief Fills a component of a MultiFab with CellType information (e.g., 0=blocked, 1=free).
+     * Based on the input phase data (m_mf_phase).
+     * @param phi The MultiFab to fill (typically fills component comp_ct).
+     * Requires at least 2 components.
      */
-    void fillCellTypes(amrex::MultiFab& phi); // Typically fills component PhaseComp
+    void fillCellTypes(amrex::MultiFab& phi); // Fills component comp_ct
 
     /**
-     * @brief Sets the initial guess for the potential field (phi).
-     * Often a linear interpolation between boundary values (m_vlo, m_vhi).
-     * @param phi The MultiFab to fill with the initial state.
+     * @brief Sets the initial guess for the potential field (phi component).
+     * Often a linear interpolation between boundary values (m_vlo, m_vhi) in the specified direction.
+     * @param phi The MultiFab to fill with the initial state (modifies comp_phi).
      */
-    void fillInitialState(amrex::MultiFab& phi);
+    void fillInitialState(amrex::MultiFab& phi); // Fills component comp_phi
 
 
     /**
      * @brief Performs one iteration of the Finite Volume solver (e.g., Jacobi, SOR).
-     * Calculates face fluxes and updates the potential field based on conservation laws.
-     * @param phi_old Input: Potential field from the previous iteration (requires ghost cells).
+     * Calculates face fluxes (updates m_flux) based on phi_old.
+     * Updates the potential field phi_new based on conservation laws using calculated fluxes.
+     * @param phi_old Input: Potential field from the previous iteration (requires filled ghost cells).
      * @param phi_new Output: Updated potential field for the current iteration.
+     * @param dt Timestep or relaxation parameter used in the update.
      */
-    void advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_new);
+    void advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_new, const amrex::Real& dt); // Added dt param
+
 
     // --- Member Variables ---
 
@@ -170,15 +180,16 @@ private:
 
     // Internal data structures
     amrex::Array<amrex::MultiFab, AMREX_SPACEDIM> m_flux; // Stores face fluxes
-    amrex::BCRec m_bc; // Describes boundary condition types
+    amrex::BCRec m_bc; // Describes boundary condition types for phi (comp 0)
 
     // Phase and Direction info
-    const int m_phase;                      // Phase ID to compute tortuosity for
-    const OpenImpala::Direction m_dir; // Principal direction for flux
+    const int m_phase;                       // Phase ID to compute tortuosity for
+    const OpenImpala::Direction m_dir;       // Principal direction for flux
 
     // Solver Control Parameters (set via constructor)
-    const size_t m_n_steps;             // Max iterations
-    const amrex::Real m_eps;            // Convergence tolerance
+    // const size_t m_n_steps; // Original was size_t
+    const int m_n_steps;           // <<< Changed to int >>> Max iterations
+    const amrex::Real m_eps;       // Convergence tolerance
 
     // Boundary Condition Values (set via constructor)
     const amrex::Real m_vlo; // Potential at low boundary face in m_dir
@@ -189,6 +200,12 @@ private:
     bool m_first_call;              // Flag for caching logic
     int m_last_iterations;          // Iterations used in last solve
     amrex::Real m_last_residual;    // Residual achieved in last solve
+
+    // <<< ADDED Missing Member Declarations >>>
+    amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> m_dxinv; // Inverse cell sizes (calculated in constructor)
+    int m_plot_interval;                            // Plotting frequency (from constructor)
+    std::string m_plot_basename;                    // Base name for plotfiles (from constructor)
+
 };
 
 } // namespace OpenImpala
