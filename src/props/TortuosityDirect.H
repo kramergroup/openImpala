@@ -8,12 +8,12 @@
 #include <AMReX_BoxArray.H>
 #include <AMReX_Geometry.H> // Include Geometry explicitly
 #include <AMReX_DistributionMapping.H>
-#include <AMReX_Array.H>     // For amrex::Array
-#include <AMReX_GpuContainers.H> // <<< ADDED for amrex::GpuArray (used for m_dxinv) >>>
-#include "Tortuosity.H"      // Includes base class and enums under OpenImpala namespace
+#include <AMReX_Array.H>          // For amrex::Array (Needed for m_dxinv)
+// #include <AMReX_GpuContainers.H> // <<< REMOVED: No longer needed for GpuArray >>>
+#include "Tortuosity.H"          // Includes base class and enums under OpenImpala namespace
 
-#include <string>            // For std::string
-#include <limits>            // For numeric_limits
+#include <string>                // For std::string
+#include <limits>                // For numeric_limits
 
 // Forward declaration if needed, although includes seem sufficient
 // namespace amrex { class MultiFab; class iMultiFab; ... }
@@ -61,18 +61,18 @@ public:
      * @param vhi Potential value applied at the high boundary in the specified direction.
      */
     TortuosityDirect(const amrex::Geometry& geom,
-                       const amrex::BoxArray& ba,
-                       const amrex::DistributionMapping& dm,
-                       const amrex::iMultiFab& mf_phase, // Phase data input
-                       const int phase,
-                       const OpenImpala::Direction dir,
-                       const amrex::Real eps,
-                       // const size_t max_steps, // Original was size_t
-                       const int n_steps,            // <<< Changed to int >>>
-                       const int plot_interval,      // <<< ADDED >>>
-                       const std::string& plot_basename, // <<< ADDED >>>
-                       const amrex::Real vlo,
-                       const amrex::Real vhi);
+                     const amrex::BoxArray& ba,
+                     const amrex::DistributionMapping& dm,
+                     const amrex::iMultiFab& mf_phase, // Phase data input
+                     const int phase,
+                     const OpenImpala::Direction dir,
+                     const amrex::Real eps,
+                     // const size_t max_steps, // Original was size_t
+                     const int n_steps,           // <<< Changed to int >>>
+                     const int plot_interval,       // <<< ADDED >>>
+                     const std::string& plot_basename, // <<< ADDED >>>
+                     const amrex::Real vlo,
+                     const amrex::Real vhi);
 
     // Override the virtual destructor from the base class
     ~TortuosityDirect() override = default; // Default is sufficient if no raw resources owned
@@ -129,10 +129,12 @@ private:
     amrex::Real residual(const amrex::MultiFab& phiold, const amrex::MultiFab& phinew) const;
 
     /** @brief Sets up the m_bc member variable describing boundary condition types (e.g., Dirichlet, Neumann). */
-    void initializeBoundaryConditions() ;
+    // void initializeBoundaryConditions() ; // FIX 2: Corrected spelling
+    void initializeBoundaryConditions(); // <<< FIX 2: Corrected spelling >>>
 
     /** @brief Creates and initializes the m_flux MultiFab array for storing face fluxes. */
-    void initializeFluxMultiFabs();
+    // void initializeFluxMultiFabs();    // FIX 2: Corrected spelling
+    void initializeFluxMultiFabs();    // <<< FIX 2: Corrected spelling >>>
 
     /**
      * @brief Applies boundary conditions to the ghost cells of the potential MultiFab for a specific component.
@@ -183,29 +185,30 @@ private:
     amrex::BCRec m_bc; // Describes boundary condition types for phi (comp 0)
 
     // Phase and Direction info
-    const int m_phase;                       // Phase ID to compute tortuosity for
-    const OpenImpala::Direction m_dir;       // Principal direction for flux
+    const int m_phase;                     // Phase ID to compute tortuosity for
+    const OpenImpala::Direction m_dir;     // Principal direction for flux
 
     // Solver Control Parameters (set via constructor)
-    const int m_n_steps;           // <<< Changed type >>> Max iterations
-    const amrex::Real m_eps;       // Convergence tolerance
+    const int m_n_steps;         // <<< Changed type >>> Max iterations
+    const amrex::Real m_eps;     // Convergence tolerance
 
     // Boundary Condition Values (set via constructor)
     const amrex::Real m_vlo; // Potential at low boundary face in m_dir
     const amrex::Real m_vhi; // Potential at high boundary face in m_dir
 
     // Caching and Diagnostics
-    amrex::Real m_value;            // Cached tortuosity value
-    bool m_first_call;              // Flag for caching logic
-    int m_last_iterations;          // Iterations used in last solve
-    amrex::Real m_last_residual;    // Residual achieved in last solve
+    amrex::Real m_value;           // Cached tortuosity value
+    bool m_first_call;             // Flag for caching logic
+    int m_last_iterations;         // Iterations used in last solve
+    amrex::Real m_last_residual;   // Residual achieved in last solve
 
-    // <<< ADDED Missing Member Declarations >>>
-    amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> m_dxinv; // Inverse cell sizes (calculated in constructor)
-    int m_plot_interval;                            // Plotting frequency (from constructor)
-    std::string m_plot_basename;                    // Base name for plotfiles (from constructor)
+    // <<< ADDED Missing Member Declarations (from .cpp analysis) >>>
+    // FIX 1: Changed GpuArray to Array for CPU compatibility
+    amrex::Array<amrex::Real, AMREX_SPACEDIM> m_dxinv; // Inverse cell sizes (calculated in constructor)
+    int m_plot_interval;                 // Plotting frequency (from constructor)
+    std::string m_plot_basename;         // Base name for plotfiles (from constructor)
 
-};
+}; // class TortuosityDirect
 
 } // namespace OpenImpala
 
