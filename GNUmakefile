@@ -6,11 +6,11 @@
 # ============================================================
 # Default paths matching the Singularity container build.
 # Can still be overridden by setting environment variables before running make.
-AMREX_HOME    ?= /opt/amrex/23.11
-HYPRE_HOME    ?= /opt/hypre/v2.30.0
-HDF5_HOME     ?= /opt/hdf5/1.12.3
-H5CPP_HOME    ?= $(HDF5_HOME)
-TIFF_HOME     ?= /usr
+AMREX_HOME    ?= /opt/amrex/23.11
+HYPRE_HOME    ?= /opt/hypre/v2.30.0
+HDF5_HOME     ?= /opt/hdf5/1.12.3
+H5CPP_HOME    ?= $(HDF5_HOME)
+TIFF_HOME     ?= /usr
 
 # ============================================================
 # Compilers and Flags
