@@ -88,7 +88,7 @@ VPATH := $(subst $(space),:,$(SRC_DIRS)):src
 # ============================================================
 # Main Targets
 # ============================================================
-.PHONY: all main tests clean debug release
+.PHONY: all main tests test clean debug release
 
 all: main tests
 
@@ -98,6 +98,34 @@ main: $(APP_DIR)/Diffusion
 # Define test executables based on found test sources
 TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
 tests: $(TEST_EXECS_IO) $(TEST_EXECS_PRP)
+
+# Target to run the tests after they are built
+test: tests
+	@echo ""
+	@echo "--- Running Tests ---"
+	@passed_all=true; \
+	list_of_tests='$(TEST_EXECS_IO) $(TEST_EXECS_PRP)'; \
+	if [ -z "$$list_of_tests" ]; then \
+	    echo "No test executables found to run."; \
+	else \
+	    for tst in $$list_of_tests; do \
+	        echo "Running test $$tst..."; \
+	        if mpirun -np 1 $$tst; then \
+	            echo "  PASS: $$tst"; \
+	        else \
+	            echo "  FAIL: $$tst"; \
+	            passed_all=false; \
+	        fi; \
+	    done; \
+	fi; \
+	echo "--- Test Summary ---"; \
+	if $$passed_all; then \
+	    echo "All tests passed."; \
+	    exit 0; \
+	else \
+	    echo "ERROR: One or more tests failed."; \
+	    exit 1; \
+	fi
 
 # ============================================================
 # Compilation Rules (Using Structure Similar to Working v2)
