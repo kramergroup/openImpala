@@ -128,6 +128,3 @@ void tortuosity_poisson_fio (const int* lo, const int* hi,
 #endif
 
 #endif // TORTUOSITY_POISSON_F_H_
-```
-
-Now the C++ declaration matches the updated Fortran `bind(c)` interface. Remember you still need to update the actual C++ *call* to this function in `TortuosityDirect.cpp` to pass the number of componen
