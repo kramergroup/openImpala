@@ -110,21 +110,21 @@ tests: $(TEST_EXECS)
 
 # Static Pattern Rule for C++ objects in build/io
 # <<< FIX: Removed second colon >>>
-$(OBJECTS_IO_LIB) $(OBJECTS_IO_TESTS): $(IO_DIR)/%.o : src/io/%.cpp
+$(OBJECTS_IO_LIB) $(OBJECTS_IO_TESTS): $(IO_DIR)/%.o: src/io/%.cpp
 	@echo "Compiling (IO) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Static Pattern Rule for C++ objects in build/props
 # <<< FIX: Removed second colon >>>
-$(OBJECTS_PRP_LIB) $(OBJECTS_APP_DRIVER) $(OBJECTS_PRP_TESTS): $(PROPS_DIR)/%.o : src/props/%.cpp
+$(OBJECTS_PRP_LIB) $(OBJECTS_APP_DRIVER) $(OBJECTS_PRP_TESTS): $(PROPS_DIR)/%.o: src/props/%.cpp
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Static Pattern Rule for F90 objects in build/props
 # <<< FIX: Removed second colon >>>
-$(OBJECTS_F90_LIB): $(PROPS_DIR)/%.o : src/props/%.F90
+$(OBJECTS_F90_LIB): $(PROPS_DIR)/%.o: src/props/%.F90
 	@echo "Compiling (Props Fortran) $< ..."
 	@mkdir -p $(@D) $(INC_DIR) # Ensure both obj and mod dirs exist
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
