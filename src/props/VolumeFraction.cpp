@@ -3,8 +3,11 @@
 // AMReX includes
 #include <AMReX_iMultiFab.H>
 #include <AMReX_ParallelReduce.H> // For ParallelAllReduce::Sum
-#include <AMReX_Reduce.H>       // For amrex::ReduceSum
-#include <AMReX_MultiFabUtil.H> // For amrex::Loop, Array4
+#include <AMReX_Reduce.H>         // For amrex::Reduce::Sum
+#include <AMReX_MultiFabUtil.H>   // For Array4 (implicitly included?), needed for const_array
+#include <AMReX_MFIter.H>         // <<< ADDED for MFIter >>>
+#include <AMReX_GpuQualifiers.H>  // <<< ADDED for AMREX_GPU_DEVICE >>>
+#include <AMReX.H>                // Included transitively, but good practice
 
 namespace OpenImpala // Use the same namespace as in the header
 {
@@ -12,9 +15,9 @@ namespace OpenImpala // Use the same namespace as in the header
     // --- Constructor ---
 
     VolumeFraction::VolumeFraction(const amrex::iMultiFab& fm, const int phase, int comp)
-      : m_mf(fm),         // Initialize const reference member
-        m_phase(phase),   // Initialize const int member
-        m_comp(comp)      // Initialize int member
+      : m_mf(fm),        // Initialize const reference member
+        m_phase(phase),  // Initialize const int member
+        m_comp(comp)     // Initialize int member
     {
         // Check that the specified component index is valid for the given MultiFab
         AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_comp >= 0 && m_comp < m_mf.nComp(),
@@ -39,16 +42,19 @@ namespace OpenImpala // Use the same namespace as in the header
 #ifdef AMREX_USE_OMP
 #pragma omp parallel reduction(+:local_phase_count, local_total_count)
 #endif
-        for (amrex::MFIter mfi(m_mf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        // FIX 1: Add amrex:: namespace for TilingIfNotGPU
+        for (amrex::MFIter mfi(m_mf, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
             const amrex::Box& bx = mfi.tilebox(); // Use tilebox for potential OMP tiling
             const auto& fab = m_mf.const_array(mfi, phase_comp); // Get Array4 for the correct component
 
             // Use ReduceSum on the tilebox to count cells where fab(i,j,k) == target_phase
             // The lambda returns 1LL (long long 1) if condition met, 0LL otherwise
-            long long box_phase_count = amrex::Reduce::Sum(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> long long {
-                return (fab(i, j, k) == target_phase) ? 1LL : 0LL;
-            });
+            // FIX 2: Add initial value 0LL to Reduce::Sum
+            long long box_phase_count = amrex::Reduce::Sum(bx,
+                [=] AMREX_GPU_DEVICE (int i, int j, int k) -> long long {
+                    return (fab(i, j, k) == target_phase) ? 1LL : 0LL;
+                }, 0LL ); // <<< Added 0LL initial value
 
             local_phase_count += box_phase_count;
             local_total_count += bx.numPts(); // Add number of cells in this tilebox
