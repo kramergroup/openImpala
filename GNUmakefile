@@ -113,7 +113,7 @@ test: tests
 	else \
 	    for tst in $$list_of_tests; do \
 	        echo "Running test $$tst..."; \
-	        if mpirun -np 1 $$tst; then \
+	        if mpirun -np 1 --allow-run-as-root $$tst; then \
 	            echo "  PASS: $$tst"; \
 	        else \
 	            echo "  FAIL: $$tst"; \
