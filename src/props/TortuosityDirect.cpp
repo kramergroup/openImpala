@@ -255,7 +255,6 @@ void TortuosityDirect::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) cons
         {
             const amrex::Box& bx = mfi.tilebox();
 
-            // Get Array4 view, then pointer
             const auto& fx_arr = m_flux[0].const_array(mfi);
             const auto& fy_arr = m_flux[1].const_array(mfi);
             const auto& fz_arr = m_flux[2].const_array(mfi);
@@ -267,7 +266,6 @@ void TortuosityDirect::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) cons
             const auto& fybox = m_flux[1].box(mfi.index());
             const auto& fzbox = m_flux[2].box(mfi.index());
 
-            // Pass raw pointers for box bounds
             tortuosity_poisson_fio(bx.loVect(), bx.hiVect(),
                                    fx_ptr, fxbox.loVect(), fxbox.hiVect(),
                                    fy_ptr, fybox.loVect(), fybox.hiVect(),
@@ -295,7 +293,6 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
         {
             const amrex::Box& bx = mfi.tilebox();
 
-            // FIX 1: Get Array4 by value (auto, not auto&)
             auto fx_arr = m_flux[0].array(mfi);
             auto fy_arr = m_flux[1].array(mfi);
             auto fz_arr = m_flux[2].array(mfi);
@@ -313,7 +310,6 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
 
             const amrex::Real* dxinv_ptr = m_dxinv.data(); // Assumes m_dxinv is amrex::Array
 
-            // Pass raw pointers for box bounds
             tortuosity_poisson_flux(bx.loVect(), bx.hiVect(),
                                     fx_ptr, fxbox.loVect(), fxbox.hiVect(),
                                     fy_ptr, fybox.loVect(), fybox.hiVect(),
@@ -327,13 +323,11 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
             const amrex::Box& bx = mfi.tilebox();
 
             const auto& p_arr = phi_old.const_array(mfi);
-            // FIX 1: Get Array4 by value (auto, not auto&)
             auto        n_arr = phi_new.array(mfi);
             const auto& fx_arr = m_flux[0].const_array(mfi);
             const auto& fy_arr = m_flux[1].const_array(mfi);
             const auto& fz_arr = m_flux[2].const_array(mfi);
 
-            // FIX 2: Call dataPtr() with no arguments
             const auto* p_ptr = p_arr.dataPtr();
             auto* n_ptr = n_arr.dataPtr();
             const auto* fx_ptr = fx_arr.dataPtr();
@@ -348,20 +342,20 @@ void TortuosityDirect::advance(amrex::MultiFab& phi_old, amrex::MultiFab& phi_ne
 
             const amrex::Real* dxinv_ptr = m_dxinv.data(); // Assumes m_dxinv is amrex::Array
 
-            // Pass raw pointers for box bounds
+            // *** FIX: Add ncomp argument to the call ***
+            const int ncomp_val = phi_new.nComp(); // Get number of components
+
             tortuosity_poisson_update(bx.loVect(), bx.hiVect(),
                                       p_ptr, pbox.loVect(), pbox.hiVect(),
                                       n_ptr, nbox.loVect(), nbox.hiVect(),
                                       fx_ptr, fxbox.loVect(), fxbox.hiVect(),
                                       fy_ptr, fybox.loVect(), fybox.hiVect(),
                                       fz_ptr, fzbox.loVect(), fzbox.hiVect(),
+                                      &ncomp_val, // Pass address of ncomp
                                       dxinv_ptr,
                                       &dt);
 
             // Ensure cell type remains unchanged in phi_new (copy from phi_old)
-            // FIX 3: Use direct Array4 component access
-            // Removed incorrect getConstArray/array calls
-            // Assuming p_arr and n_arr cover all components
             amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept {
                 n_arr(i,j,k, comp_ct) = p_arr(i,j,k, comp_ct);
             });
@@ -400,25 +394,18 @@ amrex::Real TortuosityDirect::residual(const amrex::MultiFab& phi_old, const amr
 
 void TortuosityDirect::initializeBoundaryConditions()
 {
-    // FIX 4: Use default BCRec constructor
-    m_bc = amrex::BCRec();
+    m_bc = amrex::BCRec(); // Use default constructor
 
     // Set default Neumann conditions for component 0
     for (int i=0; i<AMREX_SPACEDIM; ++i)
     {
-        // FIX 5: Use 2-argument setLo/setHi and cast enum type
         m_bc.setLo(i, static_cast<int>(amrex::BCType::reflect_even));
         m_bc.setHi(i, static_cast<int>(amrex::BCType::reflect_even));
     }
 
     // Set Dirichlet for component comp_phi (0) in the specified direction
-    // FIX 5: Use 2-argument setLo/setHi and cast enum type and direction
     m_bc.setLo(static_cast<int>(m_dir), static_cast<int>(amrex::BCType::ext_dir));
     m_bc.setHi(static_cast<int>(m_dir), static_cast<int>(amrex::BCType::ext_dir));
-
-    // NOTE: BCRec implicitly applies to component 0. Component 1 (cell type)
-    // boundary conditions are not explicitly set here and will likely rely
-    // on FillBoundary behavior or how it's handled in Fortran.
 }
 
 void TortuosityDirect::fillCellTypes(amrex::MultiFab& phi)
@@ -438,7 +425,6 @@ void TortuosityDirect::fillCellTypes(amrex::MultiFab& phi)
         const auto& qbox = phi.box(mfi.LocalTileIndex());
         const auto& pbox = m_mf_phase.box(mfi.LocalTileIndex());
 
-        // Pass raw pointers for box bounds
         tortuosity_filct(phi_arr.dataPtr(),
                          qbox.loVect(), qbox.hiVect(), &q_ncomp,
                          phase_arr.dataPtr(),
@@ -468,7 +454,6 @@ void TortuosityDirect::fillInitialState(amrex::MultiFab& phi)
         const auto& qbox = phi.box(mfi.LocalTileIndex());
         const auto& pbox = m_mf_phase.box(mfi.LocalTileIndex());
 
-        // Pass raw pointers for box bounds
         tortuosity_filic(phi_arr.dataPtr(),
                          qbox.loVect(), qbox.hiVect(), &q_ncomp,
                          phase_arr.dataPtr(),
@@ -484,27 +469,19 @@ void TortuosityDirect::fillInitialState(amrex::MultiFab& phi)
 
 void TortuosityDirect::fillDomainBoundary (amrex::MultiFab& phi, int comp)
 {
-    // This function applies EXT_DIR BCs for the specified component `comp`
-    // using the information stored implicitly for component 0 in m_bc
-    // and the boundary values m_vlo, m_vhi.
-
-    // Only apply if the requested component is comp_phi
     if (comp != comp_phi) return;
 
     const amrex::Box& domain_box = m_geom.Domain();
 
-    // Temporary C array for boundary condition flags (1=Dirichlet, 0=Other)
     int bc_c_array[AMREX_SPACEDIM*2];
     for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
         auto map_bc = [&](int amrex_bc_type_int) -> int {
             if (amrex_bc_type_int == static_cast<int>(amrex::BCType::ext_dir)) return 1;
             return 0;
         };
-        // FIX 6: Use single argument lo/hi
         bc_c_array[idim*2 + 0] = map_bc(m_bc.lo(idim));
         bc_c_array[idim*2 + 1] = map_bc(m_bc.hi(idim));
     }
-
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
@@ -513,7 +490,6 @@ void TortuosityDirect::fillDomainBoundary (amrex::MultiFab& phi, int comp)
     {
         const amrex::Box& fab_box_ghosts = mfi.fabbox();
 
-        // Only call on boxes that touch the physical domain boundary
         bool touches_boundary = !domain_box.contains(fab_box_ghosts);
         if (touches_boundary)
         {
@@ -522,9 +498,7 @@ void TortuosityDirect::fillDomainBoundary (amrex::MultiFab& phi, int comp)
              int q_ncomp = phi.nComp();
              const auto& qbox = phi.box(mfi.LocalTileIndex());
 
-             // Pass base pointer for the Array4. Fortran routine must handle component logic.
-             // Pass raw pointers for box bounds
-             tortuosity_filbc(phi_arr.dataPtr(), // Pass base pointer
+             tortuosity_filbc(phi_arr.dataPtr(),
                               qbox.loVect(), qbox.hiVect(), &q_ncomp,
                               domain_box.loVect(), domain_box.hiVect(),
                               &m_vlo, &m_vhi,

@@ -23,21 +23,21 @@ extern "C" {
  * Sets flux to zero if either adjacent cell is 'blocked' (cell type 0).
  * Assumes unit diffusivity (D=1) or diffusivity is handled elsewhere.
  *
- * @param[in] lo      Pointer to lower corner of the valid region (i,j,k) in the C++ indexing space.
- * @param[in] hi      Pointer to upper corner of the valid region (i,j,k) in the C++ indexing space.
- * @param[out] fx     Pointer to the X-face flux array data (output).
- * @param[in] fxlo    Pointer to lower corner of the fx array Fortran bounds.
- * @param[in] fxhi    Pointer to upper corner of the fx array Fortran bounds.
- * @param[out] fy     Pointer to the Y-face flux array data (output).
- * @param[in] fylo    Pointer to lower corner of the fy array Fortran bounds.
- * @param[in] fyhi    Pointer to upper corner of the fy array Fortran bounds.
- * @param[out] fz     Pointer to the Z-face flux array data (output).
- * @param[in] fzlo    Pointer to lower corner of the fz array Fortran bounds.
- * @param[in] fzhi    Pointer to upper corner of the fz array Fortran bounds.
- * @param[in] sol     Pointer to the input solution array data (contains phi at Fortran comp 1, cell type at Fortran comp 2).
- * @param[in] slo     Pointer to lower corner of the sol array Fortran bounds (including ghost cells).
- * @param[in] shi     Pointer to upper corner of the sol array Fortran bounds (including ghost cells).
- * @param[in] dxinv   Pointer to array[3] of inverse cell sizes (1/dx, 1/dy, 1/dz).
+ * @param[in] lo     Pointer to lower corner of the valid region (i,j,k) in the C++ indexing space.
+ * @param[in] hi     Pointer to upper corner of the valid region (i,j,k) in the C++ indexing space.
+ * @param[out] fx    Pointer to the X-face flux array data (output).
+ * @param[in] fxlo   Pointer to lower corner of the fx array Fortran bounds.
+ * @param[in] fxhi   Pointer to upper corner of the fx array Fortran bounds.
+ * @param[out] fy    Pointer to the Y-face flux array data (output).
+ * @param[in] fylo   Pointer to lower corner of the fy array Fortran bounds.
+ * @param[in] fyhi   Pointer to upper corner of the fy array Fortran bounds.
+ * @param[out] fz    Pointer to the Z-face flux array data (output).
+ * @param[in] fzlo   Pointer to lower corner of the fz array Fortran bounds.
+ * @param[in] fzhi   Pointer to upper corner of the fz array Fortran bounds.
+ * @param[in] sol    Pointer to the input solution array data (contains phi at Fortran comp 1, cell type at Fortran comp 2).
+ * @param[in] slo    Pointer to lower corner of the sol array Fortran bounds (including ghost cells).
+ * @param[in] shi    Pointer to upper corner of the sol array Fortran bounds (including ghost cells).
+ * @param[in] dxinv  Pointer to array[3] of inverse cell sizes (1/dx, 1/dy, 1/dz).
  */
 void tortuosity_poisson_flux (const int* lo, const int* hi,
                               amrex_real* fx, const int* fxlo, const int* fxhi,
@@ -56,26 +56,28 @@ void tortuosity_poisson_flux (const int* lo, const int* hi,
  *
  * Performs one step: n = p + dt * Div(Flux), approximating d(phi)/dt = Div(Flux).
  * Assumes fluxes were computed by tortuosity_poisson_flux.
+ * Assumes p and n are 4D arrays in Fortran including component dimension.
  *
- * @param[in] lo      Pointer to lower corner of the valid region (i,j,k) to update.
- * @param[in] hi      Pointer to upper corner of the valid region (i,j,k) to update.
- * @param[in] p       Pointer to the old solution array data (phi at Fortran comp 1).
- * @param[in] plo     Pointer to lower corner of the p array Fortran bounds.
- * @param[in] phi     Pointer to upper corner of the p array Fortran bounds.
- * @param[out] n      Pointer to the new solution array data (phi at Fortran comp 1) (output).
- * @param[in] nlo     Pointer to lower corner of the n array Fortran bounds.
- * @param[in] nhi     Pointer to upper corner of the n array Fortran bounds.
- * @param[in] fx      Pointer to the X-face flux array data (input).
- * @param[in] fxlo    Pointer to lower corner of the fx array Fortran bounds.
- * @param[in] fxhi    Pointer to upper corner of the fx array Fortran bounds.
- * @param[in] fy      Pointer to the Y-face flux array data (input).
- * @param[in] fylo    Pointer to lower corner of the fy array Fortran bounds.
- * @param[in] fyhi    Pointer to upper corner of the fy array Fortran bounds.
- * @param[in] fz      Pointer to the Z-face flux array data (input).
- * @param[in] fzlo    Pointer to lower corner of the fz array Fortran bounds.
- * @param[in] fzhi    Pointer to upper corner of the fz array Fortran bounds.
- * @param[in] dxinv   Pointer to array[3] of inverse cell sizes (1/dx, 1/dy, 1/dz).
- * @param[in] dt      Pointer to the time step (or relaxation factor). Passed by reference from Fortran default bind(c).
+ * @param[in] lo     Pointer to lower corner of the valid region (i,j,k) to update.
+ * @param[in] hi     Pointer to upper corner of the valid region (i,j,k) to update.
+ * @param[in] p      Pointer to the old solution array data (phi at Fortran comp 1).
+ * @param[in] plo    Pointer to lower corner of the p array Fortran bounds.
+ * @param[in] phi    Pointer to upper corner of the p array Fortran bounds.
+ * @param[out] n     Pointer to the new solution array data (phi at Fortran comp 1) (output).
+ * @param[in] nlo    Pointer to lower corner of the n array Fortran bounds.
+ * @param[in] nhi    Pointer to upper corner of the n array Fortran bounds.
+ * @param[in] fx     Pointer to the X-face flux array data (input).
+ * @param[in] fxlo   Pointer to lower corner of the fx array Fortran bounds.
+ * @param[in] fxhi   Pointer to upper corner of the fx array Fortran bounds.
+ * @param[in] fy     Pointer to the Y-face flux array data (input).
+ * @param[in] fylo   Pointer to lower corner of the fy array Fortran bounds.
+ * @param[in] fyhi   Pointer to upper corner of the fy array Fortran bounds.
+ * @param[in] fz     Pointer to the Z-face flux array data (input).
+ * @param[in] fzlo   Pointer to lower corner of the fz array Fortran bounds.
+ * @param[in] fzhi   Pointer to upper corner of the fz array Fortran bounds.
+ * @param[in] ncomp  Pointer to the number of components in p and n arrays. Passed by reference. <<< ADDED >>>
+ * @param[in] dxinv  Pointer to array[3] of inverse cell sizes (1/dx, 1/dy, 1/dz).
+ * @param[in] dt     Pointer to the time step (or relaxation factor). Passed by reference from Fortran default bind(c).
  */
 void tortuosity_poisson_update (const int* lo, const int* hi,
                                 const amrex_real* p, const int* plo, const int* phi,
@@ -83,6 +85,7 @@ void tortuosity_poisson_update (const int* lo, const int* hi,
                                 const amrex_real* fx, const int* fxlo, const int* fxhi,
                                 const amrex_real* fy, const int* fylo, const int* fyhi,
                                 const amrex_real* fz, const int* fzlo, const int* fzhi,
+                                const int* ncomp, // <<< ADDED ncomp argument >>>
                                 const amrex_real* dxinv, const amrex_real* dt);
 
 
@@ -98,18 +101,18 @@ void tortuosity_poisson_update (const int* lo, const int* hi,
  * considering only the portion relevant to the box defined by lo/hi.
  * Checks ownership of boundary face data using flux array bounds (fxlo/hi etc.).
  *
- * @param[in] lo      Pointer to lower corner of the valid region (i,j,k) for this box.
- * @param[in] hi      Pointer to upper corner of the valid region (i,j,k) for this box.
- * @param[in] fx      Pointer to the X-face flux array data (input).
- * @param[in] fxlo    Pointer to lower corner of the fx array Fortran bounds.
- * @param[in] fxhi    Pointer to upper corner of the fx array Fortran bounds.
- * @param[in] fy      Pointer to the Y-face flux array data (input).
- * @param[in] fylo    Pointer to lower corner of the fy array Fortran bounds.
- * @param[in] fyhi    Pointer to upper corner of the fy array Fortran bounds.
- * @param[in] fz      Pointer to the Z-face flux array data (input).
- * @param[in] fzlo    Pointer to lower corner of the fz array Fortran bounds.
- * @param[in] fzhi    Pointer to upper corner of the fz array Fortran bounds.
- * @param[in] dir     Pointer to the direction index (0=X, 1=Y, 2=Z). Passed by reference from Fortran default bind(c).
+ * @param[in] lo       Pointer to lower corner of the valid region (i,j,k) for this box.
+ * @param[in] hi       Pointer to upper corner of the valid region (i,j,k) for this box.
+ * @param[in] fx       Pointer to the X-face flux array data (input).
+ * @param[in] fxlo     Pointer to lower corner of the fx array Fortran bounds.
+ * @param[in] fxhi     Pointer to upper corner of the fx array Fortran bounds.
+ * @param[in] fy       Pointer to the Y-face flux array data (input).
+ * @param[in] fylo     Pointer to lower corner of the fy array Fortran bounds.
+ * @param[in] fyhi     Pointer to upper corner of the fy array Fortran bounds.
+ * @param[in] fz       Pointer to the Z-face flux array data (input).
+ * @param[in] fzlo     Pointer to lower corner of the fz array Fortran bounds.
+ * @param[in] fzhi     Pointer to upper corner of the fz array Fortran bounds.
+ * @param[in] dir      Pointer to the direction index (0=X, 1=Y, 2=Z). Passed by reference from Fortran default bind(c).
  * @param[out] flux_in Pointer to store the total flux entering on the low face (output).
  * @param[out] flux_out Pointer to store the total flux exiting on the high face (output).
  */
@@ -125,3 +128,6 @@ void tortuosity_poisson_fio (const int* lo, const int* hi,
 #endif
 
 #endif // TORTUOSITY_POISSON_F_H_
+```
+
+Now the C++ declaration matches the updated Fortran `bind(c)` interface. Remember you still need to update the actual C++ *call* to this function in `TortuosityDirect.cpp` to pass the number of componen
