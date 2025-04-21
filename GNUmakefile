@@ -1,5 +1,5 @@
 # GNU MakeFile for OpenImpala Diffusion Application and Tests
-# Corrected version 2: Uses Static Pattern Rules for compilation.
+# Corrected version 3: Fixes linker errors.
 
 # ============================================================
 # Environment Setup (Defaults set for the Singularity container)
@@ -23,57 +23,66 @@ F90FLAGS      := -g -O3
 
 # Include project source dir and dependency includes
 INCLUDE       := -Isrc \
-		 -Isrc/props \
+                 -Isrc/props \
+                 -Isrc/io \
                  -I$(AMREX_HOME)/include \
                  -I$(HYPRE_HOME)/include \
                  -I$(HDF5_HOME)/include \
                  -I$(TIFF_HOME)/include
 
 # Linker Flags
+# <<< FIX: Added -lgfortran >>>
 LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
                  -L$(HYPRE_HOME)/lib -lHYPRE \
                  -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
                  -L$(TIFF_HOME)/lib64 -ltiff \
-                 -lm
+                 -lm \
+                 -lgfortran
 
 # ============================================================
 # Project Structure
 # ============================================================
-INC_DIR       := build/include# For Fortran modules
-APP_DIR       := build/apps# For main executable
-TST_DIR       := build/tests# For test executables
-IO_DIR        := build/io# For IO object files   <<< REMOVE SPACES BEFORE #
-PROPS_DIR     := build/props# For Props object files <<< REMOVE SPACES BEFORE #
+INC_DIR       := build/include # For Fortran modules
+APP_DIR       := build/apps    # For main executable
+TST_DIR       := build/tests   # For test executables
+IO_DIR        := build/io      # For IO object files
+PROPS_DIR     := build/props   # For Props object files
 
 MODULES       := io props
-SRC_DIRS      := $(addprefix src/,$(MODULES))# src/io src/props
-BUILD_DIRS    := $(addprefix build/,$(MODULES))# build/io build/props
+SRC_DIRS      := $(addprefix src/,$(MODULES)) # src/io src/props
+BUILD_DIRS    := $(addprefix build/,$(MODULES)) # build/io build/props
 
 # ============================================================
-# Source and Object Files
+# Source and Object Files (Revised for Linking)
 # ============================================================
-# Find source files
-SOURCES_IO_CPP  := $(wildcard src/io/*.cpp)
-# All non-test CPP files in src/props (includes Diffusion.cpp, Tortuosity*.cpp etc.)
-SOURCES_PRP_CPP_ALL := $(wildcard src/props/*.cpp)
-# Test CPP files in src/props (assuming they start with 't')
-SOURCES_TST_CPP := $(filter src/props/t%.cpp, $(SOURCES_PRP_CPP_ALL))
-# Non-test CPP files in src/props
-SOURCES_PRP_CPP := $(filter-out $(SOURCES_TST_CPP), $(SOURCES_PRP_CPP_ALL))
-# Fortran files
-SOURCES_PRP_F90 := $(wildcard src/props/*.F90)
+# --- Find source files ---
+SOURCES_IO_ALL      := $(wildcard src/io/*.cpp)
+SOURCES_PRP_ALL     := $(wildcard src/props/*.cpp)
+SOURCES_F90_ALL     := $(wildcard src/props/*.F90) # Assuming Fortran only in props
 
-# Define object file targets based on source locations
-OBJECTS_IO_CPP  := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_CPP))
-OBJECTS_PRP_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_CPP))
-OBJECTS_PRP_F90 := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_PRP_F90))
-# Test objects (compile test sources to the props build dir as well)
-OBJECTS_TST_CPP := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_TST_CPP))
+# --- Identify Drivers (containing main()) ---
+SOURCES_APP_DRIVER  := src/props/Diffusion.cpp
+SOURCES_IO_TESTS    := $(filter src/io/t%.cpp, $(SOURCES_IO_ALL))
+SOURCES_PRP_TESTS   := $(filter src/props/t%.cpp, $(SOURCES_PRP_ALL))
+SOURCES_TEST_DRIVERS:= $(SOURCES_IO_TESTS) $(SOURCES_PRP_TESTS)
 
-# Consolidate non-test objects
-OBJECTS_APP_CPP := $(OBJECTS_IO_CPP) $(OBJECTS_PRP_CPP)
-OBJECTS_APP_F90 := $(OBJECTS_PRP_F90)
-OBJECTS_APP     := $(OBJECTS_APP_CPP) $(OBJECTS_APP_F90)
+# --- Identify Library Sources (excluding drivers) ---
+SOURCES_IO_LIB      := $(filter-out $(SOURCES_IO_TESTS), $(SOURCES_IO_ALL))
+SOURCES_PRP_LIB     := $(filter-out $(SOURCES_PRP_TESTS) $(SOURCES_APP_DRIVER), $(SOURCES_PRP_ALL))
+SOURCES_F90_LIB     := $(SOURCES_F90_ALL) # Assuming all F90 are library code
+
+# --- Define Object Files based on Categories ---
+OBJECTS_APP_DRIVER  := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_APP_DRIVER))
+OBJECTS_IO_TESTS    := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_TESTS))
+OBJECTS_PRP_TESTS   := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_TESTS))
+OBJECTS_TEST_DRIVERS:= $(OBJECTS_IO_TESTS) $(OBJECTS_PRP_TESTS)
+
+OBJECTS_IO_LIB      := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_LIB))
+OBJECTS_PRP_LIB     := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_LIB))
+OBJECTS_F90_LIB     := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_F90_LIB))
+
+# --- Consolidate Library Objects ---
+OBJECTS_LIB_ALL     := $(OBJECTS_IO_LIB) $(OBJECTS_PRP_LIB) $(OBJECTS_F90_LIB)
 
 # Let Make search for source files in relevant directories
 VPATH := $(subst $(space),:,$(SRC_DIRS)):src
@@ -89,64 +98,63 @@ all: main tests
 main: $(APP_DIR)/Diffusion
 
 # Define test executables based on found test sources
-TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
+# <<< FIX: Define test executables based on test sources >>>
+TEST_EXECS_IO := $(patsubst src/io/%.cpp,$(TST_DIR)/%,$(SOURCES_IO_TESTS))
+TEST_EXECS_PRP := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_PRP_TESTS))
+TEST_EXECS := $(TEST_EXECS_IO) $(TEST_EXECS_PRP)
+
 tests: $(TEST_EXECS)
 
 # ============================================================
-# Compilation Rules (Using Static Pattern Rules - Adjusted Syntax) # <<< SECTION REVISED >>>
+# Compilation Rules (Unchanged)
 # ============================================================
 
 # Static Pattern Rule for C++ objects in build/io
-$(OBJECTS_IO_CPP): $(IO_DIR)/%.o: src/io/%.cpp # <<< Removed space before second colon
+$(OBJECTS_IO_LIB) $(OBJECTS_IO_TESTS): $(IO_DIR)/%.o: src/io/%.cpp
 	@echo "Compiling (IO) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
-# Static Pattern Rule for non-test C++ objects in build/props
-$(OBJECTS_PRP_CPP): $(PROPS_DIR)/%.o: src/props/%.cpp # <<< Removed space before second colon
+# Static Pattern Rule for C++ objects in build/props
+$(OBJECTS_PRP_LIB) $(OBJECTS_APP_DRIVER) $(OBJECTS_PRP_TESTS): $(PROPS_DIR)/%.o: src/props/%.cpp
 	@echo "Compiling (Props) $< ..."
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
 
 # Static Pattern Rule for F90 objects in build/props
-$(OBJECTS_PRP_F90): $(PROPS_DIR)/%.o: src/props/%.F90 # <<< Removed space before second colon
+$(OBJECTS_F90_LIB): $(PROPS_DIR)/%.o: src/props/%.F90
 	@echo "Compiling (Props Fortran) $< ..."
 	@mkdir -p $(@D) $(INC_DIR) # Ensure both obj and mod dirs exist
 	$(F90) $(F90FLAGS) $(INCLUDE) -J$(INC_DIR) -c $< -o $@
 
-# Static Pattern Rule for test C++ objects (output to build/props)
-$(OBJECTS_TST_CPP): $(PROPS_DIR)/%.o: src/props/%.cpp # <<< Removed space before second colon
-	@echo "Compiling (Test) $< ..."
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -c $< -o $@
-
 # ============================================================
-# Linking Executables
+# Linking Executables (Revised Rules)
 # ============================================================
-
-# Define object lists needed by the main application and tests
-# Main App depends on all non-test C++ and Fortran objects
-APP_OBJS          := $(OBJECTS_APP)
-
-# Specific objects needed for each test (adjust based on actual dependencies)
-# Using OBJECTS_APP includes all non-test code objects, which might be simplest
-TEST_DEPS_BASE    := $(OBJECTS_APP) # Assume most tests need most app objects for now
 
 # Main application
-$(APP_DIR)/Diffusion: src/props/Diffusion.cpp $(APP_OBJS)
-	@echo "Linking $@ ..."
+# <<< FIX: Link only main driver object + all library objects >>>
+$(APP_DIR)/Diffusion: $(OBJECTS_APP_DRIVER) $(OBJECTS_LIB_ALL)
+	@echo "Linking Main App $@ ..."
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -o $@ $< $(APP_OBJS) $(LDFLAGS) # Link source + objects
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use $^ for all prerequisites
 
-# Test executables (General rule using specific test object + base dependencies)
-# This links the specific t*.o file with TEST_DEPS_BASE
-$(TST_DIR)/t%: $(PROPS_DIR)/t%.o $(TEST_DEPS_BASE)
-	@echo "Linking $@ ..."
+# Test executables from src/props
+# <<< FIX: Link specific test driver + all library objects >>>
+$(TEST_EXECS_PRP): $(TST_DIR)/%: $(PROPS_DIR)/%.o $(OBJECTS_LIB_ALL)
+	@echo "Linking Test $@ ..."
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use $^ for all prerequisites
+
+# Test executables from src/io
+# <<< FIX: Link specific test driver + all library objects >>>
+$(TEST_EXECS_IO): $(TST_DIR)/%: $(IO_DIR)/%.o $(OBJECTS_LIB_ALL)
+	@echo "Linking Test $@ ..."
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) # Use $^ for all prerequisites
+
 
 # ============================================================
-# Supporting Targets
+# Supporting Targets (Unchanged)
 # ============================================================
 
 # Build environments (simple examples)
@@ -166,15 +174,15 @@ clean:
 	-@find . -name '*.mod' -delete # Remove Fortran module files from source tree if accidentally created there
 
 # ============================================================
-# Include Auto-Generated Dependencies
+# Include Auto-Generated Dependencies (Revised)
 # ============================================================
 # Include the .d files generated by CXXFLAGS -MMD -MP for C++ files
-# Includes both app and test objects dependencies now
--include $(OBJECTS_APP_CPP:.o=.d) $(OBJECTS_TST_CPP:.o=.d)
+# <<< FIX: Include .d files for ALL compiled C++ objects >>>
+-include $(OBJECTS_IO_LIB:.o=.d) $(OBJECTS_PRP_LIB:.o=.d) $(OBJECTS_APP_DRIVER:.o=.d) $(OBJECTS_TEST_DRIVERS:.o=.d)
 
 # ============================================================
 # Debugging Help (Uncomment to use)
 # ============================================================
 # print-%:
 # 	@echo '$* = $($*)'
-# Example: make print-OBJECTS_APP
+# Example: make print-OBJECTS_LIB_ALL
