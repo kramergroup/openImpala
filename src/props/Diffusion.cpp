@@ -3,6 +3,7 @@
 // Corrected scope for TortuosityHypre and its nested SolverType enum.
 // Corrected duplicate enum definition.
 // Removed check for non-existent DatReader::isRead method.
+// Corrected namespace issues identified in recent build.
 
 #include <cmath>
 #include <cstdlib> // Prefer over <stdlib.h>
@@ -34,19 +35,16 @@
 #include <AMReX_Utility.H> // For amrex::UtilCreateDirectory
 
 // OpenImpala includes (assuming namespace OpenImpala)
-#include "../io/DatReader.H"      // Assuming DatReader.H includes needed types like RawDataType, parseRawDataType
+#include "../io/DatReader.H"       // Assuming DatReader.H includes needed types like RawDataType, parseRawDataType
 #include "../io/HDF5Reader.H"
 #include "../io/TiffReader.H"
 // #include "../io/TiffStackReader.H" // REMOVED - Deprecated
-#include "TortuosityHypre.H"      // Defines ::TortuosityHypre and ::TortuosityHypre::SolverType
+#include "TortuosityHypre.H"       // Defines OpenImpala::TortuosityHypre and OpenImpala::TortuosityHypre::SolverType
 #include "VolumeFraction.H"
 #include "Tortuosity.H"           // Include base class and OpenImpala::Direction enum
 
-// Namespace for clarity, actual enums expected in included headers
-namespace OpenImpala {
-    // Direction enum assumed to be defined in Tortuosity.H
-    // SolverType enum assumed to be defined nested within ::TortuosityHypre in TortuosityHypre.H
-} // namespace OpenImpala
+// Namespace already declared in Tortuosity.H and TortuosityHypre.H
+// No need to redeclare enums here.
 
 namespace // Anonymous namespace for helpers
 {
@@ -73,18 +71,18 @@ namespace // Anonymous namespace for helpers
     }
 
     // Helper to convert string to SolverType (Example, needs actual enum)
-    // <<< FIXED Scope for SolverType >>>
-    TortuosityHypre::SolverType string_to_solver(const std::string& s) {
+    // FIX 1: Qualify return type with namespace
+    OpenImpala::TortuosityHypre::SolverType string_to_solver(const std::string& s) {
         std::string upper_s = s;
         std::transform(upper_s.begin(), upper_s.end(), upper_s.begin(), ::toupper);
-        // Assuming SolverType is nested inside the global TortuosityHypre class
-        if (upper_s == "FLEXGMRES") { return TortuosityHypre::SolverType::FlexGMRES; }
-        if (upper_s == "JACOBI")    { return TortuosityHypre::SolverType::Jacobi; }
-        if (upper_s == "GMRES")     { return TortuosityHypre::SolverType::GMRES; }
-        if (upper_s == "PCG")       { return TortuosityHypre::SolverType::PCG; }
+        // FIX 1: Qualify enum values with full namespace::class::enum
+        if (upper_s == "FLEXGMRES") { return OpenImpala::TortuosityHypre::SolverType::FlexGMRES; }
+        if (upper_s == "JACOBI")    { return OpenImpala::TortuosityHypre::SolverType::Jacobi; }
+        if (upper_s == "GMRES")     { return OpenImpala::TortuosityHypre::SolverType::GMRES; }
+        if (upper_s == "PCG")       { return OpenImpala::TortuosityHypre::SolverType::PCG; }
         // Add other solver types here...
         amrex::Warning("Invalid solver type string '" + s + "', defaulting to FlexGMRES.");
-        return TortuosityHypre::SolverType::FlexGMRES;
+        return OpenImpala::TortuosityHypre::SolverType::FlexGMRES;
     }
 
 } // namespace
@@ -130,8 +128,8 @@ int main(int argc, char* argv[])
         // Solver Parameters
         std::string solver_type_str = "FlexGMRES";
         pp.query("solver_type", solver_type_str);
-        // <<< FIXED Scope for SolverType result >>>
-        auto solver_type = string_to_solver(solver_type_str); // Calls corrected helper
+        // FIX 2: Resolved by fixing string_to_solver return type
+        auto solver_type = string_to_solver(solver_type_str);
 
         double hypre_eps = 1e-9; // Solver tolerance
         pp.query("hypre_eps", hypre_eps);
@@ -171,7 +169,7 @@ int main(int argc, char* argv[])
                 std::string subpath = results_dir.string().substr(1);
                 if (!subpath.empty() && (subpath.front() == '/' || subpath.front() == '\\')) {
                      subpath = subpath.substr(1);
-                 }
+                }
                 results_dir = std::filesystem::path(homeDir) / subpath;
             }
         }
@@ -185,9 +183,9 @@ int main(int argc, char* argv[])
                      data_path = data_path.string().substr(1);
                  }
              } else {
-                std::string subpath = data_path.string().substr(1);
-                if (!subpath.empty() && (subpath.front() == '/' || subpath.front() == '\\')) {
-                     subpath = subpath.substr(1);
+                 std::string subpath = data_path.string().substr(1);
+                 if (!subpath.empty() && (subpath.front() == '/' || subpath.front() == '\\')) {
+                      subpath = subpath.substr(1);
                  }
                  data_path = std::filesystem::path(homeDir) / subpath;
              }
@@ -209,17 +207,17 @@ int main(int argc, char* argv[])
 
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Diffusion Calculation Setup ---\n";
-            amrex::Print() << " Input File:         " << full_input_path << "\n";
-            if (!hdf5_dataset.empty()) amrex::Print() << " HDF5 Dataset:       " << hdf5_dataset << "\n";
-            amrex::Print() << " Analysis Phase ID:  " << phase_id << "\n";
-            amrex::Print() << " Threshold Value:    " << threshold_value << "\n";
-            amrex::Print() << " Direction(s):       " << direction_str << "\n";
-            amrex::Print() << " Results Directory:  " << results_dir << "\n";
-            amrex::Print() << " Output Filename:    " << output_filename << "\n";
-            amrex::Print() << " Max Grid Size:      " << box_size << "\n";
-            amrex::Print() << " Solver:             " << solver_type_str << "\n";
-            amrex::Print() << " Solver Tol:         " << hypre_eps << "\n";
-            amrex::Print() << " Solver MaxIter:     " << hypre_maxiter << "\n";
+            amrex::Print() << " Input File:            " << full_input_path << "\n";
+            if (!hdf5_dataset.empty()) amrex::Print() << " HDF5 Dataset:          " << hdf5_dataset << "\n";
+            amrex::Print() << " Analysis Phase ID:     " << phase_id << "\n";
+            amrex::Print() << " Threshold Value:       " << threshold_value << "\n";
+            amrex::Print() << " Direction(s):          " << direction_str << "\n";
+            amrex::Print() << " Results Directory:     " << results_dir << "\n";
+            amrex::Print() << " Output Filename:       " << output_filename << "\n";
+            amrex::Print() << " Max Grid Size:         " << box_size << "\n";
+            amrex::Print() << " Solver:                " << solver_type_str << "\n";
+            amrex::Print() << " Solver Tol:            " << hypre_eps << "\n";
+            amrex::Print() << " Solver MaxIter:        " << hypre_maxiter << "\n";
             amrex::Print() << "-----------------------------------\n\n";
         }
 
@@ -241,8 +239,6 @@ int main(int argc, char* argv[])
             if (ext == ".tif" || ext == ".tiff") {
                 if (verbose > 0) amrex::Print() << " Reading TIFF file: " << full_input_path << "\n";
                 OpenImpala::TiffReader reader(full_input_path.string());
-                // Assuming constructor throws on error, otherwise need isRead() method
-                // if (!reader.isRead()) throw std::runtime_error("TiffReader failed to read file.");
                 domain_box = reader.box();
                 if (domain_box.isEmpty()) throw std::runtime_error("TiffReader returned empty domain box.");
                 reader_success = true;
@@ -255,17 +251,15 @@ int main(int argc, char* argv[])
             } else if (ext == ".dat") {
                  if (verbose > 0) amrex::Print() << " Reading DAT file: " << full_input_path << "\n";
                  OpenImpala::DatReader reader(full_input_path.string());
-                 // <<< REMOVED Check for non-existent public isRead() method >>>
-                 // Assume constructor throws on error.
-                 // if (!reader.isRead()) throw std::runtime_error("DatReader failed to read file.");
                  domain_box = reader.box();
-                  if (domain_box.isEmpty()) throw std::runtime_error("DatReader returned empty domain box.");
+                 if (domain_box.isEmpty()) throw std::runtime_error("DatReader returned empty domain box.");
                  reader_success = true;
                  ba.define(domain_box);
                  ba.maxSize(box_size);
                  dm.define(ba);
                  mf_phase.define(ba, dm, 1, 1);
-                 // Assuming DatReader's threshold uses its internal DataType
+                 // Assuming DatReader's threshold uses its internal DataType or can handle double
+                 // Adjust cast if needed based on DatReader implementation
                  reader.threshold(static_cast<OpenImpala::DatReader::DataType>(threshold_value), phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
 
             } else if (ext == ".raw") { // Example: Handle raw if needed distinctly
@@ -273,14 +267,7 @@ int main(int argc, char* argv[])
                  if (raw_width <= 0 || raw_height <= 0 || raw_depth <= 0 || raw_datatype_str.empty()) {
                      throw std::runtime_error("raw_width, raw_height, raw_depth, and raw_datatype must be specified in inputs for RAW files.");
                  }
-                 // TODO: Implement or use appropriate RawReader assuming it takes dims/type
-                 // OpenImpala::RawDataType raw_type = OpenImpala::parseRawDataType(raw_datatype_str); // Assuming helper exists
-                 // OpenImpala::RawReader reader(full_input_path.string(), raw_width, raw_height, raw_depth, raw_type);
-                 // ... check read success ...
-                 // domain_box = reader.box();
-                 // reader_success = true;
-                 // ... setup ba, dm, mf_phase ...
-                 // reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
+                 // TODO: Implement or use appropriate RawReader
                  throw std::runtime_error("RAW file reading not fully implemented in this example.");
 
             } else if (ext == ".h5" || ext == ".hdf5") {
@@ -289,8 +276,6 @@ int main(int argc, char* argv[])
                      throw std::runtime_error("hdf5_dataset must be specified in inputs for HDF5 files.");
                  }
                  OpenImpala::HDF5Reader reader(full_input_path.string(), hdf5_dataset);
-                 // Assuming constructor throws on error
-                 // if (!reader.isRead()) throw std::runtime_error("HDF5Reader failed to read file.");
                  domain_box = reader.box();
                  if (domain_box.isEmpty()) throw std::runtime_error("HDF5Reader returned empty domain box.");
                  reader_success = true;
@@ -300,16 +285,9 @@ int main(int argc, char* argv[])
                  mf_phase.define(ba, dm, 1, 1);
                  reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
 
-            // REMOVED TiffStackReader block
-
             } else {
                  amrex::Abort("File format not recognized or supported: " + filename + " (Extension: " + ext + ")");
             }
-
-            // This check might be redundant if domain_box.isEmpty() check is done above
-            // if (!reader_success || domain_box.isEmpty()) {
-            //     amrex::Abort("Failed to read valid domain box from input file.");
-            // }
 
             // --- Setup Geometry and Fill Ghost Cells ---
             amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)},
@@ -355,13 +333,12 @@ int main(int argc, char* argv[])
             if (verbose > 0) amrex::Print() << "\n Calculating Tortuosity for Direction: " << direction_to_string(dir) << "\n";
 
             try {
-                // <<< FIXED Scope for TortuosityHypre >>>
-                // Instantiate using global scope since class is not in OpenImpala namespace
-                TortuosityHypre tortuosity_solver(
+                // FIX 3: Qualify TortuosityHypre with namespace
+                OpenImpala::TortuosityHypre tortuosity_solver( // Use qualified name
                     geom, ba, dm, mf_phase,
                     actual_vf,
                     phase_id,
-                      dir,
+                     dir,
                     solver_type,
                     results_dir.string(), // resultspath
                     // Use defaults for vlo, vhi, verbose, or pass them if needed
@@ -370,8 +347,7 @@ int main(int argc, char* argv[])
                     verbose // verbose
                 );
 
-                // <<< FIXED Scope for tortuosity_solver >>>
-                // This call should now work since the declaration above is corrected
+                // FIX 4: Variable name tortuosity_solver should now be correct and in scope
                 amrex::Real tau_value = tortuosity_solver.value(); // Calculate tortuosity
                 tortuosity_results[dir] = tau_value;
                 amrex::Print() << "  Tortuosity (" << direction_to_string(dir) << ") = " << std::fixed << std::setprecision(6) << tau_value << "\n";

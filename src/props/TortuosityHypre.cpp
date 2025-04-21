@@ -19,8 +19,7 @@
 #include <AMReX_BLassert.H>           // Corrected include path
 #include <AMReX_ParmParse.H>          // Added for ParmParse
 #include <AMReX_Vector.H>           // Added for amrex::Vector (needed for plotfile fix)
-#include <AMReX_Array.H>            // Added for amrex::Array (for dxinv_sq fix)
-// #include <AMReX_GpuContainers.H>    // <<< REMOVED: No longer needed >>>
+#include <AMReX_Array.H>            // Added for amrex::Array (for dxinv_sq fix & loV/hiV return)
 
 // HYPRE includes (already in TortuosityHypre.H but good practice here too)
 #include <HYPRE.h>
@@ -50,8 +49,9 @@ namespace {
 //-----------------------------------------------------------------------------
 // Helper Functions are static members defined in the header TortuosityHypre.H
 //-----------------------------------------------------------------------------
-// Assuming loV and hiV implementations exist in the header as:
-/*
+// Implementation of static helpers (should ideally be in the header or defined here)
+namespace OpenImpala { // <<< Assuming TortuosityHypre is in OpenImpala namespace >>>
+
 inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::loV (const amrex::Box& b) {
     const int* lo_ptr = b.loVect();
     amrex::Array<HYPRE_Int,AMREX_SPACEDIM> hypre_lo;
@@ -64,8 +64,6 @@ inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex:
     for (int i=0; i<AMREX_SPACEDIM; ++i) hypre_hi[i] = static_cast<HYPRE_Int>(hi_ptr[i]);
     return hypre_hi;
 }
-*/
-//-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
 // TortuosityHypre Class Implementation
@@ -74,14 +72,15 @@ inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex:
 /**
  * @brief Constructor: Sets up geometry, solver params, and HYPRE structures.
  */
-TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
+// FIX: Add namespace qualifier
+OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                  const amrex::BoxArray& ba,
                                  const amrex::DistributionMapping& dm,
                                  const amrex::iMultiFab& mf_phase_input, // Renamed for clarity
                                  const amrex::Real vf,
                                  const int phase,
                                  const OpenImpala::Direction dir,
-                                 const SolverType st,
+                                 const SolverType st, // Namespace already implicitly OpenImpala::TortuosityHypre::
                                  const std::string& resultspath,
                                  const amrex::Real vlo, // Default args from H
                                  const amrex::Real vhi, // Default args from H
@@ -121,7 +120,8 @@ TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
 /**
  * @brief Destructor: Frees all allocated HYPRE resources. CRITICAL.
  */
-TortuosityHypre::~TortuosityHypre()
+// FIX: Add namespace qualifier
+OpenImpala::TortuosityHypre::~TortuosityHypre()
 {
     if (m_x)       HYPRE_StructVectorDestroy(m_x);
     if (m_b)       HYPRE_StructVectorDestroy(m_b);
@@ -139,7 +139,8 @@ TortuosityHypre::~TortuosityHypre()
 /**
  * @brief Sets up the HYPRE StructGrid based on the AMReX BoxArray.
  */
-void TortuosityHypre::setupGrids()
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::setupGrids()
 {
     HYPRE_Int ierr = 0;
 
@@ -150,9 +151,9 @@ void TortuosityHypre::setupGrids()
     for ( amrex::MFIter mfi(m_mf_phase); mfi.isValid(); ++mfi )
     {
         const amrex::Box& bx = mfi.validbox();
-        // Use static helpers defined in header TortuosityHypre.H
-        auto lo = loV(bx); // Returns amrex::Array<HYPRE_Int,...>
-        auto hi = hiV(bx); // Returns amrex::Array<HYPRE_Int,...>
+        // FIX: Qualify static members
+        auto lo = OpenImpala::TortuosityHypre::loV(bx); // Returns amrex::Array<HYPRE_Int,...>
+        auto hi = OpenImpala::TortuosityHypre::hiV(bx); // Returns amrex::Array<HYPRE_Int,...>
 
         // Pass pointer from amrex::Array using .data()
         ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
@@ -168,7 +169,8 @@ void TortuosityHypre::setupGrids()
 /**
  * @brief Sets up the 7-point HYPRE StructStencil.
  */
-void TortuosityHypre::setupStencil()
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::setupStencil()
 {
     HYPRE_Int ierr = 0;
     constexpr int stencil_size = 7;
@@ -192,7 +194,8 @@ void TortuosityHypre::setupStencil()
  * @brief Modifies the phase MultiFab, e.g., removing isolated spots.
  * Calls the Fortran routine `tortuosity_remspot`.
  */
-void TortuosityHypre::preconditionPhaseFab()
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::preconditionPhaseFab()
 {
     // This routine modifies the *owned* copy m_mf_phase
     AMREX_ASSERT_WITH_MESSAGE(m_mf_phase.nGrow() >= 1, "Phase fab needs ghost cells for preconditionPhaseFab");
@@ -227,7 +230,8 @@ void TortuosityHypre::preconditionPhaseFab()
  * @brief Sets up the HYPRE StructMatrix and StructVectors (A, b, x).
  * Fills matrix coefficients and RHS using the Fortran routine `tortuosity_fillmtx`.
  */
-void TortuosityHypre::setupMatrixEquation()
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::setupMatrixEquation()
 {
     HYPRE_Int ierr = 0;
 
@@ -260,7 +264,7 @@ void TortuosityHypre::setupMatrixEquation()
     const int dir_int = static_cast<int>(m_dir); // Cast direction enum once
 
     // Calculate dxinv^2 needed by Fortran
-    // FIX 1: Replace GpuArray with Array
+    // Using amrex::Array for CPU compatibility
     amrex::Array<amrex::Real, AMREX_SPACEDIM> dxinv_sq;
     const amrex::Real* dx = m_geom.CellSize(); // Get cell sizes
     for(int i=0; i<AMREX_SPACEDIM; ++i) {
@@ -289,18 +293,17 @@ void TortuosityHypre::setupMatrixEquation()
         const auto& pbox = m_mf_phase.box(mfi.LocalTileIndex()); // Use index for box
 
         // --- Fortran Call for tortuosity_fillmtx ---
-        // FIX 2 & 3: Pass raw pointers from loVect/hiVect directly
         tortuosity_fillmtx(matrix_values.data(),       // a
                            rhs_values.data(),          // rhs
                            initial_guess.data(),       // xinit
                            &npts,                      // nval (int*)
                            p_ptr,                      // p (int*)
-                           pbox.loVect(),              // p_lo (int*)
-                           pbox.hiVect(),              // p_hi (int*)
-                           bx.loVect(),                // bxlo (int*) - Use tile box
-                           bx.hiVect(),                // bxhi (int*) - Use tile box
-                           domain.loVect(),            // domlo (int*)
-                           domain.hiVect(),            // domhi (int*)
+                           pbox.loVect(),              // p_lo (int*) // FIX: Pass pointer directly
+                           pbox.hiVect(),              // p_hi (int*) // FIX: Pass pointer directly
+                           bx.loVect(),                // bxlo (int*) - Use tile box // FIX: Pass pointer directly
+                           bx.hiVect(),                // bxhi (int*) - Use tile box // FIX: Pass pointer directly
+                           domain.loVect(),            // domlo (int*) // FIX: Pass pointer directly
+                           domain.hiVect(),            // domhi (int*) // FIX: Pass pointer directly
                            dxinv_sq.data(),            // dxinv (Real*) - Pass pointer from amrex::Array
                            &m_vlo,                     // vlo (Real*)
                            &m_vhi,                     // vhi (Real*)
@@ -308,9 +311,11 @@ void TortuosityHypre::setupMatrixEquation()
                            &dir_int);                  // dir (int*)
 
         // Set values in HYPRE structures for this box
-        auto hypre_lo = loV(bx); // Use static helper
-        auto hypre_hi = hiV(bx); // Use static helper
+        // FIX: Qualify static members
+        auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx); // Use static helper
+        auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx); // Use static helper
 
+        // Pass pointers from amrex::Array using .data()
         ierr = HYPRE_StructMatrixSetBoxValues(m_A, hypre_lo.data(), hypre_hi.data(), 7, stencil_indices, matrix_values.data());
         HYPRE_CHECK(ierr);
 
@@ -332,7 +337,8 @@ void TortuosityHypre::setupMatrixEquation()
  * Updates m_mf_phi with the solution and writes a plotfile.
  * @return true if solver converged successfully, false otherwise.
  */
-bool TortuosityHypre::solve()
+// FIX: Add namespace qualifier
+bool OpenImpala::TortuosityHypre::solve()
 {
     // Generate timestamp for output file
     std::time_t strt_time;
@@ -355,21 +361,21 @@ bool TortuosityHypre::solve()
 
     // --- Setup Solver and Optional Preconditioner ---
     // Example: Using PFMG as preconditioner for iterative methods
-    if (m_solvertype == SolverType::FlexGMRES || m_solvertype == SolverType::GMRES || m_solvertype == SolverType::PCG) {
+    // FIX: Qualify enum type
+    if (m_solvertype == OpenImpala::TortuosityHypre::SolverType::FlexGMRES ||
+        m_solvertype == OpenImpala::TortuosityHypre::SolverType::GMRES ||
+        m_solvertype == OpenImpala::TortuosityHypre::SolverType::PCG) {
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond); HYPRE_CHECK(ierr);
         ierr = HYPRE_StructPFMGSetMaxIter(precond, 1); HYPRE_CHECK(ierr); // Use as preconditioner (1 cycle)
         ierr = HYPRE_StructPFMGSetTol(precond, 0.0); HYPRE_CHECK(ierr);   // Tolerance doesn't matter for precond
         ierr = HYPRE_StructPFMGSetRelChange(precond, 0); HYPRE_CHECK(ierr); // Don't check relative change
-        // Set other PFMG parameters if needed (e.g., relaxation type, number of sweeps)
-        // HYPRE_StructPFMGSetRelaxType(precond, 1); // Example: Weighted Jacobi
-        // HYPRE_StructPFMGSetNumPreRelax(precond, 2);
-        // HYPRE_StructPFMGSetNumPostRelax(precond, 2);
     }
 
     // --- Select and Run the HYPRE solver ---
     switch (m_solvertype)
     {
-        case SolverType::Jacobi: // Generally avoid for performance
+        // FIX: Qualify enum type
+        case OpenImpala::TortuosityHypre::SolverType::Jacobi: // Generally avoid for performance
             ierr = HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructJacobiSetTol(solver, m_eps); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructJacobiSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
@@ -380,7 +386,8 @@ bool TortuosityHypre::solve()
             HYPRE_StructJacobiDestroy(solver); // Destroy regardless of ierr
             break;
 
-        case SolverType::FlexGMRES:
+        // FIX: Qualify enum type
+        case OpenImpala::TortuosityHypre::SolverType::FlexGMRES:
             ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructFlexGMRESSetTol(solver, m_eps); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
@@ -394,7 +401,8 @@ bool TortuosityHypre::solve()
             HYPRE_StructFlexGMRESDestroy(solver);
             break;
 
-        case SolverType::PCG:
+        // FIX: Qualify enum type
+        case OpenImpala::TortuosityHypre::SolverType::PCG:
             ierr = HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructPCGSetTol(solver, m_eps); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructPCGSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
@@ -408,7 +416,8 @@ bool TortuosityHypre::solve()
             HYPRE_StructPCGDestroy(solver);
             break;
 
-        case SolverType::GMRES: // Fallthrough intended for default case
+        // FIX: Qualify enum type
+        case OpenImpala::TortuosityHypre::SolverType::GMRES: // Fallthrough intended for default case
         default: // Default to GMRES
             ierr = HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructGMRESSetTol(solver, m_eps); HYPRE_CHECK(ierr);
@@ -482,11 +491,11 @@ bool TortuosityHypre::solve()
         // Construct filename
         std::string plotfilename = m_resultspath + "/hypre_soln_" + std::string(datetime);
 
-        // FIX 4: Use amrex::Vector directly
+        // Use amrex::Vector directly
         amrex::Vector<std::string> plot_varnames = {"potential", "cell_type"};
 
         if (m_verbose > 0) amrex::Print() << "Writing plotfile: " << plotfilename << std::endl;
-        // Pass converted vector to plotfile function
+        // Pass amrex::Vector to plotfile function
         amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, plot_varnames, m_geom, 0.0, 0);
     }
 
@@ -500,7 +509,8 @@ bool TortuosityHypre::solve()
  * @param refresh If true, forces a re-solve of the linear system.
  * @return The calculated tortuosity value (VF / RelativeDiffusivity).
  */
-amrex::Real TortuosityHypre::value(const bool refresh)
+// FIX: Add namespace qualifier
+amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 {
     // Solve the system if needed
     if (refresh || m_first_call)
@@ -527,6 +537,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     amrex::Real length_dir = m_geom.ProbLength(static_cast<int>(m_dir));
     amrex::Real cross_sectional_area = 0.0;
 
+    // FIX: Qualify enum type (use member directly, no qualification needed inside method)
     switch(m_dir)
     {
         case OpenImpala::Direction::X : cross_sectional_area = m_geom.ProbLength(1) * m_geom.ProbLength(2); break;
@@ -564,10 +575,6 @@ amrex::Real TortuosityHypre::value(const bool refresh)
          if (m_value < 0.0 && m_vf > tiny_flux_threshold) {
              amrex::Warning("Calculated negative tortuosity, check flux direction, BCs, or definition.");
          } else if (m_value < m_vf && m_vf > tiny_flux_threshold) {
-             // Tortuosity should generally be >= VF (D_eff <= D_bulk), unless VF itself is the factor
-             // This depends heavily on the definition being used. Bruggeman relates D_eff/D_bulk = VF^m
-             // tau = VF / (D_eff/D_bulk) would imply tau = VF / (VF^m) = VF^(1-m)
-             // If using path length definition tau^2 = 1 / (D_eff/D_bulk), then tau = sqrt(1/rel_diffusivity)
              amrex::Warning("Calculated tortuosity is less than volume fraction. Check definition/calculation.");
          }
     } else {
@@ -605,7 +612,8 @@ amrex::Real TortuosityHypre::value(const bool refresh)
  * @param soln The destination MultiFab.
  * @param ncomp The component index within soln to store the result.
  */
-void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
 {
     // Ensure soln has the required component and ghost cells >= 0
     AMREX_ASSERT(ncomp >= 0 && ncomp < soln.nComp());
@@ -627,8 +635,9 @@ void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
         // Resize temporary host FAB for the current box
         host_fab.resize(reg, 1); // Resize for 1 component
 
-        auto reglo = loV(reg); // Use static helper
-        auto reghi = hiV(reg); // Use static helper
+        // FIX: Qualify static members
+        auto reglo = OpenImpala::TortuosityHypre::loV(reg); // Use static helper
+        auto reghi = OpenImpala::TortuosityHypre::hiV(reg); // Use static helper
 
         // Retrieve data from HYPRE vector m_x into the temporary host FArrayBox.
         // Pass pointers from amrex::Array using .data()
@@ -649,7 +658,8 @@ void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
  * @param phi The MultiFab to modify.
  * @param ncomp The component index within phi to fill (e.g., PhaseComp).
  */
-void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
 {
     // Check if the component index is valid
     AMREX_ASSERT(ncomp >= 0 && ncomp < phi.nComp());
@@ -666,9 +676,6 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         const amrex::IArrayBox& fab_phase_src = m_mf_phase[mfi]; // Source phase data (Integer)
 
         // --- Call Fortran routine tortuosity_filct ---
-        // WARNING: This assumes tortuosity_filct can write Real output (cell type 1.0 or 0.0)
-        // based on Integer input phase data. Fortran interface should match.
-        // Also assumes Fortran handles component indexing correctly based on base pointers.
         int q_ncomp = fab_target.nComp();
         int p_ncomp = fab_phase_src.nComp();
         const auto& qbox = phi.box(mfi.LocalTileIndex()); // Use index for box
@@ -678,13 +685,6 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // Need to pass pointer to the specific component 'ncomp' of the target FAB
         amrex::Real* q_comp_ptr = fab_target.dataPtr(ncomp);
 
-        // Fortran modifies q(comp_ct) based on p(comp_phase)
-        // C++ passes base pointer q_comp_ptr (for component ncomp)
-        // Fortran needs to know which component of 'q' this pointer refers to if ncomp > 1 in Fortran.
-        // If Fortran routine only operates on one component passed via pointer, it's ok.
-        // If it needs base pointer + ncomp, the call signature is slightly off.
-        // Assuming Fortran operates on the single component pointed to by q_comp_ptr here.
-        // The `ncomp` arguments passed are for bounds checking/array extent, not necessarily target component.
         // FIX 2 & 3: Pass raw pointers from loVect/hiVect
         tortuosity_filct(q_comp_ptr,               // Pass pointer to target component ncomp
                          qbox.loVect(), qbox.hiVect(), &q_ncomp, // Bounds/ncomp of the multifab 'phi'
@@ -700,7 +700,8 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
  * @param[out] fxin Total flux entering the domain.
  * @param[out] fxout Total flux exiting the domain.
  */
-void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const {
+// FIX: Add namespace qualifier
+void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const {
     fxin = 0.0;
     fxout = 0.0;
     amrex::Real local_fxin = 0.0;
@@ -722,13 +723,9 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
     const int domhi_dir = domain.bigEnd(idir);
 
     // Ensure solution ghost cells are up-to-date (needed for finite difference)
-    // It's safer to fill here, although getSolution might have done it.
-    // Create a temporary copy to avoid modifying the const member in a const method
     amrex::MultiFab phi_soln_local(m_mf_phi, amrex::make_alias, SolnComp, 1);
     phi_soln_local.FillBoundary(m_geom.periodicity());
-    // Need to apply domain BCs too if FillBoundary doesn't handle non-periodic ext_dir
-    // This requires non-const access or a more complex setup.
-    // For simplicity, assume FillBoundary + BC values are sufficient for 1st order diff.
+    // TODO: Apply domain BCs explicitly here if needed for accurate flux calc
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout)
@@ -741,7 +738,6 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
         const auto& phase = m_mf_phase.const_array(mfi);
 
         // Calculate flux on the low domain face (idir = domlo_dir)
-        // Box for the face itself
         amrex::Box lo_face_box = domain;
         lo_face_box.setBig(idir, domlo_dir);
         lo_face_box.setSmall(idir, domlo_dir);
@@ -751,21 +747,13 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
              amrex::Loop(lo_face_box, [=, &local_fxin] (int i, int j, int k) noexcept {
                  amrex::IntVect iv_face(i, j, k); // Cell on the face index
                  amrex::IntVect iv_cell1 = iv_face; // Cell inside domain at index 'i' (or j or k)
-                 // amrex::IntVect iv_cell0 = iv_face; // Index of ghost cell (not needed for BC value approach)
-                 // iv_cell0[idir] -= 1;
-
-                 // Check if the cell *inside* the boundary is conducting phase
-                 // Flux = -D * (phi_inside - phi_boundary) / dx
-                 // phi_boundary is m_vlo
                  if (phase(iv_cell1) == m_phase) {
-                     // Simple first-order difference using boundary value
                      local_fxin += -1.0 * (phi(iv_cell1) - m_vlo) * dxinv_dir;
                  }
              });
         }
 
         // Calculate flux on the high domain face (face index is domhi_dir + 1)
-        // Cells used are at domhi_dir (inside) and the BC value (outside)
         amrex::Box hi_face_box = domain;
         hi_face_box.setSmall(idir, domhi_dir + 1); // Face index
         hi_face_box.setBig(idir, domhi_dir + 1);
@@ -773,15 +761,9 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
 
          if (hi_face_box.ok()) {
              amrex::Loop(hi_face_box, [=, &local_fxout] (int i, int j, int k) noexcept {
-                 // amrex::IntVect iv_face(i, j, k); // Index on the face (hi + 1)
                  amrex::IntVect iv_cell1(i, j, k); // Index inside domain
                  iv_cell1[idir] -= 1; // Cell inside domain at index 'hi'
-
-                 // Check if the cell *inside* the boundary is conducting phase
-                 // Flux = -D * (phi_boundary - phi_inside) / dx
-                 // phi_boundary is m_vhi
                  if (phase(iv_cell1) == m_phase) {
-                     // Simple first-order difference using boundary value
                      local_fxout += -1.0 * (m_vhi - phi(iv_cell1)) * dxinv_dir;
                  }
              });
@@ -805,3 +787,5 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
     amrex::ParallelDescriptor::Bcast(&fxin, 1, amrex::ParallelDescriptor::IOProcessorNumber());
     amrex::ParallelDescriptor::Bcast(&fxout, 1, amrex::ParallelDescriptor::IOProcessorNumber());
 }
+
+} // End namespace OpenImpala
