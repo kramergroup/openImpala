@@ -1,6 +1,6 @@
 #include "TortuosityHypre.H"
-#include "Tortuosity_filcc_F.H"     // For tortuosity_remspot
-#include "TortuosityHypreFill_F.H"  // For tortuosity_fillmtx
+#include "Tortuosity_filcc_F.H"      // For tortuosity_remspot
+#include "TortuosityHypreFill_F.H"   // For tortuosity_fillmtx
 
 #include <cstdlib>
 #include <ctime>
@@ -11,16 +11,16 @@
 #include <stdexcept> // For potential error throwing (optional)
 
 #include <AMReX_MultiFab.H>
-#include <AMReX_MultiFabUtil.H>      // For amrex::average_down (potentially needed elsewhere, good include)
+#include <AMReX_MultiFabUtil.H>       // For amrex::average_down (potentially needed elsewhere, good include)
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
-#include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory
-#include <AMReX_BLassert.H>          // Corrected include path
-#include <AMReX_GpuContainers.H>     // For GpuArray used in constructor
-#include <AMReX_ParmParse.H>         // Added for ParmParse
-#include <AMReX_Vector.H>            // Added for amrex::Vector (needed for plotfile fix)
-
+#include <AMReX_Utility.H>            // For amrex::UtilCreateDirectory
+#include <AMReX_BLassert.H>           // Corrected include path
+#include <AMReX_ParmParse.H>          // Added for ParmParse
+#include <AMReX_Vector.H>           // Added for amrex::Vector (needed for plotfile fix)
+#include <AMReX_Array.H>            // Added for amrex::Array (for dxinv_sq fix)
+// #include <AMReX_GpuContainers.H>    // <<< REMOVED: No longer needed >>>
 
 // HYPRE includes (already in TortuosityHypre.H but good practice here too)
 #include <HYPRE.h>
@@ -49,6 +49,22 @@ namespace {
 
 //-----------------------------------------------------------------------------
 // Helper Functions are static members defined in the header TortuosityHypre.H
+//-----------------------------------------------------------------------------
+// Assuming loV and hiV implementations exist in the header as:
+/*
+inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::loV (const amrex::Box& b) {
+    const int* lo_ptr = b.loVect();
+    amrex::Array<HYPRE_Int,AMREX_SPACEDIM> hypre_lo;
+    for (int i=0; i<AMREX_SPACEDIM; ++i) hypre_lo[i] = static_cast<HYPRE_Int>(lo_ptr[i]);
+    return hypre_lo;
+}
+inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex::Box& b) {
+    const int* hi_ptr = b.hiVect();
+    amrex::Array<HYPRE_Int,AMREX_SPACEDIM> hypre_hi;
+    for (int i=0; i<AMREX_SPACEDIM; ++i) hypre_hi[i] = static_cast<HYPRE_Int>(hi_ptr[i]);
+    return hypre_hi;
+}
+*/
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
@@ -135,9 +151,10 @@ void TortuosityHypre::setupGrids()
     {
         const amrex::Box& bx = mfi.validbox();
         // Use static helpers defined in header TortuosityHypre.H
-        auto lo = loV(bx);
-        auto hi = hiV(bx);
+        auto lo = loV(bx); // Returns amrex::Array<HYPRE_Int,...>
+        auto hi = hiV(bx); // Returns amrex::Array<HYPRE_Int,...>
 
+        // Pass pointer from amrex::Array using .data()
         ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
         HYPRE_CHECK(ierr);
     }
@@ -243,7 +260,8 @@ void TortuosityHypre::setupMatrixEquation()
     const int dir_int = static_cast<int>(m_dir); // Cast direction enum once
 
     // Calculate dxinv^2 needed by Fortran
-    amrex::GpuArray<amrex::Real, AMREX_SPACEDIM> dxinv_sq;
+    // FIX 1: Replace GpuArray with Array
+    amrex::Array<amrex::Real, AMREX_SPACEDIM> dxinv_sq;
     const amrex::Real* dx = m_geom.CellSize(); // Get cell sizes
     for(int i=0; i<AMREX_SPACEDIM; ++i) {
         dxinv_sq[i] = (1.0/dx[i]) * (1.0/dx[i]); // Calculate 1/dx^2 etc.
@@ -258,9 +276,6 @@ void TortuosityHypre::setupMatrixEquation()
         const amrex::Box& bx = mfi.tilebox(); // Operate on tile box
         const int npts = static_cast<int>(bx.numPts()); // Use int
 
-        // Warning for potential overflow (from previous log) can be ignored if npts is reasonably small
-        // if (static_cast<size_t>(npts) != bx.numPts()) { ... }
-
         if (npts == 0) continue; // Skip empty boxes
 
         // Use dynamic allocation (std::vector) for potentially large arrays
@@ -271,29 +286,22 @@ void TortuosityHypre::setupMatrixEquation()
         // Get phase data pointer and bounds
         const amrex::IArrayBox& phase_iab = m_mf_phase[mfi]; // Get IArrayBox
         const int* p_ptr = phase_iab.dataPtr();
-        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // Use index for fabbox
-
-        // <<< CHANGED: Store IntVect refs explicitly before calling .data() >>>
-        const amrex::IntVect& pbox_lo = pbox.loVect();
-        const amrex::IntVect& pbox_hi = pbox.hiVect();
-        const amrex::IntVect& bx_lo = bx.loVect();
-        const amrex::IntVect& bx_hi = bx.hiVect();
-        const amrex::IntVect& domain_lo = domain.loVect();
-        const amrex::IntVect& domain_hi = domain.hiVect();
+        const auto& pbox = m_mf_phase.box(mfi.LocalTileIndex()); // Use index for box
 
         // --- Fortran Call for tortuosity_fillmtx ---
+        // FIX 2 & 3: Pass raw pointers from loVect/hiVect directly
         tortuosity_fillmtx(matrix_values.data(),       // a
                            rhs_values.data(),          // rhs
                            initial_guess.data(),       // xinit
                            &npts,                      // nval (int*)
                            p_ptr,                      // p (int*)
-                           pbox_lo.data(),             // p_lo (int*)
-                           pbox_hi.data(),             // p_hi (int*)
-                           bx_lo.data(),               // bxlo (int*) - Use tile box
-                           bx_hi.data(),               // bxhi (int*) - Use tile box
-                           domain_lo.data(),           // domlo (int*)
-                           domain_hi.data(),           // domhi (int*)
-                           dxinv_sq.data(),            // dxinv (Real*) - Pass inverse SQUARED
+                           pbox.loVect(),              // p_lo (int*)
+                           pbox.hiVect(),              // p_hi (int*)
+                           bx.loVect(),                // bxlo (int*) - Use tile box
+                           bx.hiVect(),                // bxhi (int*) - Use tile box
+                           domain.loVect(),            // domlo (int*)
+                           domain.hiVect(),            // domhi (int*)
+                           dxinv_sq.data(),            // dxinv (Real*) - Pass pointer from amrex::Array
                            &m_vlo,                     // vlo (Real*)
                            &m_vhi,                     // vhi (Real*)
                            &m_phase,                   // phase (int*)
@@ -443,15 +451,15 @@ bool TortuosityHypre::solve()
             }
         }
          converged_ok = false; // Indicate solver failure
-     }
-     // Explicitly check convergence status based on reported residual norm
-     if (final_res_norm > m_eps || std::isnan(final_res_norm)) { // Also check for NaN
-         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "Warning: Solver did not converge to tolerance " << m_eps
-                            << " (Final Residual = " << final_res_norm << ")" << std::endl;
-         }
-         converged_ok = false;
-     }
+       }
+       // Explicitly check convergence status based on reported residual norm
+       if (final_res_norm > m_eps || std::isnan(final_res_norm)) { // Also check for NaN
+           if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+               amrex::Print() << "Warning: Solver did not converge to tolerance " << m_eps
+                              << " (Final Residual = " << final_res_norm << ")" << std::endl;
+           }
+           converged_ok = false;
+       }
 
 
     // Copy solution from HYPRE vector m_x to AMReX MultiFab m_mf_phi (Component SolnComp)
@@ -473,18 +481,13 @@ bool TortuosityHypre::solve()
 
         // Construct filename
         std::string plotfilename = m_resultspath + "/hypre_soln_" + std::string(datetime);
-        // Correctly use std::vector here, convert before passing
-        const std::vector<std::string> std_varnames = {"potential", "cell_type"};
 
-        // <<< Convert std::vector to amrex::Vector >>>
-        amrex::Vector<std::string> amrex_varnames(std_varnames.size());
-        for (std::size_t i = 0; i < std_varnames.size(); ++i) {
-            amrex_varnames[i] = std_varnames[i];
-        }
+        // FIX 4: Use amrex::Vector directly
+        amrex::Vector<std::string> plot_varnames = {"potential", "cell_type"};
 
         if (m_verbose > 0) amrex::Print() << "Writing plotfile: " << plotfilename << std::endl;
         // Pass converted vector to plotfile function
-        amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, amrex_varnames, m_geom, 0.0, 0);
+        amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, plot_varnames, m_geom, 0.0, 0);
     }
 
 
@@ -533,9 +536,9 @@ amrex::Real TortuosityHypre::value(const bool refresh)
     }
 
      if (cross_sectional_area <= tiny_flux_threshold) {
-          amrex::Warning("TortuosityHypre::value: Domain cross-sectional area is near zero. Cannot calculate tortuosity.");
-          m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
-          return m_value;
+         amrex::Warning("TortuosityHypre::value: Domain cross-sectional area is near zero. Cannot calculate tortuosity.");
+         m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+         return m_value;
      }
 
     // Effective Diffusivity Calculation (assuming D_bulk = 1)
@@ -581,7 +584,7 @@ amrex::Real TortuosityHypre::value(const bool refresh)
         amrex::Print() << "------------------------------------------" << std::endl;
         amrex::Print() << " Tortuosity Calculation Results (Dir=" << static_cast<int>(m_dir) << ")" << std::endl;
         amrex::Print() << std::fixed << std::setprecision(6); // Set precision for output
-        amrex::Print() << "   Volume Fraction (VF)                 : " << m_vf << std::endl;
+        amrex::Print() << "   Volume Fraction (VF)                   : " << m_vf << std::endl;
         amrex::Print() << "   Relative Effective Diffusivity       : " << rel_diffusivity << std::endl;
         amrex::Print() << "   Tortuosity (tau = VF / D_rel)        : " << m_value << std::endl;
         amrex::Print() << "   --- Intermediate Values ---" << std::endl;
@@ -628,12 +631,13 @@ void TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
         auto reghi = hiV(reg); // Use static helper
 
         // Retrieve data from HYPRE vector m_x into the temporary host FArrayBox.
+        // Pass pointers from amrex::Array using .data()
         HYPRE_Int ierr = HYPRE_StructVectorGetBoxValues(m_x, reglo.data(), reghi.data(), host_fab.dataPtr());
         HYPRE_CHECK(ierr); // Use macro for error checking
 
         // Copy data from the host FAB (component 0) to the destination MultiFab component 'ncomp'
         // Handles potential GPU data movement if soln is on device.
-        // Uses Box bx to define the region to copy within the FABs.
+        // Uses Box reg to define the region to copy within the FABs.
         soln[mfi].copy(host_fab, reg, 0, reg, ncomp, 1); // Copy valid region only
     }
 }
@@ -667,20 +671,12 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // Also assumes Fortran handles component indexing correctly based on base pointers.
         int q_ncomp = fab_target.nComp();
         int p_ncomp = fab_phase_src.nComp();
-        const auto& qbox = phi.fabbox(mfi.LocalTileIndex()); // Use index for fabbox
-        const auto& pbox = m_mf_phase.fabbox(mfi.LocalTileIndex()); // Use index for fabbox
+        const auto& qbox = phi.box(mfi.LocalTileIndex()); // Use index for box
+        const auto& pbox = m_mf_phase.box(mfi.LocalTileIndex()); // Use index for box
         const auto& domain_box = m_geom.Domain(); // Domain bounds
 
         // Need to pass pointer to the specific component 'ncomp' of the target FAB
         amrex::Real* q_comp_ptr = fab_target.dataPtr(ncomp);
-
-        // <<< CHANGED: Store IntVect refs explicitly before calling .data() >>>
-        const amrex::IntVect& qbox_lo = qbox.loVect();
-        const amrex::IntVect& qbox_hi = qbox.hiVect();
-        const amrex::IntVect& pbox_lo = pbox.loVect();
-        const amrex::IntVect& pbox_hi = pbox.hiVect();
-        const amrex::IntVect& domain_box_lo = domain_box.loVect();
-        const amrex::IntVect& domain_box_hi = domain_box.hiVect();
 
         // Fortran modifies q(comp_ct) based on p(comp_phase)
         // C++ passes base pointer q_comp_ptr (for component ncomp)
@@ -689,11 +685,12 @@ void TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int ncomp)
         // If it needs base pointer + ncomp, the call signature is slightly off.
         // Assuming Fortran operates on the single component pointed to by q_comp_ptr here.
         // The `ncomp` arguments passed are for bounds checking/array extent, not necessarily target component.
-        tortuosity_filct(q_comp_ptr,                // Pass pointer to target component ncomp
-                         qbox_lo.data(), qbox_hi.data(), &q_ncomp, // Bounds/ncomp of the multifab 'phi'
-                         fab_phase_src.dataPtr(),   // Pass pointer to int data (comp 0)
-                         pbox_lo.data(), pbox_hi.data(), &p_ncomp, // Bounds/ncomp of the iMultiFab 'm_mf_phase'
-                         domain_box_lo.data(), domain_box_hi.data(),
+        // FIX 2 & 3: Pass raw pointers from loVect/hiVect
+        tortuosity_filct(q_comp_ptr,               // Pass pointer to target component ncomp
+                         qbox.loVect(), qbox.hiVect(), &q_ncomp, // Bounds/ncomp of the multifab 'phi'
+                         fab_phase_src.dataPtr(),  // Pass pointer to int data (comp 0)
+                         pbox.loVect(), pbox.hiVect(), &p_ncomp, // Bounds/ncomp of the iMultiFab 'm_mf_phase'
+                         domain_box.loVect(), domain_box.hiVect(),
                          &m_phase);
     }
 }
@@ -724,13 +721,23 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
     const int domlo_dir = domain.smallEnd(idir);
     const int domhi_dir = domain.bigEnd(idir);
 
+    // Ensure solution ghost cells are up-to-date (needed for finite difference)
+    // It's safer to fill here, although getSolution might have done it.
+    // Create a temporary copy to avoid modifying the const member in a const method
+    amrex::MultiFab phi_soln_local(m_mf_phi, amrex::make_alias, SolnComp, 1);
+    phi_soln_local.FillBoundary(m_geom.periodicity());
+    // Need to apply domain BCs too if FillBoundary doesn't handle non-periodic ext_dir
+    // This requires non-const access or a more complex setup.
+    // For simplicity, assume FillBoundary + BC values are sufficient for 1st order diff.
+
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout)
 #endif
-    for (amrex::MFIter mfi(m_mf_phi); mfi.isValid(); ++mfi) {
+    // Use phi_soln_local which has filled boundaries
+    for (amrex::MFIter mfi(phi_soln_local); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
         // Need const access to potential (SolnComp) and phase (from m_mf_phase)
-        const auto& phi   = m_mf_phi.const_array(mfi, SolnComp);
+        const auto& phi   = phi_soln_local.const_array(mfi); // Use local copy with filled ghosts
         const auto& phase = m_mf_phase.const_array(mfi);
 
         // Calculate flux on the low domain face (idir = domlo_dir)
@@ -744,8 +751,8 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
              amrex::Loop(lo_face_box, [=, &local_fxin] (int i, int j, int k) noexcept {
                  amrex::IntVect iv_face(i, j, k); // Cell on the face index
                  amrex::IntVect iv_cell1 = iv_face; // Cell inside domain at index 'i' (or j or k)
-                 amrex::IntVect iv_cell0 = iv_face;
-                 iv_cell0[idir] -= 1; // Cell outside domain (or at boundary condition value)
+                 // amrex::IntVect iv_cell0 = iv_face; // Index of ghost cell (not needed for BC value approach)
+                 // iv_cell0[idir] -= 1;
 
                  // Check if the cell *inside* the boundary is conducting phase
                  // Flux = -D * (phi_inside - phi_boundary) / dx
@@ -757,17 +764,19 @@ void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const
              });
         }
 
-        // Calculate flux on the high domain face (idir = domhi_dir + 1)
+        // Calculate flux on the high domain face (face index is domhi_dir + 1)
+        // Cells used are at domhi_dir (inside) and the BC value (outside)
         amrex::Box hi_face_box = domain;
-        hi_face_box.setSmall(idir, domhi_dir + 1);
+        hi_face_box.setSmall(idir, domhi_dir + 1); // Face index
         hi_face_box.setBig(idir, domhi_dir + 1);
         hi_face_box &= bx; // Intersect face box with current valid box
 
          if (hi_face_box.ok()) {
              amrex::Loop(hi_face_box, [=, &local_fxout] (int i, int j, int k) noexcept {
-                 amrex::IntVect iv_face(i, j, k); // Cell on the face index (hi + 1)
-                 amrex::IntVect iv_cell1 = iv_face;
+                 // amrex::IntVect iv_face(i, j, k); // Index on the face (hi + 1)
+                 amrex::IntVect iv_cell1(i, j, k); // Index inside domain
                  iv_cell1[idir] -= 1; // Cell inside domain at index 'hi'
+
                  // Check if the cell *inside* the boundary is conducting phase
                  // Flux = -D * (phi_boundary - phi_inside) / dx
                  // phi_boundary is m_vhi
