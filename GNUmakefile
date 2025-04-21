@@ -75,26 +75,15 @@ OBJECTS_IO_TESTS   := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_TESTS))
 OBJECTS_PRP_TESTS  := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_TESTS))
 OBJECTS_TEST_DRIVERS:= $(OBJECTS_IO_TESTS) $(OBJECTS_PRP_TESTS)
 
+TEST_EXECS_IO      := $(patsubst src/io/%.cpp,$(TST_DIR)/%,$(SOURCES_IO_TESTS))
+TEST_EXECS_PRP      := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_PRP_TESTS))
+
 OBJECTS_IO_LIB     := $(patsubst src/io/%.cpp,$(IO_DIR)/%.o,$(SOURCES_IO_LIB))
 OBJECTS_PRP_LIB    := $(patsubst src/props/%.cpp,$(PROPS_DIR)/%.o,$(SOURCES_PRP_LIB))
 OBJECTS_F90_LIB    := $(patsubst src/props/%.F90,$(PROPS_DIR)/%.o,$(SOURCES_F90_LIB))
 
 # --- Consolidate Library Objects ---
 OBJECTS_LIB_ALL    := $(OBJECTS_IO_LIB) $(OBJECTS_PRP_LIB) $(OBJECTS_F90_LIB)
-
-# --- Start Debug Output ---
-$(info === DEBUG INFO START ===)
-$(info SOURCES_IO_ALL: [$(SOURCES_IO_ALL)])
-$(info SOURCES_IO_TESTS: [$(SOURCES_IO_TESTS)])
-$(info OBJECTS_IO_TESTS: [$(OBJECTS_IO_TESTS)])
-$(info TEST_EXECS_IO (Source): [$(patsubst src/io/%.cpp,$(TST_DIR)/%,$(SOURCES_IO_TESTS))])
-$(info ---) # Separator
-$(info SOURCES_PRP_ALL: [$(SOURCES_PRP_ALL)])
-$(info SOURCES_PRP_TESTS: [$(SOURCES_PRP_TESTS)])
-$(info OBJECTS_PRP_TESTS: [$(OBJECTS_PRP_TESTS)])
-$(info TEST_EXECS_PRP (Source): [$(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_PRP_TESTS))])
-$(info === DEBUG INFO END ===)
-# --- End Debug Output ---
 
 # Let Make search for source files in relevant directories
 VPATH := $(subst $(space),:,$(SRC_DIRS)):src
