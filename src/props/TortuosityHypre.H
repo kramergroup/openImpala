@@ -9,6 +9,7 @@
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Geometry.H> // Include Geometry explicitly
+#include <AMReX_Array.H>    // <<< ADDED: Needed for return type of loV/hiV >>>
 
 #include <HYPRE.h>
 #include <HYPRE_struct_ls.h>
@@ -21,6 +22,9 @@
 
 // Forward declaration (if needed, though likely defined in Tortuosity.H)
 // namespace OpenImpala { enum class Direction; }
+
+// Add OpenImpala namespace if Tortuosity class is defined within it
+namespace OpenImpala {
 
 /** Computes the tortuosity of a porous structure using HYPRE.
  *
@@ -39,7 +43,7 @@
  * @warning The implementation (.cpp file) must rigorously check HYPRE function
  * return codes for error handling.
  */
-class TortuosityHypre : public OpenImpala::Tortuosity
+class TortuosityHypre : public OpenImpala::Tortuosity // Ensure OpenImpala namespace is correct
 {
 
 public:
@@ -78,7 +82,7 @@ public:
                     const amrex::iMultiFab& mf, // Pass const&, store copy
                     const amrex::Real vf,       // Pass by value
                     const int phase,
-                    const OpenImpala::Direction dir,
+                    const OpenImpala::Direction dir, // Ensure OpenImpala namespace is correct
                     const SolverType solvertype,
                     const std::string& resultspath,
                     const amrex::Real vlo = 0.0, // Default BC values if often used
@@ -198,34 +202,36 @@ private:
     // --- Member Variables ---
 
     // Configuration (set at construction)
-    const SolverType m_solvertype;        /**< HYPRE solver algorithm to use. */
-    std::string m_resultspath;            /**< Base path for results output. */
-    const int m_phase;                    /**< Index of the phase of interest. */
-    const OpenImpala::Direction m_dir;    /**< Principal direction of flow/gradient. */
-    const amrex::Real m_vlo;              /**< Potential value at low boundary in m_dir. */
-    const amrex::Real m_vhi;              /**< Potential value at high boundary in m_dir. */
-    amrex::Real m_eps = 1e-7;             /**< Solver relative convergence tolerance. */
-    int m_maxiter = 50000;                /**< Solver maximum iterations. */
-    int m_verbose = 0;                    /**< Verbosity level. */
-    amrex::Real m_vf;                     /**< Volume Fraction (stored by value). */
+    const SolverType m_solvertype;       /**< HYPRE solver algorithm to use. */
+    std::string m_resultspath;           /**< Base path for results output. */
+    const int m_phase;                   /**< Index of the phase of interest. */
+    const OpenImpala::Direction m_dir;   /**< Principal direction of flow/gradient. */
+    const amrex::Real m_vlo;             /**< Potential value at low boundary in m_dir. */
+    const amrex::Real m_vhi;             /**< Potential value at high boundary in m_dir. */
+    amrex::Real m_eps = 1e-7;            /**< Solver relative convergence tolerance. */
+    int m_maxiter = 50000;               /**< Solver maximum iterations. */
+    int m_verbose = 0;                   /**< Verbosity level. */
+    amrex::Real m_vf;                    /**< Volume Fraction (stored by value). */
 
     // AMReX Geometry & Data (references + owned copies/results)
-    const amrex::Geometry& m_geom;        /**< Domain geometry (reference, lifetime managed externally). */
-    const amrex::BoxArray& m_ba;          /**< Box layout (reference, lifetime managed externally). */
+    const amrex::Geometry& m_geom;       /**< Domain geometry (reference, lifetime managed externally). */
+    const amrex::BoxArray& m_ba;         /**< Box layout (reference, lifetime managed externally). */
     const amrex::DistributionMapping& m_dm; /**< Box distribution (reference, lifetime managed externally). */
-    amrex::iMultiFab m_mf_phase;          /**< Phase data (owned copy, potentially preconditioned). */
-    amrex::MultiFab m_mf_phi;             /**< Potential field solution (owned). */
+    amrex::iMultiFab m_mf_phase;         /**< Phase data (owned copy, potentially preconditioned). */
+    amrex::MultiFab m_mf_phi;            /**< Potential field solution (owned). */
 
     // State Variables
     amrex::Real m_value = std::numeric_limits<amrex::Real>::quiet_NaN(); /**< Cached tortuosity value. */
-    bool m_first_call = true;             /**< Flag to trigger solve() on first call to value(). */
+    bool m_first_call = true;            /**< Flag to trigger solve() on first call to value(). */
 
     // HYPRE Data Structures (managed internally)
-    HYPRE_StructGrid m_grid = NULL;       /**< HYPRE grid object. */
-    HYPRE_StructStencil m_stencil = NULL; /**< HYPRE stencil object. */
-    HYPRE_StructMatrix m_A = NULL;        /**< HYPRE matrix object (Laplacian). */
-    HYPRE_StructVector m_b = NULL;        /**< HYPRE RHS vector object. */
-    HYPRE_StructVector m_x = NULL;        /**< HYPRE solution vector object. */
+    HYPRE_StructGrid m_grid = NULL;      /**< HYPRE grid object. */
+    HYPRE_StructStencil m_stencil = NULL;/**< HYPRE stencil object. */
+    HYPRE_StructMatrix m_A = NULL;       /**< HYPRE matrix object (Laplacian). */
+    HYPRE_StructVector m_b = NULL;       /**< HYPRE RHS vector object. */
+    HYPRE_StructVector m_x = NULL;       /**< HYPRE solution vector object. */
 };
+
+} // namespace OpenImpala
 
 #endif // TortuosityHypre_H
