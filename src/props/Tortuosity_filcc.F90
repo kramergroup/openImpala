@@ -13,14 +13,10 @@ module tortuosity_filcc_module
   integer, parameter :: direction_z = 2
 
   ! Parameters defining cell types
-  ! NOTE: Simplified to only blocked/free based on observed usage in kernels.
-  !       If boundary types or bitflags are needed later, revise these definitions
-  !       and update checking logic in relevant routines.
   integer, parameter :: cell_type_blocked = 0  ! Blocked cell (e.g., solid)
   integer, parameter :: cell_type_free    = 1  ! Free cell (e.g., conductive phase)
 
   ! Parameters defining components in MultiFabs (Fortran 1-based indices)
-  ! WARNING: C++ calling code uses 0-based indices. Ensure correct mapping!
   integer, parameter :: comp_phase = 1  ! Component index for phase ID (maps to C++ index 0 in phase MultiFab)
   integer, parameter :: comp_phi   = 1  ! Component index for potential/concentration field (maps to C++ index 0 in solution MultiFab)
   integer, parameter :: comp_ct    = 2  ! Component index for cell type field (maps to C++ index 1 in solution MultiFab)
@@ -45,15 +41,15 @@ contains
     implicit none
 
     ! Argument Declarations
-    integer,          intent(in)    :: q_lo(3), q_hi(3)             ! Bounds of output array q
-    integer,          intent(in)    :: p_lo(3), p_hi(3)             ! Bounds of input array p
-    integer,          intent(in)    :: domlo(amrex_spacedim)        ! Domain lower corner
-    integer,          intent(in)    :: domhi(amrex_spacedim)        ! Domain upper corner
-    integer,          intent(in)    :: q_ncomp                      ! Number of components in q
-    integer,          intent(in)    :: p_ncomp                      ! Number of components in p
+    integer,          intent(in)    :: q_lo(3), q_hi(3)              ! Bounds of output array q
+    integer,          intent(in)    :: p_lo(3), p_hi(3)              ! Bounds of input array p
+    integer,          intent(in)    :: domlo(amrex_spacedim)         ! Domain lower corner
+    integer,          intent(in)    :: domhi(amrex_spacedim)         ! Domain upper corner
+    integer,          intent(in)    :: q_ncomp                       ! Number of components in q
+    integer,          intent(in)    :: p_ncomp                       ! Number of components in p
     real(amrex_real), intent(inout) :: q(q_lo(1):q_hi(1), q_lo(2):q_hi(2), q_lo(3):q_hi(3), q_ncomp) ! Output array (cell types written to comp_ct)
     integer,          intent(in)    :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), p_ncomp) ! Input phase data (read from comp_phase)
-    integer,          intent(in)    :: phase                        ! ID of the phase considered 'free'
+    integer,          intent(in)    :: phase                         ! ID of the phase considered 'free'
 
     ! Local variables
     integer :: k, j, i
@@ -69,14 +65,18 @@ contains
     klo = domlo(3); khi = domhi(3)
 
     ! Iterate over domain cells and fill cell type in component comp_ct of q
-    ! Using DO CONCURRENT (F2008+) as iterations are independent
-    DO CONCURRENT (k = klo, khi, j = jlo, jhi, i = ilo, ihi)
-      if (p(i, j, k, comp_phase) == phase) then
-        q(i, j, k, comp_ct) = cell_type_free
-      else
-        q(i, j, k, comp_ct) = cell_type_blocked
-      end if
-    END DO
+    ! FIX: Replace DO CONCURRENT with nested DO loops
+    do k = klo, khi
+      do j = jlo, jhi
+        do i = ilo, ihi
+          if (p(i, j, k, comp_phase) == phase) then
+            q(i, j, k, comp_ct) = cell_type_free
+          else
+            q(i, j, k, comp_ct) = cell_type_blocked
+          end if
+        end do ! i
+      end do ! j
+    end do ! k
 
   end subroutine tortuosity_filct
 
@@ -86,7 +86,7 @@ contains
 ! the cell's phase is flipped (0->1 or 1->0). Operates in-place on q.
 !-----------------------------------------------------------------------
   subroutine tortuosity_remspot(q, q_lo, q_hi, ncomp, bxlo, bxhi, domlo, domhi) &
-                                bind(c, name='tortuosity_remspot')
+                               bind(c, name='tortuosity_remspot')
 
     implicit none
 
@@ -98,16 +98,15 @@ contains
     integer, intent(inout) :: q(q_lo(1):q_hi(1), q_lo(2):q_hi(2), q_lo(3):q_hi(3), ncomp) ! Phase data array (modified in-place at comp_phase)
 
     ! Local variables
-    integer :: i, j, k             ! Running indices for the valid box
-    integer :: neighbor_idx        ! Index for neighbor loop
-    integer :: p_stencil(7)        ! Local array for 7-point stencil phase values
-    logical :: is_connected        ! Flag to track if cell is connected
+    integer :: i, j, k               ! Running indices for the valid box
+    integer :: neighbor_idx          ! Index for neighbor loop
+    integer :: p_stencil(7)          ! Local array for 7-point stencil phase values
+    logical :: is_connected          ! Flag to track if cell is connected
 
     ! Input validation (Fortran 2008+)
     if (ncomp < comp_phase) error stop "tortuosity_remspot: Input array q must have at least comp_phase components."
 
     ! Loop over the valid box defined by bxlo, bxhi
-    ! Standard DO used here; neighbor reads make DO CONCURRENT complex to verify safely.
     do k = bxlo(3), bxhi(3)
       do j = bxlo(2), bxhi(2)
         do i = bxlo(1), bxhi(1)
@@ -181,21 +180,21 @@ contains
 ! Fills Dirichlet boundary condition values in ghost cells.
 ! Iterates through components and applies vlo/vhi based on bc flags.
 !-----------------------------------------------------------------------
-  subroutine tortuosity_filbc(q, q_lo, q_hi, ncomp, & ! Removed p, p_lo/hi, p_ncomp as unused
+  subroutine tortuosity_filbc(q, q_lo, q_hi, ncomp, &
                               domlo, domhi, vlo, vhi, bc) &
                               bind(c, name='tortuosity_filbc')
 
     implicit none
 
     ! Argument Declarations
-    integer,          intent(in)    :: q_lo(3), q_hi(3)      ! Bounds of array q (incl. ghost cells)
-    integer,          intent(in)    :: domlo(amrex_spacedim) ! Domain lower corner
-    integer,          intent(in)    :: domhi(amrex_spacedim) ! Domain upper corner
-    integer,          intent(in)    :: ncomp               ! Number of components in q
-    real(amrex_real), intent(in)    :: vlo                 ! Value at low boundary
-    real(amrex_real), intent(in)    :: vhi                 ! Value at high boundary
+    integer,          intent(in)    :: q_lo(3), q_hi(3)              ! Bounds of array q (incl. ghost cells)
+    integer,          intent(in)    :: domlo(amrex_spacedim)         ! Domain lower corner
+    integer,          intent(in)    :: domhi(amrex_spacedim)         ! Domain upper corner
+    integer,          intent(in)    :: ncomp                         ! Number of components in q
+    real(amrex_real), intent(in)    :: vlo                           ! Value at low boundary
+    real(amrex_real), intent(in)    :: vhi                           ! Value at high boundary
     real(amrex_real), intent(inout) :: q(q_lo(1):q_hi(1), q_lo(2):q_hi(2), q_lo(3):q_hi(3), ncomp) ! Array to fill ghost cells
-    integer,          intent(in)    :: bc(amrex_spacedim, 2) ! BC flags (bc(dim, side), side=1 for low, 2 for high)
+    integer,          intent(in)    :: bc(amrex_spacedim, 2)         ! BC flags (bc(dim, side), side=1 for low, 2 for high)
 
     ! Local variables
     integer :: ilo, ihi, jlo, jhi, klo, khi ! Domain index limits
@@ -215,18 +214,28 @@ contains
         imin = q_lo(1)
         imax = ilo - 1
         if (bc(1, 1) == amrex_bc_ext_dir) then ! Check if BC type is Dirichlet
-          DO CONCURRENT (k = q_lo(3), q_hi(3), j = q_lo(2), q_hi(2), i = imin, imax)
-            q(i, j, k, n) = vlo
-          END DO
+          ! FIX: Replace DO CONCURRENT with nested DO loops
+          do k = q_lo(3), q_hi(3)
+            do j = q_lo(2), q_hi(2)
+              do i = imin, imax
+                q(i, j, k, n) = vlo
+              end do
+            end do
+          end do
         end if
       end if
       if (q_hi(1) > ihi) then ! Fill high-X ghost cells
         imin = ihi + 1
         imax = q_hi(1)
         if (bc(1, 2) == amrex_bc_ext_dir) then
-          DO CONCURRENT (k = q_lo(3), q_hi(3), j = q_lo(2), q_hi(2), i = imin, imax)
-            q(i, j, k, n) = vhi
-          END DO
+          ! FIX: Replace DO CONCURRENT with nested DO loops
+          do k = q_lo(3), q_hi(3)
+            do j = q_lo(2), q_hi(2)
+              do i = imin, imax
+                q(i, j, k, n) = vhi
+              end do
+            end do
+          end do
         end if
       end if
 
@@ -236,18 +245,28 @@ contains
         jmin = q_lo(2)
         jmax = jlo - 1
         if (bc(2, 1) == amrex_bc_ext_dir) then
-          DO CONCURRENT (k = q_lo(3), q_hi(3), j = jmin, jmax, i = q_lo(1), q_hi(1))
-             q(i, j, k, n) = vlo
-          END DO
+          ! FIX: Replace DO CONCURRENT with nested DO loops
+          do k = q_lo(3), q_hi(3)
+            do j = jmin, jmax
+              do i = q_lo(1), q_hi(1)
+                  q(i, j, k, n) = vlo
+              end do
+            end do
+          end do
         end if
       end if
       if (q_hi(2) > jhi) then ! Fill high-Y ghost cells
         jmin = jhi + 1
         jmax = q_hi(2)
         if (bc(2, 2) == amrex_bc_ext_dir) then
-          DO CONCURRENT (k = q_lo(3), q_hi(3), j = jmin, jmax, i = q_lo(1), q_hi(1))
-             q(i, j, k, n) = vhi
-          END DO
+          ! FIX: Replace DO CONCURRENT with nested DO loops
+          do k = q_lo(3), q_hi(3)
+            do j = jmin, jmax
+              do i = q_lo(1), q_hi(1)
+                  q(i, j, k, n) = vhi
+              end do
+            end do
+          end do
         end if
       end if
 #endif
@@ -258,18 +277,28 @@ contains
         kmin = q_lo(3)
         kmax = klo - 1
         if (bc(3, 1) == amrex_bc_ext_dir) then
-          DO CONCURRENT (k = kmin, kmax, j = q_lo(2), q_hi(2), i = q_lo(1), q_hi(1))
-             q(i, j, k, n) = vlo
-          END DO
+          ! FIX: Replace DO CONCURRENT with nested DO loops
+          do k = kmin, kmax
+            do j = q_lo(2), q_hi(2)
+              do i = q_lo(1), q_hi(1)
+                  q(i, j, k, n) = vlo
+              end do
+            end do
+          end do
         end if
       end if
       if (q_hi(3) > khi) then ! Fill high-Z ghost cells
         kmin = khi + 1
         kmax = q_hi(3)
         if (bc(3, 2) == amrex_bc_ext_dir) then
-          DO CONCURRENT (k = kmin, kmax, j = q_lo(2), q_hi(2), i = q_lo(1), q_hi(1))
-             q(i, j, k, n) = vhi
-          END DO
+          ! FIX: Replace DO CONCURRENT with nested DO loops
+          do k = kmin, kmax
+            do j = q_lo(2), q_hi(2)
+              do i = q_lo(1), q_hi(1)
+                  q(i, j, k, n) = vhi
+              end do
+            end do
+          end do
         end if
       end if
 #endif
@@ -290,19 +319,19 @@ contains
     implicit none
 
     ! Argument Declarations
-    integer,          intent(in)    :: q_lo(3), q_hi(3)      ! Bounds of output array q
-    integer,          intent(in)    :: p_lo(3), p_hi(3)      ! Bounds of input phase array p
-    integer,          intent(in)    :: lo(3), hi(3)          ! Valid region loop bounds
-    integer,          intent(in)    :: domlo(amrex_spacedim) ! Domain lower corner
-    integer,          intent(in)    :: domhi(amrex_spacedim) ! Domain upper corner
-    integer,          intent(in)    :: ncomp               ! Number of components in q
-    integer,          intent(in)    :: p_ncomp               ! Number of components in p
-    real(amrex_real), intent(in)    :: vlo                 ! Value at low boundary
-    real(amrex_real), intent(in)    :: vhi                 ! Value at high boundary
+    integer,          intent(in)    :: q_lo(3), q_hi(3)              ! Bounds of output array q
+    integer,          intent(in)    :: p_lo(3), p_hi(3)              ! Bounds of input phase array p
+    integer,          intent(in)    :: lo(3), hi(3)                  ! Valid region loop bounds
+    integer,          intent(in)    :: domlo(amrex_spacedim)         ! Domain lower corner
+    integer,          intent(in)    :: domhi(amrex_spacedim)         ! Domain upper corner
+    integer,          intent(in)    :: ncomp                         ! Number of components in q
+    integer,          intent(in)    :: p_ncomp                       ! Number of components in p
+    real(amrex_real), intent(in)    :: vlo                           ! Value at low boundary
+    real(amrex_real), intent(in)    :: vhi                           ! Value at high boundary
     real(amrex_real), intent(inout) :: q(q_lo(1):q_hi(1), q_lo(2):q_hi(2), q_lo(3):q_hi(3), ncomp) ! Array to fill with initial condition
     integer,          intent(in)    :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), p_ncomp) ! Input phase data (read from comp_phase)
-    integer,          intent(in)    :: phase               ! ID of the phase to initialize
-    integer,          intent(in)    :: dir                 ! Direction for linear gradient (0, 1, or 2)
+    integer,          intent(in)    :: phase                         ! ID of the phase to initialize
+    integer,          intent(in)    :: dir                           ! Direction for linear gradient (0, 1, or 2)
 
     ! Local variables
     integer :: i, j, k, n
@@ -327,21 +356,25 @@ contains
 
     ! Loop over components and valid region (lo:hi)
     do n = 1, ncomp
-      ! Using DO CONCURRENT (F2008+) as iterations are independent
-      DO CONCURRENT (k = lo(3), hi(3), j = lo(2), hi(2), i = lo(1), hi(1))
-        if (p(i, j, k, comp_phase) == phase) then
-          ! Get coordinate along the specified direction
-          select case (dir)
-          case (direction_x); coord = real(i - dom_lo_d, amrex_real)
-          case (direction_y); coord = real(j - dom_lo_d, amrex_real)
-          case (direction_z); coord = real(k - dom_lo_d, amrex_real)
-          end select
-          ! Linear interpolation: vlo + (coordinate / extent) * (vhi - vlo)
-          q(i, j, k, n) = vlo + coord * factor * (vhi - vlo)
-        else
-          q(i, j, k, n) = 0.0_amrex_real ! Set non-phase cells to zero
-        end if
-      END DO ! Concurrent i,j,k loop
+      ! FIX: Replace DO CONCURRENT with nested DO loops
+      do k = lo(3), hi(3)
+        do j = lo(2), hi(2)
+          do i = lo(1), hi(1)
+            if (p(i, j, k, comp_phase) == phase) then
+              ! Get coordinate along the specified direction
+              select case (dir)
+              case (direction_x); coord = real(i - dom_lo_d, amrex_real)
+              case (direction_y); coord = real(j - dom_lo_d, amrex_real)
+              case (direction_z); coord = real(k - dom_lo_d, amrex_real)
+              end select
+              ! Linear interpolation: vlo + (coordinate / extent) * (vhi - vlo)
+              q(i, j, k, n) = vlo + coord * factor * (vhi - vlo)
+            else
+              q(i, j, k, n) = 0.0_amrex_real ! Set non-phase cells to zero
+            end if
+          end do ! i loop
+        end do ! j loop
+      end do ! k loop
     end do ! n component loop
 
   end subroutine tortuosity_filic
