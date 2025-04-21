@@ -1,3 +1,10 @@
+// Test driver for the OpenImpala::VolumeFraction class.
+// Reads phase data (typically from a TIFF file), calculates the volume
+// fraction of specified phases using the VolumeFraction class, compares
+// the result against expected values (if provided) and/or a direct
+// summation using AMReX tools, and reports PASS/FAIL.
+// Configuration is handled via ParmParse inputs.
+
 #include "../io/TiffReader.H"  // Assuming defines OpenImpala::TiffReader
 #include "VolumeFraction.H"    // Assuming defines OpenImpala::VolumeFraction
 
@@ -13,18 +20,21 @@
 
 #include <AMReX.H>
 #include <AMReX_ParmParse.H>        // For reading parameters
-#include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory (optional for output)
+#include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory (optional for output)
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Box.H>
 #include <AMReX_IntVect.H>
 #include <AMReX_IArrayBox.H>
 #include <AMReX_iMultiFab.H>
-#include <AMReX_MultiFabUtil.H>    // For amrex::Loop, Array4
+#include <AMReX_MultiFabUtil.H>   // For amrex::Loop, Array4
 #include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, Reduce*
 #include <AMReX_ParallelReduce.H>   // For ParallelAllReduce
-#include <AMReX_Reduce.H>           // For amrex::ReduceSum
-#include <AMReX_Random.H>          // For potential synthetic data later
+// #include <AMReX_Reduce.H>           // <<< REMOVED: Not using Reduce::Sum anymore >>>
+#include <AMReX_Random.H>         // For potential synthetic data later
+#include <AMReX_MFIter.H>         // Include MFIter explicitly
+#include <AMReX_GpuQualifiers.H>  // <<< ADDED for AMREX_GPU_DEVICE >>>
+
 
 // --- Default Test Parameters ---
 
@@ -43,13 +53,13 @@ constexpr int default_depth = 100;
 constexpr double default_threshold_value = 127.5;
 constexpr int default_phase0_id = 0; // ID assigned to values <= threshold
 constexpr int default_phase1_id = 1; // ID assigned to values > threshold
-constexpr int default_comp = 0;     // Component index in iMultiFab for phase data
+constexpr int default_comp = 0;      // Component index in iMultiFab for phase data
 constexpr amrex::Real default_tolerance = 1e-9; // Tolerance for checking sums/results
 constexpr int default_box_size = 32; // Max grid size for BoxArray
 
 namespace // Anonymous namespace for internal helpers
 {
-    // Helper function to calculate VF directly using AMReX reductions
+    // Helper function to calculate VF directly using AMReX loops and reductions
     amrex::Real calculate_vf_direct(const amrex::iMultiFab& mf, int phase_id, int comp)
     {
         long long local_phase_count = 0;
@@ -58,15 +68,21 @@ namespace // Anonymous namespace for internal helpers
 #ifdef AMREX_USE_OMP
 #pragma omp parallel reduction(+:local_phase_count, local_total_count)
 #endif
-        for (amrex::MFIter mfi(mf, true); mfi.isValid(); ++mfi) // Use tiling iterator
+        // Use tiling iterator (true argument)
+        for (amrex::MFIter mfi(mf, true); mfi.isValid(); ++mfi)
         {
             const amrex::Box& bx = mfi.tilebox();
             const auto& fab = mf.const_array(mfi, comp); // Use specified component
 
-            long long box_phase_count = amrex::Reduce::Sum(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> long long {
-                return (fab(i, j, k) == phase_id) ? 1LL : 0LL;
+            // FIX: Replace Reduce::Sum with amrex::Loop
+            amrex::Loop(bx, [&] (int i, int j, int k) // Capture locals by reference for OMP reduction
+            {
+                if (fab(i, j, k) == phase_id) {
+                    local_phase_count += 1; // Directly increment thread-local sum (OMP handles reduction)
+                }
             });
-            local_phase_count += box_phase_count;
+            // End of replacement
+
             local_total_count += bx.numPts();
         }
 
@@ -125,15 +141,15 @@ int main (int argc, char* argv[])
 
         if (verbose > 0) {
             amrex::Print() << "\n--- VolumeFraction Test Configuration ---\n";
-            amrex::Print() << " TIF File:           " << tifffile << "\n";
-            amrex::Print() << " Phase IDs:          " << phase0_id << " (<= T), " << phase1_id << " (> T)\n";
-            amrex::Print() << " Phase Component:    " << phase_comp << "\n";
-            amrex::Print() << " Threshold Value:    " << threshold_val << "\n";
-            amrex::Print() << " Box Size:           " << box_size << "\n";
-            amrex::Print() << " Verbose:            " << verbose << "\n";
-            amrex::Print() << " Tolerance:          " << tolerance << "\n";
-            if (expected_vf0 >= 0.0) amrex::Print() << " Expected VF[" << phase0_id << "]:     " << expected_vf0 << "\n";
-            if (expected_vf1 >= 0.0) amrex::Print() << " Expected VF[" << phase1_id << "]:     " << expected_vf1 << "\n";
+            amrex::Print() << " TIF File:            " << tifffile << "\n";
+            amrex::Print() << " Phase IDs:           " << phase0_id << " (<= T), " << phase1_id << " (> T)\n";
+            amrex::Print() << " Phase Component:     " << phase_comp << "\n";
+            amrex::Print() << " Threshold Value:     " << threshold_val << "\n";
+            amrex::Print() << " Box Size:            " << box_size << "\n";
+            amrex::Print() << " Verbose:             " << verbose << "\n";
+            amrex::Print() << " Tolerance:           " << tolerance << "\n";
+            if (expected_vf0 >= 0.0) amrex::Print() << " Expected VF[" << phase0_id << "]:      " << expected_vf0 << "\n";
+            if (expected_vf1 >= 0.0) amrex::Print() << " Expected VF[" << phase1_id << "]:      " << expected_vf1 << "\n";
             amrex::Print() << "--------------------------------------\n\n";
         }
 
@@ -211,7 +227,7 @@ int main (int argc, char* argv[])
 
         if (expected_vf0 >= 0.0) { // Check global against expected
             if (std::abs(actual_vf0_global - expected_vf0) > tolerance) {
-                amrex::Abort("FAIL: Global Volume Fraction mismatch for phase " + std::to_string(phase0_id));
+                 amrex::Abort("FAIL: Global Volume Fraction mismatch for phase " + std::to_string(phase0_id));
             }
              if (verbose > 0) amrex::Print() << "  VF[" << phase0_id << "] Global Check: PASS\n";
         }
@@ -249,7 +265,7 @@ int main (int argc, char* argv[])
         if (std::abs(1.0 - vf_sum_global) > tolerance) {
             amrex::Warning("Global Volume Fractions do not sum to 1.0 within tolerance.");
         } else {
-             if (verbose > 0) amrex::Print() << "  Global Sum Check:   PASS\n";
+             if (verbose > 0) amrex::Print() << "  Global Sum Check:    PASS\n";
         }
         // Local sum check requires care in parallel if mf_phase has zero cells on some ranks
         if (mf_phase.boxArray().numPts() > 0 && std::abs(1.0 - vf_sum_local) > tolerance) {
@@ -275,10 +291,6 @@ int main (int argc, char* argv[])
 
 
         // --- Optional Synthetic Test Case ---
-        // Consider adding a small test case here that creates a simple iMultiFab
-        // programmatically (e.g., half 0, half 1) and checks VF results = 0.5.
-        // This isolates VolumeFraction logic from TiffReader.
-        // Example:
         /*
         if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Running synthetic test case...\n";
         // Define small box, geom, ba, dm, imf_synth
@@ -290,7 +302,7 @@ int main (int argc, char* argv[])
         // if (std::abs(synth_vf0 - 0.5) > tolerance || std::abs(synth_vf1 - 0.5) > tolerance) {
         //     amrex::Abort("FAIL: Synthetic test case failed.");
         // } else {
-        //     amrex::Print() << "  Synthetic Test:     PASS\n";
+        //     amrex::Print() << "  Synthetic Test:      PASS\n";
         // }
         */
 
