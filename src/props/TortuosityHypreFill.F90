@@ -1,6 +1,8 @@
 module tortuosity_poisson_3d_module
 
-  use amrex_fort_module, only : amrex_real, amrex_abort
+  ! FIX 1: Import amrex_abort from correct module
+  use amrex_fort_module, only : amrex_real
+  use amrex_error_module, only : amrex_abort
 
   implicit none
 
@@ -67,6 +69,7 @@ contains
     integer :: local_idx(nstencil)
     real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
+    integer :: u ! FIX 4: Declare implied-do loop variable
 
     ! Calculate box dimensions
     len_x = bxhi(1) - bxlo(1) + 1
@@ -81,153 +84,155 @@ contains
     coeff_c = 2.0_amrex_real * (coeff_x + coeff_y + coeff_z) ! Center coeff for -Laplacian
 
     ! Check consistency between expected nval and passed nval (only if box not empty)
+    ! Note: String conversion logic for abort message might be brittle
     if (expected_nval > 0 .and. expected_nval /= nval) then
-        call amrex_abort("tortuosity_fillmtx: nval mismatch. Expected " // &
-                         achar(int(log10(real(expected_nval)))+49) // ", got " // &
-                         achar(int(log10(real(nval)))+49) )
+       call amrex_abort("tortuosity_fillmtx: nval mismatch.")
     end if
     if (nval <= 0) return ! Nothing to do for empty box
 
-    ! Use DO CONCURRENT (Fortran 2008) for potential parallelization
-    ! Iterates over all points (i,j,k) within the specified box (bxlo:bxhi)
-    DO CONCURRENT (k = bxlo(3), bxhi(3), j = bxlo(2), bxhi(2), i = bxlo(1), bxhi(1))
+    ! FIX 2 & 3: Replace DO CONCURRENT with standard nested DO loops
+    do k = bxlo(3), bxhi(3)
+      do j = bxlo(2), bxhi(2)
+        do i = bxlo(1), bxhi(1)
 
-        ! Calculate the 1D index 'local_m' for the current point (i,j,k)
-        ! Assumes Fortran ordering (i varies fastest)
-        local_m = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
+          ! Calculate the 1D index 'local_m' for the current point (i,j,k)
+          ! Assumes Fortran ordering (i varies fastest)
+          local_m = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
 
-        ! Calculate the starting index in the flat 'a' array for this point
-        local_idx = (/ (nstencil*(local_m-1) + u, u=1,nstencil) /)
+          ! Calculate the starting index in the flat 'a' array for this point
+          local_idx = (/ (nstencil*(local_m-1) + u, u=1,nstencil) /)
 
-        ! --- Determine stencil based on phase ---
+          ! --- Determine stencil based on phase ---
 
-        if ( p(i,j,k,comp_phase) .ne. phase ) then
+          if ( p(i,j,k,comp_phase) .ne. phase ) then
 
-            ! Blocked cell (not the specified conductive phase)
-            ! Force solution to zero: phi = 0  =>  1*phi = 0
-            a(local_idx) = 0.0_amrex_real
-            a(local_idx(istn_c)) = 1.0_amrex_real
-            rhs(local_m) = 0.0_amrex_real
+              ! Blocked cell (not the specified conductive phase)
+              ! Force solution to zero: phi = 0  =>  1*phi = 0
+              a(local_idx) = 0.0_amrex_real
+              a(local_idx(istn_c)) = 1.0_amrex_real
+              rhs(local_m) = 0.0_amrex_real
 
-        else
+          else
 
-            ! Fluid cell (conductive phase)
-            ! Start with default stencil for -Laplacian(phi) = 0
-            a(local_idx(istn_c))  =  coeff_c
-            a(local_idx(istn_mx)) = -coeff_x
-            a(local_idx(istn_px)) = -coeff_x
-            a(local_idx(istn_my)) = -coeff_y
-            a(local_idx(istn_py)) = -coeff_y
-            a(local_idx(istn_mz)) = -coeff_z
-            a(local_idx(istn_pz)) = -coeff_z
-            rhs(local_m) = 0.0_amrex_real
+              ! Fluid cell (conductive phase)
+              ! Start with default stencil for -Laplacian(phi) = 0
+              a(local_idx(istn_c))  =  coeff_c
+              a(local_idx(istn_mx)) = -coeff_x
+              a(local_idx(istn_px)) = -coeff_x
+              a(local_idx(istn_my)) = -coeff_y
+              a(local_idx(istn_py)) = -coeff_y
+              a(local_idx(istn_mz)) = -coeff_z
+              a(local_idx(istn_pz)) = -coeff_z
+              rhs(local_m) = 0.0_amrex_real
 
-            ! --- Modify stencil for internal phase boundaries (Zero Neumann) ---
-            ! Check neighbors: if neighbor is blocked, modify stencil for zero flux across that face.
+              ! --- Modify stencil for internal phase boundaries (Zero Neumann) ---
+              ! Check neighbors: if neighbor is blocked, modify stencil for zero flux across that face.
 
-            ! -X face
-            if ( p(i-1,j,k,comp_phase) .ne. phase ) then
-                a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_x ! Center term absorbs flux
-                a(local_idx(istn_mx)) = 0.0_amrex_real                   ! No connection to neighbor
-            end if
-            ! +X face
-            if ( p(i+1,j,k,comp_phase) .ne. phase ) then
-                a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_x
-                a(local_idx(istn_px)) = 0.0_amrex_real
-            end if
-            ! -Y face
-            if ( p(i,j-1,k,comp_phase) .ne. phase ) then
-                a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_y
-                a(local_idx(istn_my)) = 0.0_amrex_real
-            end if
-            ! +Y face
-            if ( p(i,j+1,k,comp_phase) .ne. phase ) then
-                a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_y
-                a(local_idx(istn_py)) = 0.0_amrex_real
-            end if
-            ! -Z face
-            if ( p(i,j,k-1,comp_phase) .ne. phase ) then
-                a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_z
-                a(local_idx(istn_mz)) = 0.0_amrex_real
-            end if
-             ! +Z face
-            if ( p(i,j,k+1,comp_phase) .ne. phase ) then
-                a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_z
-                a(local_idx(istn_pz)) = 0.0_amrex_real
-            end if
+              ! -X face
+              if ( p(i-1,j,k,comp_phase) .ne. phase ) then
+                  a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_x ! Center term absorbs flux
+                  a(local_idx(istn_mx)) = 0.0_amrex_real                  ! No connection to neighbor
+              end if
+              ! +X face
+              if ( p(i+1,j,k,comp_phase) .ne. phase ) then
+                  a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_x
+                  a(local_idx(istn_px)) = 0.0_amrex_real
+              end if
+              ! -Y face
+              if ( p(i,j-1,k,comp_phase) .ne. phase ) then
+                  a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_y
+                  a(local_idx(istn_my)) = 0.0_amrex_real
+              end if
+              ! +Y face
+              if ( p(i,j+1,k,comp_phase) .ne. phase ) then
+                  a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_y
+                  a(local_idx(istn_py)) = 0.0_amrex_real
+              end if
+              ! -Z face
+              if ( p(i,j,k-1,comp_phase) .ne. phase ) then
+                  a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_z
+                  a(local_idx(istn_mz)) = 0.0_amrex_real
+              end if
+               ! +Z face
+              if ( p(i,j,k+1,comp_phase) .ne. phase ) then
+                  a(local_idx(istn_c))  = a(local_idx(istn_c))  - coeff_z
+                  a(local_idx(istn_pz)) = 0.0_amrex_real
+              end if
 
-        end if ! End of fluid/blocked check
+          end if ! End of fluid/blocked check
 
-        ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
-        ! This takes precedence over internal BC modifications if a cell is both.
+          ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
+          ! This takes precedence over internal BC modifications if a cell is both.
 
-        ! X-Direction Flow
-        if ( dir == direction_x ) then
-            if ( i == domlo(1) ) then
-                a(local_idx) = 0.0_amrex_real
-                a(local_idx(istn_c)) = 1.0_amrex_real
-                rhs(local_m) = vlo
-            else if ( i == domhi(1) ) then
-                a(local_idx) = 0.0_amrex_real
-                a(local_idx(istn_c)) = 1.0_amrex_real
-                rhs(local_m) = vhi
-            end if
-        ! Y-Direction Flow
-        else if ( dir == direction_y ) then
-            if ( j == domlo(2) ) then
-                a(local_idx) = 0.0_amrex_real
-                a(local_idx(istn_c)) = 1.0_amrex_real
-                rhs(local_m) = vlo
-            else if ( j == domhi(2) ) then
-                a(local_idx) = 0.0_amrex_real
-                a(local_idx(istn_c)) = 1.0_amrex_real
-                rhs(local_m) = vhi
-            end if
-        ! Z-Direction Flow
-        else if ( dir == direction_z ) then
-            if ( k == domlo(3) ) then
-                a(local_idx) = 0.0_amrex_real
-                a(local_idx(istn_c)) = 1.0_amrex_real
-                rhs(local_m) = vlo
-            else if ( k == domhi(3) ) then
-                a(local_idx) = 0.0_amrex_real
-                a(local_idx(istn_c)) = 1.0_amrex_real
-                rhs(local_m) = vhi
-            end if
-        end if ! End of Dirichlet BC overwrite
+          ! X-Direction Flow
+          if ( dir == direction_x ) then
+              if ( i == domlo(1) ) then
+                  a(local_idx) = 0.0_amrex_real
+                  a(local_idx(istn_c)) = 1.0_amrex_real
+                  rhs(local_m) = vlo
+              else if ( i == domhi(1) ) then
+                  a(local_idx) = 0.0_amrex_real
+                  a(local_idx(istn_c)) = 1.0_amrex_real
+                  rhs(local_m) = vhi
+              end if
+          ! Y-Direction Flow
+          else if ( dir == direction_y ) then
+              if ( j == domlo(2) ) then
+                  a(local_idx) = 0.0_amrex_real
+                  a(local_idx(istn_c)) = 1.0_amrex_real
+                  rhs(local_m) = vlo
+              else if ( j == domhi(2) ) then
+                  a(local_idx) = 0.0_amrex_real
+                  a(local_idx(istn_c)) = 1.0_amrex_real
+                  rhs(local_m) = vhi
+              end if
+          ! Z-Direction Flow
+          else if ( dir == direction_z ) then
+              if ( k == domlo(3) ) then
+                  a(local_idx) = 0.0_amrex_real
+                  a(local_idx(istn_c)) = 1.0_amrex_real
+                  rhs(local_m) = vlo
+              else if ( k == domhi(3) ) then
+                  a(local_idx) = 0.0_amrex_real
+                  a(local_idx(istn_c)) = 1.0_amrex_real
+                  rhs(local_m) = vhi
+              end if
+          end if ! End of Dirichlet BC overwrite
 
-        ! --- Calculate Initial Guess ---
-        ! Linear ramp between vlo and vhi along the flow direction
+          ! --- Calculate Initial Guess ---
+          ! Linear ramp between vlo and vhi along the flow direction
 
-        if ( dir == direction_x ) then
-            domain_extent = domhi(1) - domlo(1)
-            if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                 factor = 0.0_amrex_real
-            else
-                 factor = 1.0_amrex_real / domain_extent
-            end if
-            xinit(local_m) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
-        else if ( dir == direction_y ) then
-            domain_extent = domhi(2) - domlo(2)
-             if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                 factor = 0.0_amrex_real
-             else
-                 factor = 1.0_amrex_real / domain_extent
-             end if
-             xinit(local_m) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
-        else if ( dir == direction_z ) then
-             domain_extent = domhi(3) - domlo(3)
-             if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                 factor = 0.0_amrex_real
-             else
-                 factor = 1.0_amrex_real / domain_extent
-             end if
-             xinit(local_m) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
-        else ! Should not happen if dir is 0, 1, or 2
-             xinit(local_m) = 0.5_amrex_real * (vlo + vhi)
-        end if
+          if ( dir == direction_x ) then
+              domain_extent = domhi(1) - domlo(1)
+              if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                   factor = 0.0_amrex_real
+              else
+                   factor = 1.0_amrex_real / domain_extent
+              end if
+              xinit(local_m) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
+          else if ( dir == direction_y ) then
+              domain_extent = domhi(2) - domlo(2)
+               if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                   factor = 0.0_amrex_real
+               else
+                   factor = 1.0_amrex_real / domain_extent
+               end if
+               xinit(local_m) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
+          else if ( dir == direction_z ) then
+               domain_extent = domhi(3) - domlo(3)
+               if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                   factor = 0.0_amrex_real
+               else
+                   factor = 1.0_amrex_real / domain_extent
+               end if
+               xinit(local_m) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
+          else ! Should not happen if dir is 0, 1, or 2
+               xinit(local_m) = 0.5_amrex_real * (vlo + vhi)
+          end if
 
-    END DO ! End DO CONCURRENT loop
+        end do ! i
+      end do ! j
+    end do ! k
 
   end subroutine tortuosity_fillmtx
 
