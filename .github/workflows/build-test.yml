@@ -51,7 +51,6 @@ jobs:
             exit 1
           fi
           echo "Cache miss or invalid. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
-          # Use sudo for apptainer build as it often requires root privileges
           sudo apptainer build --force "$TARGET_SIF" "$RECIPE_FILE"
           BUILD_EXIT_CODE=$?
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
@@ -78,99 +77,90 @@ jobs:
         continue-on-error: true # Allow logs to upload even if build fails
         run: |
           echo "Running make clean..."
-          # Use sudo for apptainer exec if needed, depends on setup, but build used sudo
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make clean'
 
           echo "Running make all..."
-          # Run build, redirect stdout/stderr to log file
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)' > make_build_output.log 2>&1
-
           MAKE_EXIT_CODE=$?
           echo "Make build exit code: $MAKE_EXIT_CODE"
-          # Exit step with the make exit code (relevant for continue-on-error)
           exit $MAKE_EXIT_CODE
 
       # Step 7: Upload Build Log
       - name: Upload Build Log
-        # Always run this step to get logs, especially on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: make-build-log-${{ github.run_id }}
           path: make_build_output.log
           retention-days: 5
-          if-no-files-found: warn # Add this in case log file isn't created
+          if-no-files-found: warn
 
       # Step 8: Explicitly fail the JOB if the make build step failed
       - name: Check build outcome
         if: steps.make_build.outcome == 'failure'
         run: |
           echo "Make build command failed. See uploaded 'make-build-log' artifact for details."
-          exit 1 # Exit with non-zero code to fail the entire job run
+          exit 1
 
       # --- MODIFIED STEP 9 ---
-      # Step 9: Run Tests, Check/Copy Backtrace (only if build succeeded)
-      - name: Run Tests, Check/Copy Backtrace
+      # Step 9: Run Tests and Copy Backtrace
+      - name: Run Tests and Copy Backtrace
         id: make_test
-        if: steps.make_build.outcome == 'success' # Only run if build was successful
-        continue-on-error: true # Allow test logs/backtrace to upload even if tests fail
+        if: steps.make_build.outcome == 'success'
+        continue-on-error: true # Keep this true
         run: |
           echo "Running make test..."
           # Run tests, redirect stdout/stderr to log file
-          # Backtrace files should be created in the CWD (/src) inside container
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make test' > make_test_output.log 2>&1
-
           TEST_EXIT_CODE=$?
           echo "Make test exit code: $TEST_EXIT_CODE"
 
-          # --- Add checks for Backtrace files ---
-          echo "--- Checking for Backtrace files ---"
-          echo "Listing files in PWD (workspace: $PWD)..."
+          # --- Attempt to copy Backtrace files from container's /src to host's PWD ---
+          echo "Attempting to find and copy Backtrace files from /src inside container..."
+          # Use find within the container, execute cp to copy to the bound /src dir ($PWD). Ignore errors if not found.
+          sudo apptainer exec \
+            --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'find /src -maxdepth 1 -name "Backtrace.*" -exec echo "==> Found Backtrace file:" {} \; -exec cp {} /src/ \;' || true
+
+          echo "Listing files in PWD (workspace: $PWD) after copy attempt:"
           ls -la "$PWD"
-          echo "Listing files in /src inside container..."
-          # Use sudo for exec, consistent with previous steps
-          sudo apptainer exec ./dependency_image.sif ls -la /src
-          echo "Listing files in /tmp inside container..."
-          sudo apptainer exec ./dependency_image.sif ls -la /tmp
-          # --- End checks ---
+          # --- End copy attempt ---
 
           # Exit step with the original test exit code
+          echo "Exiting step with original test code: $TEST_EXIT_CODE"
           exit $TEST_EXIT_CODE
 
-      # Step 10: Upload Test Log and Backtrace (only if tests were attempted)
-      # (No changes needed here, relies on Backtrace.* being in PWD/workspace)
+      # Step 10: Upload Test Log and Backtrace (No change needed here)
       - name: Upload Test Log and Backtrace
-        # Run if tests were attempted (build succeeded), regardless of test outcome
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: make-test-output-${{ github.run_id }}
-          path: |                                     # Use multi-line path syntax
+          path: |
             make_test_output.log
-            Backtrace.* # Add Backtrace files (glob pattern checks PWD/workspace)
+            Backtrace.*
           retention-days: 5
-          if-no-files-found: warn                     # Don't fail job if Backtrace.* not found
+          if-no-files-found: warn
 
       # Step 11: Explicitly fail the JOB if the make test step failed
       - name: Check test outcome
-        # Only check if tests were actually run (build succeeded) and they failed
         if: steps.make_build.outcome == 'success' && steps.make_test.outcome == 'failure'
         run: |
           echo "Make test command failed. See uploaded 'make-test-output' artifact for details."
-          exit 1 # Exit with non-zero code to fail the entire job run
+          exit 1
 
       # Step 12: Save the SIF image to the cache
       - name: Save Dependency SIF Image Cache
-        # Run if the SIF was built locally (cache miss), regardless of build/test outcome
         if: steps.cache-restore-sif.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
