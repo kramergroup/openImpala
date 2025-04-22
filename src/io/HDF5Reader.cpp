@@ -129,8 +129,19 @@ bool HDF5Reader::readMetadataInternal()
             return false;
         }
         hsize_t file_dims[3];
+        // NOTE: HDF5 C API typically returns dimensions in C-order (slowest to fastest index: e.g., Z, Y, X)
+        // Check H5Sget_simple_extent_dims documentation or test to confirm order if needed.
+        // Assuming for now it returns [dim0, dim1, dim2] where dim0 is slowest varying.
+        // Let's assume HDF5 store is (Z, Y, X) for C-order default.
         dataspace.getSimpleExtentDims(file_dims);
 
+        // Assuming file_dims[0]=Z, file_dims[1]=Y, file_dims[2]=X for C order
+        // AMReX uses X, Y, Z order for width, height, depth
+        int dim_x = static_cast<int>(file_dims[2]);
+        int dim_y = static_cast<int>(file_dims[1]);
+        int dim_z = static_cast<int>(file_dims[0]);
+
+        // Store dimensions as int, check for potential overflow
         if (file_dims[0] > static_cast<hsize_t>(std::numeric_limits<int>::max()) ||
             file_dims[1] > static_cast<hsize_t>(std::numeric_limits<int>::max()) ||
             file_dims[2] > static_cast<hsize_t>(std::numeric_limits<int>::max()))
@@ -138,13 +149,15 @@ bool HDF5Reader::readMetadataInternal()
             amrex::Print() << "Error: [HDF5Reader] Dataset dimensions exceed integer limits.\n";
             return false;
         }
-        m_width  = static_cast<int>(file_dims[0]);
-        m_height = static_cast<int>(file_dims[1]);
-        m_depth  = static_cast<int>(file_dims[2]);
+
+        // Store in AMReX convention (Width=X, Height=Y, Depth=Z)
+        m_width  = dim_x;
+        m_height = dim_y;
+        m_depth  = dim_z;
 
         if (m_width <= 0 || m_height <= 0 || m_depth <= 0) {
              amrex::Print() << "Error: [HDF5Reader] Invalid dimensions read from dataset in " << m_filename
-                            << " (W=" << m_width << ", H=" << m_height << ", D=" << m_depth << ")\n";
+                            << " (X=" << m_width << ", Y=" << m_height << ", Z=" << m_depth << ")\n";
              return false;
         }
 
@@ -160,7 +173,7 @@ bool HDF5Reader::readMetadataInternal()
         m_is_read = true; // Metadata read successfully
         if (amrex::ParallelDescriptor::IOProcessor()) {
              amrex::Print() << "Successfully read HDF5 Metadata: " << m_filename << " [" << m_hdf5dataset << "]"
-                           << " (Dimensions: " << m_width << "x" << m_height << "x" << m_depth << ")\n";
+                           << " (Dimensions: X=" << m_width << ", Y=" << m_height << ", Z=" << m_depth << ")\n";
         }
         return true;
 
@@ -188,6 +201,7 @@ int HDF5Reader::height() const { return m_height; }
 int HDF5Reader::depth() const { return m_depth; }
 amrex::Box HDF5Reader::box() const {
     if (!m_is_read) return amrex::Box();
+    // AMReX Box uses (X, Y, Z) convention
     return amrex::Box(amrex::IntVect::TheZeroVector(),
                       amrex::IntVect(m_width - 1, m_height - 1, m_depth - 1));
 }
@@ -244,7 +258,7 @@ std::map<std::string, std::string> HDF5Reader::getAllAttributes() const {
 // Threshold Implementation (Main Refactored Logic)
 //-----------------------------------------------------------------------
 
-// Private template helper function with corrected memspace and added debugging
+// Private template helper function with corrected memspace and dimension ordering
 template<typename T_Native>
 void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
                                      int value_if_true, int value_if_false,
@@ -264,17 +278,13 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     else if constexpr (std::is_same_v<T_Native, double>)   { native_pred_type = H5::PredType::NATIVE_DOUBLE; }
     else { amrex::Abort("readAndThresholdFab: Unsupported native type T_Native"); }
 
-    // +++ DEBUG PRINTS +++
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: readAndThresholdFab<T_Native> entered for box: " << box << "\n";
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Using HDF5 PredType corresponding to T_Native.\n";
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Creating temp_fab...\n";
-    // +++ END DEBUG PRINTS +++
 
     amrex::BaseFab<T_Native> temp_fab(box, 1, amrex::The_Pinned_Arena()); // Use pinned memory
 
-    // +++ DEBUG PRINTS +++
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: temp_fab created. Getting filespace...\n";
-    // +++ END DEBUG PRINTS +++
 
     H5::DataSpace filespace = dataset.getSpace(); // Get file dataspace
 
@@ -282,31 +292,32 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     hsize_t offset[3], count[3];
     const amrex::IntVect& smallEnd = box.smallEnd();
     const amrex::IntVect& box_size = box.size();
-    offset[0] = static_cast<hsize_t>(smallEnd[0]); offset[1] = static_cast<hsize_t>(smallEnd[1]); offset[2] = static_cast<hsize_t>(smallEnd[2]);
-    count[0] = static_cast<hsize_t>(box_size[0]); count[1] = static_cast<hsize_t>(box_size[1]); count[2] = static_cast<hsize_t>(box_size[2]);
 
-    // +++ DEBUG PRINTS +++
-    amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Selecting hyperslab: offset=("
+    // <<< FIX: Reverse order for HDF5 (C-order: Z, Y, X) from AMReX Box (X, Y, Z) >>>
+    offset[0] = static_cast<hsize_t>(smallEnd[2]); // HDF5 Dim 0 = AMReX Dim 2 (Z)
+    offset[1] = static_cast<hsize_t>(smallEnd[1]); // HDF5 Dim 1 = AMReX Dim 1 (Y)
+    offset[2] = static_cast<hsize_t>(smallEnd[0]); // HDF5 Dim 2 = AMReX Dim 0 (X)
+
+    count[0] = static_cast<hsize_t>(box_size[2]); // HDF5 Dim 0 = AMReX Dim 2 (Z)
+    count[1] = static_cast<hsize_t>(box_size[1]); // HDF5 Dim 1 = AMReX Dim 1 (Y)
+    count[2] = static_cast<hsize_t>(box_size[0]); // HDF5 Dim 2 = AMReX Dim 0 (X)
+
+    amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Selecting hyperslab (HDF5 C-Order Z,Y,X): offset=("
                        << offset[0] << "," << offset[1] << "," << offset[2] << "), count=("
                        << count[0] << "," << count[1] << "," << count[2] << ")...\n";
-    // +++ END DEBUG PRINTS +++
 
     filespace.selectHyperslab(H5S_SELECT_SET, count, offset); // Select the chunk in the file
 
-    // <<< Define memory dataspace as 1D matching the contiguous buffer size >>>
+    // Define memory dataspace as 1D matching the contiguous buffer size
     hsize_t mem_dims[1] = { static_cast<hsize_t>(box.numPts()) }; // Total points in the box
     H5::DataSpace memspace(1, mem_dims);                         // Rank 1
 
-    // +++ DEBUG PRINTS +++
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Defined memory dataspace (Rank " << memspace.getSimpleExtentNdims() << " Size " << mem_dims[0] << "). Calling dataset.read()...\n";
-    // +++ END DEBUG PRINTS +++
 
     // *** Read data into temp_fab ***
     dataset.read(temp_fab.dataPtr(), native_pred_type, memspace, filespace);
 
-    // +++ DEBUG PRINTS +++
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: dataset.read() completed. Preparing for ParallelFor...\n";
-    // +++ END DEBUG PRINTS +++
 
     // Apply threshold using Array4 interface
     amrex::Array4<int> const& fab_arr = fab.array(); // Target iMultiFab Array4
@@ -320,9 +331,7 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
         fab_arr(i, j, k) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
     });
 
-    // +++ DEBUG PRINTS +++
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: ParallelFor completed. Exiting readAndThresholdFab for box: " << box << "\n";
-    // +++ END DEBUG PRINTS +++
 }
 
 
@@ -334,7 +343,6 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
     }
 
     try {
-        // Print native type info before loop
         if (amrex::ParallelDescriptor::IOProcessor()) {
             H5T_class_t dt_class = m_native_type.getClass();
             size_t dt_size = m_native_type.getSize();
@@ -352,34 +360,33 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             const amrex::Box& tile_box = mfi.tilebox();
             amrex::IArrayBox& fab = mf[mfi]; // Get current FArrayBox
 
-            // +++ Add Print BEFORE calling helper +++
-            // Using AllPrint in case IOProcessor crashes mid-loop
+            // Print box info before dispatch
             amrex::AllPrint() << "DEBUG: Processing tile_box: " << tile_box << "\n";
 
             // Dispatch based on stored native type
             if (m_native_type == H5::PredType::NATIVE_UINT8) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as uint8_t\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as uint8_t\n";
                  readAndThresholdFab<uint8_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_INT8) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as int8_t\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as int8_t\n";
                  readAndThresholdFab<int8_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_UINT16) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as uint16_t\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as uint16_t\n";
                  readAndThresholdFab<uint16_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_INT16) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as int16_t\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as int16_t\n";
                  readAndThresholdFab<int16_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_UINT32) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as uint32_t\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as uint32_t\n";
                  readAndThresholdFab<uint32_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_INT32) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as int32_t\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as int32_t\n";
                  readAndThresholdFab<int32_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_FLOAT) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as float\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as float\n";
                  readAndThresholdFab<float>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_DOUBLE) {
-                 amrex::AllPrint() << "DEBUG: Dispatching as double\n"; // Added this
+                 amrex::AllPrint() << "DEBUG: Dispatching as double\n";
                  readAndThresholdFab<double>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             }
             // Add cases for NATIVE_LONG, NATIVE_ULONG, INT64, UINT64 etc. if needed
