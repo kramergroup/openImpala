@@ -1,21 +1,2 @@
-# ============================================================
-# Input file for the tHDF5Reader test
-# Specifies the literal dataset path including special characters.
-# ============================================================
-
-# --- Required Parameters ---
-
-# Specifies the HDF5 file to be read by the test.
-filename = "data/SampleData_2Phase.h5"
-
-
-# Specifies the LITERAL internal path to the 3D dataset within the HDF5 file.
-# This includes the '$' characters exactly as they appear in the file.
-hdf5_dataset = "/t$F/channel$C"
-
-
-# --- Optional Parameters ---
-# verbose = 1
-# box_size = 32
-# threshold_value = 1.0 # Adjust based on data in the dataset named /t$F/channel$C
-# write_plotfile = 0
+filename     = "data/SampleData_2Phase.h5"
+hdf5_dataset     = "/t$F/channel$C"
