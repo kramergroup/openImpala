@@ -48,7 +48,31 @@ int main (int argc, char* argv[])
         int box_size = BOX_SIZE;
         double threshold_value = 1.0;
 
-        // +++ DEBUGGING ADDED +++
+
+        // +++ NEW MANUAL READ DEBUGGING +++
+        amrex::ParallelDescriptor::Barrier(); // Sync before IO
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "\nDEBUG: === Manually reading ./inputs line by line: ===\n";
+            std::ifstream manual_reader("./inputs");
+            if (manual_reader) {
+                std::string line;
+                int line_num = 1;
+                while (std::getline(manual_reader, line)) {
+                    // Print line number and content
+                    amrex::Print() << "DEBUG: Manual Line " << line_num++ << ": [" << line << "]\n";
+                    // You could add checks here for line length, specific characters etc. if needed
+                }
+                manual_reader.close();
+                amrex::Print() << "DEBUG: === End of manual read. ===\n";
+            } else {
+                amrex::Print() << "DEBUG: Manual read FAILED - could not open ./inputs.\n";
+            }
+        }
+        amrex::ParallelDescriptor::Barrier(); // Sync after IO
+        // +++ END NEW MANUAL READ DEBUGGING +++
+
+
+        // +++ DEBUGGING ADDED PREVIOUSLY (Checks accessibility and ParmParse creation/call) +++
         amrex::ParallelDescriptor::Barrier(); // Ensure all ranks sync before printing/checking
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\nDEBUG: === Entering ParmParse Section ===\n";
@@ -56,11 +80,9 @@ int main (int argc, char* argv[])
             std::ifstream check_inputs("./inputs");
             if (check_inputs) {
                  amrex::Print() << "DEBUG: SUCCESS - './inputs' file exists and is readable.\n";
-                 // Optional: You could read/print the first few lines here if needed, but be careful with file pointers.
                  check_inputs.close(); // Close the check stream
             } else {
                  amrex::Print() << "DEBUG: FAILED - './inputs' file NOT found or readable right before ParmParse!\n";
-                 // This would explain the "not found" error if it occurs
             }
             amrex::Print() << "DEBUG: About to create ParmParse object (no prefix).\n";
         }
@@ -110,6 +132,7 @@ int main (int argc, char* argv[])
         } // End of ParmParse scope
 
         // Simple check if input HDF5 file exists (using the value read by ParmParse)
+        // Make sure to use the RELATIVE path "data/..." in the input file for this check to work correctly
         {
             std::ifstream test_ifs(hdf5_filename);
             if (!test_ifs) {
