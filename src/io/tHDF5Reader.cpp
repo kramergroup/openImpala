@@ -60,7 +60,6 @@ int main (int argc, char* argv[])
                 while (std::getline(manual_reader, line)) {
                     // Print line number and content
                     amrex::Print() << "DEBUG: Manual Line " << line_num++ << ": [" << line << "]\n";
-                    // You could add checks here for line length, specific characters etc. if needed
                 }
                 manual_reader.close();
                 amrex::Print() << "DEBUG: === End of manual read. ===\n";
@@ -72,7 +71,7 @@ int main (int argc, char* argv[])
         // +++ END NEW MANUAL READ DEBUGGING +++
 
 
-        // +++ DEBUGGING ADDED PREVIOUSLY (Checks accessibility and ParmParse creation/call) +++
+        // +++ DEBUGGING ADDED PREVIOUSLY (Checks accessibility) +++
         amrex::ParallelDescriptor::Barrier(); // Ensure all ranks sync before printing/checking
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\nDEBUG: === Entering ParmParse Section ===\n";
@@ -87,22 +86,33 @@ int main (int argc, char* argv[])
             amrex::Print() << "DEBUG: About to create ParmParse object (no prefix).\n";
         }
         amrex::ParallelDescriptor::Barrier(); // Sync again before proceeding
-        // +++ END DEBUGGING +++
+        // +++ END ACCESSIBILITY DEBUGGING +++
 
         { // Use ParmParse to read parameters from the './inputs' file
             amrex::ParmParse pp; // No prefix, reads from root level of ./inputs
 
-            // +++ DEBUGGING ADDED +++
+            // +++ LATEST DEBUGGING: Check if ParmParse contains the key +++
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "DEBUG: ParmParse object created. Attempting pp.get(\"filename\", ...)\n";
+                 amrex::Print() << "DEBUG: ParmParse object created. Checking pp.contains(\"filename\")...\n";
+                 if (pp.contains("filename")) {
+                     amrex::Print() << "DEBUG: SUCCESS - pp.contains(\"filename\") is TRUE.\n";
+                 } else {
+                     amrex::Print() << "DEBUG: FAILED - pp.contains(\"filename\") is FALSE!\n";
+                     // If this prints, get() will definitely fail.
+                     // Optional: Abort here if needed.
+                     // amrex::Abort("ParmParse does not contain 'filename' key!");
+                 }
+                 amrex::Print() << "DEBUG: Now attempting pp.get(\"filename\", ...)\n";
             }
-            // +++ END DEBUGGING +++
+            amrex::ParallelDescriptor::Barrier(); // Sync before the potentially failing get()
+            // +++ End contains check +++
+
 
             // Use get() to REQUIRE the parameter from the inputs file.
             // This is where the original error occurred according to the log
-            pp.get("filename", hdf5_filename);   // EXPECTS 'filename = /path/to/file.h5' in inputs
+            pp.get("filename", hdf5_filename);   // EXPECTS 'filename = data/SampleData_2Phase.h5' in inputs
 
-            // +++ DEBUGGING ADDED +++
+            // +++ DEBUGGING for successful get("filename") +++
             if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "DEBUG: SUCCESS - pp.get(\"filename\") returned: " << hdf5_filename << "\n";
                  amrex::Print() << "DEBUG: Attempting pp.get(\"hdf5_dataset\", ...)\n";
@@ -111,7 +121,7 @@ int main (int argc, char* argv[])
 
             pp.get("hdf5_dataset", hdf5_dataset); // EXPECTS 'hdf5_dataset = /t$F/channel$C' in inputs
 
-            // +++ DEBUGGING ADDED +++
+            // +++ DEBUGGING for successful get("hdf5_dataset") +++
              if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "DEBUG: SUCCESS - pp.get(\"hdf5_dataset\") returned: " << hdf5_dataset << "\n";
                  amrex::Print() << "DEBUG: Attempting optional queries...\n";
@@ -123,7 +133,7 @@ int main (int argc, char* argv[])
             pp.query("box_size", box_size);
             pp.query("threshold_value", threshold_value);
 
-            // +++ DEBUGGING ADDED +++
+            // +++ DEBUGGING after optional queries +++
              if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "DEBUG: Optional queries finished.\n";
                  amrex::Print() << "DEBUG: === Exiting ParmParse Scope ===\n\n";
@@ -136,8 +146,8 @@ int main (int argc, char* argv[])
         {
             std::ifstream test_ifs(hdf5_filename);
             if (!test_ifs) {
-                 amrex::Error("Error: Cannot open input file specified by 'filename': " + hdf5_filename + "\n"
-                                "       Ensure './inputs' file exists and specifies correct path relative to execution dir.");
+                 amrex::Error("Error: Cannot open input HDF5 file specified by 'filename': " + hdf5_filename + "\n"
+                                "       Ensure './inputs' specifies correct path relative to execution dir (e.g., data/...).");
             }
         }
 
