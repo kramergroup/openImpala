@@ -135,7 +135,7 @@ int main (int argc, char* argv[])
             std::ifstream test_ifs(hdf5_filename);
             if (!test_ifs) {
                  amrex::Error("Error: Cannot open input HDF5 file specified by 'filename': " + hdf5_filename + "\n"
-                                "       Value came from input file '" + amrex::ParmParse::get_inputs_file() + "' or command line.");
+                                "       Value came from input file '" + amrex::get_input_filename() + "' or command line.");
                  // Note: amrex::ParmParse::getInputsfilename() returns the name of the file read by Initialize
             } else {
                  if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Successfully opened HDF5 file '" << hdf5_filename << "' for check.\n";
