@@ -130,7 +130,7 @@ test: tests
 	        input_file_arg=""; \
 	        if [ -f "./inputs" ]; then input_file_arg="./inputs"; fi; \
 	        echo "  Executing: mpirun -np 1 --allow-run-as-root $$tst $$input_file_arg"; \
-	        if mpirun -np 1 --allow-run-as-root $$tst $$input_file_arg; then \
+	        if mpirun -np 1 --allow-run-as-root $$tst $$input_file_arg amrex.verbose=0; then \
 	            echo "  PASS: $$tst"; \
 	        else \
 	            echo "  FAIL: $$tst"; \
