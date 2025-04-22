@@ -38,8 +38,7 @@ bool determineHostEndianness() {
 // Cache the host endianness result once at startup
 const static bool host_is_little_endian = determineHostEndianness();
 
-// *** ADDED HELPER FUNCTION based on errors and usage in threshold ***
-// Force inline as this is performance critical inside a loop
+// Helper function to reconstruct value from bytes, handling endianness
 template <typename T>
 AMREX_FORCE_INLINE T reconstructValue(const RawReader::ByteType* src_ptr, const size_t bytes_to_read, const bool needs_swap)
 {
@@ -113,7 +112,6 @@ bool RawReader::readFile(const std::string& filename,
 
     // --- Validate Inputs ---
     if (m_filename.empty()) {
-        // Use Warning maybe? Or let readRawFileInternal handle it? Let's make it an error here.
         amrex::Print() << "Error: [RawReader] No filename provided.\n";
         return false;
     }
@@ -151,24 +149,14 @@ bool RawReader::readFile(const std::string& filename,
     return success;
 }
 
-// <<< START OF MODIFIED readRawFileInternal with DEBUG prints >>>
+
+// <<< START OF CORRECTED readRawFileInternal (DEBUG prints removed) >>>
 bool RawReader::readRawFileInternal()
 {
     // --- Calculate Expected Size ---
     const size_t bytes_per_voxel = getBytesPerVoxel();
-    // +++ DEBUG PRINTS +++
-    amrex::Print() << "DEBUG RawReader: Entering readRawFileInternal.\n";
-    amrex::Print() << "DEBUG RawReader: m_width = " << m_width << "\n";
-    amrex::Print() << "DEBUG RawReader: m_height = " << m_height << "\n";
-    amrex::Print() << "DEBUG RawReader: m_depth = " << m_depth << "\n";
-    amrex::Print() << "DEBUG RawReader: m_data_type (enum val) = " << static_cast<int>(m_data_type) << "\n";
-    amrex::Print() << "DEBUG RawReader: bytes_per_voxel = " << bytes_per_voxel << "\n";
-    // +++ END DEBUG PRINTS +++
-
-
     if (bytes_per_voxel == 0) {
-        // This case should ideally be caught by the UNKNOWN check in readFile,
-        // but defensively check here too.
+        // This case should ideally be caught by the UNKNOWN check in readFile
         amrex::Print() << "Internal Error: [RawReader] Invalid data type resulted in zero bytes per voxel.\n";
         return false;
     }
@@ -177,42 +165,23 @@ bool RawReader::readRawFileInternal()
     long long total_voxels = static_cast<long long>(m_width) * m_height * m_depth;
     long long expected_bytes_ll = total_voxels * bytes_per_voxel;
 
-    // +++ DEBUG PRINTS +++
-    amrex::Print() << "DEBUG RawReader: total_voxels = " << total_voxels << "\n";
-    amrex::Print() << "DEBUG RawReader: expected_bytes_ll = " << expected_bytes_ll << "\n";
-    // Using unsigned long long for size_t::max() to avoid potential negative interpretation of the cast
-    amrex::Print() << "DEBUG RawReader: size_t_max (unsigned) = " << std::numeric_limits<size_t>::max() << "\n";
-    amrex::Print() << "DEBUG RawReader: casted size_t_max (long long) = " << static_cast<long long>(std::numeric_limits<size_t>::max()) << "\n";
-    // +++ END DEBUG PRINTS +++
-
-
     if (expected_bytes_ll <= 0) {
-        // This could happen if dimensions are large enough to overflow 'long long' during multiplication
-        // or if somehow bytes_per_voxel was negative (which it shouldn't be).
+        // This could happen if dimensions are large enough to overflow 'long long'
         amrex::Print() << "Error: [RawReader] Calculated data size (" << expected_bytes_ll << ") is zero or negative.\n";
         return false;
     }
 
     // --- Check against size_t max ---
-    // Check if the required size exceeds the maximum value representable by size_t.
-    // Comparing unsigned size_t::max() directly with signed expected_bytes_ll is tricky.
-    // A safer approach: check if expected_bytes_ll fits within the positive range of long long
-    // AND if it exceeds the max value of size_t *if* size_t is smaller than long long.
-    // However, let's keep the original check for now and analyze the debug output.
-    if (expected_bytes_ll > static_cast<long long>(std::numeric_limits<size_t>::max()))
+    // Revised check: Compare expected_bytes_ll (known positive) as unsigned with size_t::max
+    if (static_cast<unsigned long long>(expected_bytes_ll) > std::numeric_limits<size_t>::max())
     {
-        // *** THIS IS THE BLOCK THAT SEEMS TO BE EXECUTING ***
         amrex::Print() << "Error: [RawReader] Calculated data size (" << expected_bytes_ll
-                       << ") exceeds maximum vector capacity (interpreted size_t max as "
-                       << static_cast<long long>(std::numeric_limits<size_t>::max()) << ").\n"; // Modified error slightly
+                       << ") exceeds maximum value representable by size_t ("
+                       << std::numeric_limits<size_t>::max() << ").\n"; // Corrected error message
         return false;
     }
-    // If the check passes, it should be safe to cast to size_t.
+    // If the check passes, it's safe to cast to size_t.
     const size_t expected_bytes = static_cast<size_t>(expected_bytes_ll);
-    // +++ DEBUG PRINT +++
-    amrex::Print() << "DEBUG RawReader: expected_bytes (size_t) = " << expected_bytes << "\n";
-    // +++ END DEBUG PRINT +++
-
 
     // --- Open File ---
     std::ifstream file(m_filename, std::ios::binary | std::ios::ate); // Open at end to get size
@@ -223,10 +192,6 @@ bool RawReader::readRawFileInternal()
 
     // --- Check File Size ---
     std::streamsize file_size = file.tellg();
-    // +++ ADD DEBUG FOR FILE SIZE +++
-    amrex::Print() << "DEBUG RawReader: Actual file size (streamsize) = " << file_size << "\n";
-    // +++ END DEBUG +++
-
     if (file_size < 0) {
         amrex::Print() << "Error: [RawReader] Could not determine file size or file size is negative for: " << m_filename << "\n";
         file.close();
@@ -250,16 +215,9 @@ bool RawReader::readRawFileInternal()
         }
      }
 
-
     // --- Allocate Memory ---
     try {
-        // +++ DEBUG PRINT +++
-        amrex::Print() << "DEBUG RawReader: Attempting m_raw_bytes.resize(" << expected_bytes << ")...\n";
-        // +++ END DEBUG PRINT +++
         m_raw_bytes.resize(expected_bytes);
-        // +++ DEBUG PRINT +++
-        amrex::Print() << "DEBUG RawReader: Resize successful.\n";
-        // +++ END DEBUG PRINT +++
     } catch (const std::exception& e) { // Catch bad_alloc and length_error
         amrex::Print() << "Error: [RawReader] Failed to allocate " << expected_bytes
                        << " bytes for raw data: " << e.what() << "\n";
@@ -269,9 +227,6 @@ bool RawReader::readRawFileInternal()
 
     // --- Read Data ---
     file.seekg(0, std::ios::beg); // Go back to the beginning to read
-    // +++ DEBUG PRINT +++
-    amrex::Print() << "DEBUG RawReader: Attempting file.read()...\n";
-    // +++ END DEBUG PRINT +++
     if (!file.read(reinterpret_cast<char*>(m_raw_bytes.data()), expected_bytes)) {
         // Read failed, report stream state
         amrex::Print() << "Error: [RawReader] Failed to read " << expected_bytes << " bytes from file: " << m_filename << "\n";
@@ -281,9 +236,6 @@ bool RawReader::readRawFileInternal()
         m_raw_bytes.clear(); // Clear potentially partially read data
         return false;
     }
-    // +++ DEBUG PRINT +++
-    amrex::Print() << "DEBUG RawReader: File read successful.\n";
-    // +++ END DEBUG PRINT +++
 
     file.close();
 
@@ -291,7 +243,7 @@ bool RawReader::readRawFileInternal()
 
     return true; // Success!
 }
-// <<< END OF MODIFIED readRawFileInternal >>>
+// <<< END OF CORRECTED readRawFileInternal >>>
 
 
 //-----------------------------------------------------------------------
@@ -473,6 +425,7 @@ void RawReader::threshold(double threshold_value, int value_if_true, int value_i
             {
                 // --- Calculate Offset ---
                 // Use size_t consistently for indexing calculations to prevent overflow
+                // Ensure dimensions are positive (checked in readFile)
                 size_t plane_size = static_cast<size_t>(current_width) * static_cast<size_t>(current_height);
                 size_t row_offset = static_cast<size_t>(j) * static_cast<size_t>(current_width);
                 size_t idx_1d = static_cast<size_t>(k) * plane_size + row_offset + static_cast<size_t>(i);
