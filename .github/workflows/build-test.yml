@@ -40,6 +40,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-apptainer-sif-
 
+      # Step 3.5: Debug cache hit status
+      - name: Debug cache hit status
+        if: always()
+        run: echo "Cache hit status is >>>${{ steps.cache-restore-sif.outputs.cache-hit }}<<<"
+
       # Step 4: Build Dependency SIF Image (if cache miss)
       - name: Build Dependency SIF Image Locally (if cache miss)
         if: steps.cache-restore-sif.outputs.cache-hit != 'true'
@@ -51,11 +56,12 @@ jobs:
             exit 1
           fi
           echo "Cache miss or invalid. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
+          echo "Executing: sudo apptainer build --force \"$TARGET_SIF\" \"$RECIPE_FILE\""
           sudo apptainer build --force "$TARGET_SIF" "$RECIPE_FILE"
           BUILD_EXIT_CODE=$?
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
             echo "Error: Apptainer SIF build failed with exit code $BUILD_EXIT_CODE."
-            exit $BUILD_EXIT_CODE
+            exit $BUILD_EXIT_CODE # Job stops here if SIF build fails
           fi
           echo "Apptainer SIF build successful."
           ls -lh ./dependency_image.sif
@@ -71,7 +77,16 @@ jobs:
             ls -lh ./dependency_image.sif
           fi
 
-      # Step 6: Build OpenImpala using Dependency SIF
+      # Step 6: Save the SIF image to the cache <<< MOVED & RENUMBERED (was Step 12)
+      - name: Save Dependency SIF Image Cache
+        # Condition: Only run if Step 3 missed cache (meaning Step 4 ran and *succeeded*)
+        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dependency_image.sif
+          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
+
+      # Step 7: Build OpenImpala using Dependency SIF <<< RENUMBERED (was Step 6)
       - name: Build OpenImpala using Dependency SIF
         id: make_build
         continue-on-error: true # Allow logs to upload even if build fails
@@ -91,7 +106,7 @@ jobs:
           echo "Make build exit code: $MAKE_EXIT_CODE"
           exit $MAKE_EXIT_CODE
 
-      # Step 7: Upload Build Log
+      # Step 8: Upload Build Log <<< RENUMBERED (was Step 7)
       - name: Upload Build Log
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,17 +116,17 @@ jobs:
           retention-days: 5
           if-no-files-found: warn
 
-      # Step 8: Explicitly fail the JOB if the make build step failed
+      # Step 9: Explicitly fail the JOB if the make build step failed <<< RENUMBERED (was Step 8)
       - name: Check build outcome
         if: steps.make_build.outcome == 'failure'
         run: |
           echo "Make build command failed. See uploaded 'make-build-log' artifact for details."
-          exit 1
+          exit 1 # Job stops here if make build failed
 
-      # --- MODIFIED STEP 9 ---
-      # Step 9: Run Tests and Copy Backtrace
+      # Step 10: Run Tests and Copy Backtrace <<< RENUMBERED (was Step 9)
       - name: Run Tests and Copy Backtrace
         id: make_test
+        # This step is only reached if the build (Step 7/9) succeeded
         if: steps.make_build.outcome == 'success'
         continue-on-error: true # Keep this true
         run: |
@@ -140,8 +155,9 @@ jobs:
           echo "Exiting step with original test code: $TEST_EXIT_CODE"
           exit $TEST_EXIT_CODE
 
-      # Step 10: Upload Test Log and Backtrace (No change needed here)
+      # Step 11: Upload Test Log and Backtrace <<< RENUMBERED (was Step 10)
       - name: Upload Test Log and Backtrace
+        # This step is only reached if the build (Step 7/9) succeeded
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
@@ -152,17 +168,10 @@ jobs:
           retention-days: 5
           if-no-files-found: warn
 
-      # Step 11: Explicitly fail the JOB if the make test step failed
+      # Step 12: Explicitly fail the JOB if the make test step failed <<< RENUMBERED (was Step 11)
       - name: Check test outcome
+        # This step is only reached if the build (Step 7/9) succeeded
         if: steps.make_build.outcome == 'success' && steps.make_test.outcome == 'failure'
         run: |
           echo "Make test command failed. See uploaded 'make-test-output' artifact for details."
-          exit 1
-
-      # Step 12: Save the SIF image to the cache
-      - name: Save Dependency SIF Image Cache
-        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: dependency_image.sif
-          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
+          exit 1 # Job stops here if make test failed
