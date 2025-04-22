@@ -6,11 +6,12 @@
 # --- Required Parameters ---
 
 # Specifies the HDF5 file to be read by the test.
-filename     = data/SampleData_2Phase.h5
+filename = "data/SampleData_2Phase.h5"
+
 
 # Specifies the LITERAL internal path to the 3D dataset within the HDF5 file.
 # This includes the '$' characters exactly as they appear in the file.
-hdf5_dataset = /t$F/channel$C
+hdf5_dataset = "/t$F/channel$C"
 
 
 # --- Optional Parameters ---
