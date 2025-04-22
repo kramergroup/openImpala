@@ -51,6 +51,7 @@ jobs:
             exit 1
           fi
           echo "Cache miss or invalid. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
+          # Use sudo for apptainer build as it often requires root privileges
           sudo apptainer build --force "$TARGET_SIF" "$RECIPE_FILE"
           BUILD_EXIT_CODE=$?
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
@@ -77,6 +78,7 @@ jobs:
         continue-on-error: true # Allow logs to upload even if build fails
         run: |
           echo "Running make clean..."
+          # Use sudo for apptainer exec if needed, depends on setup, but build used sudo
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
@@ -103,6 +105,7 @@ jobs:
           name: make-build-log-${{ github.run_id }}
           path: make_build_output.log
           retention-days: 5
+          if-no-files-found: warn # Add this in case log file isn't created
 
       # Step 8: Explicitly fail the JOB if the make build step failed
       - name: Check build outcome
@@ -115,10 +118,11 @@ jobs:
       - name: Run Tests using Dependency SIF
         id: make_test
         if: steps.make_build.outcome == 'success' # Only run if build was successful
-        continue-on-error: true # Allow test logs to upload even if tests fail
+        continue-on-error: true # Allow test logs/backtrace to upload even if tests fail
         run: |
           echo "Running make test..."
           # Run tests, redirect stdout/stderr to log file
+          # Backtrace files should be created in the CWD (/src) inside container
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
@@ -129,22 +133,25 @@ jobs:
           # Exit step with the test exit code (relevant for continue-on-error)
           exit $TEST_EXIT_CODE
 
-      # Step 10: Upload Test Log (only if tests were attempted)
-      - name: Upload Test Log
+      # Step 10: Upload Test Log and Backtrace (only if tests were attempted)
+      - name: Upload Test Log and Backtrace
         # Run if tests were attempted (build succeeded), regardless of test outcome
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: make-test-log-${{ github.run_id }}
-          path: make_test_output.log
+          name: make-test-output-${{ github.run_id }} # Changed name slightly for clarity
+          path: |                                     # Use multi-line path syntax
+            make_test_output.log
+            Backtrace.* # Add Backtrace files (glob pattern checks PWD)
           retention-days: 5
+          if-no-files-found: warn                     # Don't fail job if Backtrace.* not found
 
       # Step 11: Explicitly fail the JOB if the make test step failed
       - name: Check test outcome
         # Only check if tests were actually run (build succeeded) and they failed
         if: steps.make_build.outcome == 'success' && steps.make_test.outcome == 'failure'
         run: |
-          echo "Make test command failed. See uploaded 'make-test-log' artifact for details."
+          echo "Make test command failed. See uploaded 'make-test-output' artifact for details."
           exit 1 # Exit with non-zero code to fail the entire job run
 
       # Step 12: Save the SIF image to the cache
