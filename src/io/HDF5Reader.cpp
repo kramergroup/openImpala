@@ -23,6 +23,7 @@
 #include <AMReX_BaseFab.H>      // Needed for BaseFab<T> temporary buffer
 #include <AMReX_Array4.H>       // Needed for Array4 access
 #include <AMReX_ParallelDescriptor.H> // Needed for MyProc in debug prints
+#include <AMReX_GpuAssert.H>    // Needed for AMREX_ASSERT
 
 // --- HDF5 C++ API Include ---
 #include <H5Cpp.h>
@@ -329,26 +330,44 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     amrex::Array4<const T_Native> const& temp_arr = temp_fab.const_array(); // Source temp data Array4
 
     // Use ParallelFor for potential OMP/GPU execution
-    // ********************************************************************
-    // *** MODIFICATION: Temporarily removed noexcept, added try-catch  ***
-    // ********************************************************************
-    amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) /* noexcept */ // DEBUG: Temporarily removed noexcept
+    // Removed noexcept and added try-catch for debugging
+    amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) /* noexcept */
     {
-        try { // DEBUG: Add try-catch for debugging ParallelFor exceptions
-             // Convert native value to double for comparison
-             double value_as_double = static_cast<double>(temp_arr(i, j, k));
-             fab_arr(i, j, k) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
+        // ********************************************************************
+        // *** MODIFICATION: Added Assertions and Kept Try/Catch            ***
+        // ********************************************************************
+        try {
+            // Check if pointers are valid (basic check)
+            // Note: AMREX_ASSERT might behave differently on host vs device,
+            // but these checks primarily target CPU execution issues first.
+            AMREX_ASSERT(temp_arr.data() != nullptr);
+            AMREX_ASSERT(fab_arr.data() != nullptr);
+
+            // Check bounds explicitly using Array4::contains or Box::contains
+            // Using Box::contains here as Array4::contains might not be host/device
+            amrex::IntVect iv(i,j,k);
+            AMREX_ASSERT(box.contains(iv));
+            // If fab_arr and temp_arr might have different boxes than the loop box 'box':
+            // AMREX_ASSERT(amrex::makeBox(fab_arr).contains(iv));
+            // AMREX_ASSERT(amrex::makeBox(temp_arr).contains(iv));
+
+            // Original logic
+            double value_as_double = static_cast<double>(temp_arr(i, j, k));
+            fab_arr(i, j, k) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
+
         } catch (const std::exception& e) {
-             // Using amrex::Print here might be tricky from device code,
-             // but okay for CPU OpenMP threads. Might generate lots of output.
+             // Using amrex::Print here is primarily for CPU/OpenMP threads.
+             // Might not work reliably or at all from GPU kernels.
              amrex::Print() << "EXCEPTION in ParallelFor [" << i << "," << j << "," << k << "]: " << e.what() << "\n";
+             // Consider using amrex::Abort inside catch on device if needed,
+             // though it might obscure the original error location.
         } catch (...) {
              amrex::Print() << "UNKNOWN EXCEPTION in ParallelFor [" << i << "," << j << "," << k << "]\n";
         }
+        // ********************************************************************
+        // *** END MODIFICATION                                             ***
+        // ********************************************************************
     });
-    // ********************************************************************
-    // *** END MODIFICATION                                             ***
-    // ********************************************************************
 
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: ParallelFor completed. Exiting readAndThresholdFab for box: " << box << "\n";
 }
