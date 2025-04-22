@@ -333,40 +333,25 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     // Removed noexcept and added try-catch for debugging
     amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) /* noexcept */
     {
-        // ********************************************************************
-        // *** MODIFICATION: Added Assertions and Kept Try/Catch            ***
-        // ********************************************************************
+        // Added Assertions and Kept Try/Catch for Debugging
         try {
             // Check if pointers are valid (basic check)
-            // Note: AMREX_ASSERT might behave differently on host vs device,
-            // but these checks primarily target CPU execution issues first.
             AMREX_ASSERT(temp_arr.data() != nullptr);
             AMREX_ASSERT(fab_arr.data() != nullptr);
 
-            // Check bounds explicitly using Array4::contains or Box::contains
-            // Using Box::contains here as Array4::contains might not be host/device
+            // Check bounds explicitly using Box::contains
             amrex::IntVect iv(i,j,k);
             AMREX_ASSERT(box.contains(iv));
-            // If fab_arr and temp_arr might have different boxes than the loop box 'box':
-            // AMREX_ASSERT(amrex::makeBox(fab_arr).contains(iv));
-            // AMREX_ASSERT(amrex::makeBox(temp_arr).contains(iv));
 
             // Original logic
             double value_as_double = static_cast<double>(temp_arr(i, j, k));
             fab_arr(i, j, k) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
 
         } catch (const std::exception& e) {
-             // Using amrex::Print here is primarily for CPU/OpenMP threads.
-             // Might not work reliably or at all from GPU kernels.
              amrex::Print() << "EXCEPTION in ParallelFor [" << i << "," << j << "," << k << "]: " << e.what() << "\n";
-             // Consider using amrex::Abort inside catch on device if needed,
-             // though it might obscure the original error location.
         } catch (...) {
              amrex::Print() << "UNKNOWN EXCEPTION in ParallelFor [" << i << "," << j << "," << k << "]\n";
         }
-        // ********************************************************************
-        // *** END MODIFICATION                                             ***
-        // ********************************************************************
     });
 
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: ParallelFor completed. Exiting readAndThresholdFab for box: " << box << "\n";
@@ -387,14 +372,21 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             amrex::Print() << "DEBUG: Thresholding based on detected native HDF5 type Class=" << dt_class << ", Size=" << dt_size << "\n";
         }
 
-        H5::H5File file(m_filename, H5F_ACC_RDONLY);
-        H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
+        // H5::H5File file(m_filename, H5F_ACC_RDONLY);       // MOVED
+        // H5::DataSet dataset = file.openDataSet(m_hdf5dataset); // MOVED
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
 #endif
         for (amrex::MFIter mfi(mf, true); mfi.isValid(); ++mfi) // Use Tiling MFIter
         {
+            // **********************************************************
+            // *** MODIFICATION: Open HDF5 File/Dataset INSIDE loop   ***
+            // **********************************************************
+            H5::H5File file(m_filename, H5F_ACC_RDONLY);
+            H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
+            // **********************************************************
+
             const amrex::Box& tile_box = mfi.tilebox();
             amrex::IArrayBox& fab = mf[mfi]; // Get current FArrayBox
 
