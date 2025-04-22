@@ -49,7 +49,7 @@ int main (int argc, char* argv[])
         double threshold_value = 1.0;
 
 
-        // +++ NEW MANUAL READ DEBUGGING +++
+        // +++ MANUAL READ DEBUGGING +++
         amrex::ParallelDescriptor::Barrier(); // Sync before IO
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\nDEBUG: === Manually reading ./inputs line by line: ===\n";
@@ -68,39 +68,52 @@ int main (int argc, char* argv[])
             }
         }
         amrex::ParallelDescriptor::Barrier(); // Sync after IO
-        // +++ END NEW MANUAL READ DEBUGGING +++
+        // +++ END MANUAL READ DEBUGGING +++
 
 
-        // +++ DEBUGGING ADDED PREVIOUSLY (Checks accessibility) +++
+        // +++ DEBUGGING: Check accessibility before trying to create PP +++
         amrex::ParallelDescriptor::Barrier(); // Ensure all ranks sync before printing/checking
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\nDEBUG: === Entering ParmParse Section ===\n";
             amrex::Print() << "DEBUG: Checking for './inputs' file accessibility...\n";
             std::ifstream check_inputs("./inputs");
             if (check_inputs) {
-                 amrex::Print() << "DEBUG: SUCCESS - './inputs' file exists and is readable.\n";
+                 amrex::Print() << "DEBUG: SUCCESS - './inputs' file exists and is readable (ifstream check).\n";
                  check_inputs.close(); // Close the check stream
             } else {
-                 amrex::Print() << "DEBUG: FAILED - './inputs' file NOT found or readable right before ParmParse!\n";
+                 amrex::Print() << "DEBUG: FAILED - './inputs' file NOT found or readable right before ParmParse (ifstream check)!\n";
             }
-            amrex::Print() << "DEBUG: About to create ParmParse object (no prefix).\n";
         }
         amrex::ParallelDescriptor::Barrier(); // Sync again before proceeding
-        // +++ END ACCESSIBILITY DEBUGGING +++
+        // +++ END DEBUGGING +++
+
 
         { // Use ParmParse to read parameters from the './inputs' file
-            amrex::ParmParse pp; // No prefix, reads from root level of ./inputs
 
-            // +++ LATEST DEBUGGING: Check if ParmParse contains the key +++
+            // +++ MODIFIED: Explicitly open file stream for ParmParse +++
+            std::string inputs_filename = "inputs";
+            if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Attempting to open ifstream for '" << inputs_filename << "'...\n";
+            std::ifstream ppis(inputs_filename); // ppis = ParmParse Input Stream
+            if (!ppis.good()) {
+                 if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: FAILED to open ifstream for explicit ParmParse constructor!\n";
+                 amrex::Abort("PP_FAIL: Failed to open "+inputs_filename+" stream for ParmParse");
+            } else {
+                 if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Opened ifstream successfully. Creating ParmParse from stream.\n";
+            }
+            // Pass the stream (ppis) and the filename (for context in errors)
+            amrex::ParmParse pp(ppis, inputs_filename);
+            // +++ END MODIFICATION +++
+
+
+            // +++ Check if ParmParse contains the key after creation from stream +++
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "DEBUG: ParmParse object created. Checking pp.contains(\"filename\")...\n";
+                 amrex::Print() << "DEBUG: ParmParse created from stream. Checking pp.contains(\"filename\")...\n";
                  if (pp.contains("filename")) {
-                     amrex::Print() << "DEBUG: SUCCESS - pp.contains(\"filename\") is TRUE.\n";
+                     amrex::Print() << "DEBUG: SUCCESS (from stream) - pp.contains(\"filename\") is TRUE.\n";
                  } else {
-                     amrex::Print() << "DEBUG: FAILED - pp.contains(\"filename\") is FALSE!\n";
-                     // If this prints, get() will definitely fail.
-                     // Optional: Abort here if needed.
-                     // amrex::Abort("ParmParse does not contain 'filename' key!");
+                     amrex::Print() << "DEBUG: FAILED (from stream) - pp.contains(\"filename\") is FALSE!\n";
+                     // If it still fails here, something is fundamentally wrong with ParmParse reading this file content
+                     // amrex::Abort("ParmParse does not contain 'filename' key even when created from stream!");
                  }
                  amrex::Print() << "DEBUG: Now attempting pp.get(\"filename\", ...)\n";
             }
@@ -109,36 +122,32 @@ int main (int argc, char* argv[])
 
 
             // Use get() to REQUIRE the parameter from the inputs file.
-            // This is where the original error occurred according to the log
             pp.get("filename", hdf5_filename);   // EXPECTS 'filename = data/SampleData_2Phase.h5' in inputs
 
-            // +++ DEBUGGING for successful get("filename") +++
+            // Debug print confirms successful get()
             if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "DEBUG: SUCCESS - pp.get(\"filename\") returned: " << hdf5_filename << "\n";
                  amrex::Print() << "DEBUG: Attempting pp.get(\"hdf5_dataset\", ...)\n";
             }
-            // +++ END DEBUGGING +++
 
             pp.get("hdf5_dataset", hdf5_dataset); // EXPECTS 'hdf5_dataset = /t$F/channel$C' in inputs
 
-            // +++ DEBUGGING for successful get("hdf5_dataset") +++
+            // Debug print confirms successful get()
              if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "DEBUG: SUCCESS - pp.get(\"hdf5_dataset\") returned: " << hdf5_dataset << "\n";
                  amrex::Print() << "DEBUG: Attempting optional queries...\n";
              }
-            // +++ END DEBUGGING +++
 
             // query() is suitable for optional parameters
             pp.query("write_plotfile", write_plotfile);
             pp.query("box_size", box_size);
             pp.query("threshold_value", threshold_value);
 
-            // +++ DEBUGGING after optional queries +++
+            // Debug print confirms finishing queries
              if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "DEBUG: Optional queries finished.\n";
                  amrex::Print() << "DEBUG: === Exiting ParmParse Scope ===\n\n";
              }
-            // +++ END DEBUGGING +++
         } // End of ParmParse scope
 
         // Simple check if input HDF5 file exists (using the value read by ParmParse)
@@ -147,7 +156,9 @@ int main (int argc, char* argv[])
             std::ifstream test_ifs(hdf5_filename);
             if (!test_ifs) {
                  amrex::Error("Error: Cannot open input HDF5 file specified by 'filename': " + hdf5_filename + "\n"
-                                "       Ensure './inputs' specifies correct path relative to execution dir (e.g., data/...).");
+                                "       Ensure './inputs' file exists and specifies correct path relative to execution dir.");
+            } else {
+                 if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Successfully opened HDF5 file '" << hdf5_filename << "' for check.\n";
             }
         }
 
@@ -170,14 +181,19 @@ int main (int argc, char* argv[])
 
         try {
             // *** Pass the LITERAL dataset path string read from inputs ***
+             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Creating HDF5Reader object...\n";
             reader_ptr = std::make_unique<OpenImpala::HDF5Reader>(hdf5_filename, hdf5_dataset);
+             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: HDF5Reader object created.\n";
         } catch (const std::exception& e) {
             amrex::Error("Error creating HDF5Reader: " + std::string(e.what()));
         }
 
         if (!reader_ptr || !reader_ptr->isRead()) {
              amrex::Error("HDF5Reader object creation or file read failed after construction.");
+        } else {
+             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: HDF5Reader reports isRead() is true.\n";
         }
+
 
         // --- Check Dimensions & Metadata ---
         if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -206,6 +222,7 @@ int main (int argc, char* argv[])
         // --- Setup AMReX Data Structures ---
         amrex::Geometry geom;
         amrex::Box domain_box = reader_ptr->box();
+         if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Setting up Geometry and BoxArray...\n";
         {
             amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)},
                               {AMREX_D_DECL(amrex::Real(domain_box.length(0)),
@@ -219,6 +236,7 @@ int main (int argc, char* argv[])
         amrex::DistributionMapping dm(ba);
         amrex::iMultiFab mf(ba, dm, 1, 0); // Integer results of threshold
         mf.setVal(0);
+         if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: AMReX data structures created.\n";
 
         // --- Test Thresholding ---
         if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -227,6 +245,7 @@ int main (int argc, char* argv[])
         try {
             // Pass threshold_value (double) and the iMultiFab to fill
             reader_ptr->threshold(threshold_value, mf);
+             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Threshold operation completed.\n";
         } catch (const std::exception& e) {
             amrex::Error("Error during threshold operation: " + std::string(e.what()));
         }
@@ -240,8 +259,6 @@ int main (int argc, char* argv[])
             if (min_val != 0 || max_val != 1) {
                  amrex::Print() << "Warning: Thresholded data min/max (" << min_val << "/" << max_val
                                 << ") not the expected 0/1.\n";
-                 // Consider making this a failure depending on test strictness
-                 // amrex::Error("FAIL: Unexpected min/max values after thresholding.");
             } else {
                  amrex::Print() << "  Threshold value range looks plausible.\n";
             }
@@ -284,7 +301,7 @@ int main (int argc, char* argv[])
             // Create a MultiFab (Real) to hold the data for plotting
             amrex::MultiFab mfv(ba, dm, 1, 0); // 0 ghost cells
 
-            // *** CORRECTED COPY LOGIC using MFIter and ParallelFor ***
+            // *** Copy logic using MFIter and ParallelFor ***
             #ifdef AMREX_USE_OMP
             #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
             #endif
@@ -299,7 +316,6 @@ int main (int argc, char* argv[])
                     real_fab(i, j, k) = static_cast<amrex::Real>(int_fab(i, j, k));
                 });
             }
-            // *** End of corrected copy logic ***
 
             // Write plot file
             amrex::WriteSingleLevelPlotfile(plotfilename, mfv, {"phase_threshold"}, geom, 0.0, 0);
