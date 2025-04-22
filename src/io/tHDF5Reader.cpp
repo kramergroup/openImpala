@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept> // For std::runtime_error
-#include <fstream>   // For std::ifstream check
+#include <fstream>   // For std::ifstream check (needed for debug)
 #include <iomanip>   // For std::setw, std::setfill
 #include <ctime>
 #include <memory>    // For std::unique_ptr, std::make_unique
@@ -24,7 +24,7 @@
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_Utility.H> // For amrex::UtilCreateDirectory, amrex::Concatenate
-#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, MyProc
+#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, MyProc (needed for debug)
 #include <AMReX_GpuLaunch.H> // Provides amrex::ParallelFor
 #include <AMReX_MFIter.H>    // <<< Needed for MFIter >>>
 
@@ -48,25 +48,73 @@ int main (int argc, char* argv[])
         int box_size = BOX_SIZE;
         double threshold_value = 1.0;
 
-        { // Use ParmParse to read parameters from the 'inputs' file
-            amrex::ParmParse pp;
+        // +++ DEBUGGING ADDED +++
+        amrex::ParallelDescriptor::Barrier(); // Ensure all ranks sync before printing/checking
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "\nDEBUG: === Entering ParmParse Section ===\n";
+            amrex::Print() << "DEBUG: Checking for './inputs' file accessibility...\n";
+            std::ifstream check_inputs("./inputs");
+            if (check_inputs) {
+                 amrex::Print() << "DEBUG: SUCCESS - './inputs' file exists and is readable.\n";
+                 // Optional: You could read/print the first few lines here if needed, but be careful with file pointers.
+                 check_inputs.close(); // Close the check stream
+            } else {
+                 amrex::Print() << "DEBUG: FAILED - './inputs' file NOT found or readable right before ParmParse!\n";
+                 // This would explain the "not found" error if it occurs
+            }
+            amrex::Print() << "DEBUG: About to create ParmParse object (no prefix).\n";
+        }
+        amrex::ParallelDescriptor::Barrier(); // Sync again before proceeding
+        // +++ END DEBUGGING +++
+
+        { // Use ParmParse to read parameters from the './inputs' file
+            amrex::ParmParse pp; // No prefix, reads from root level of ./inputs
+
+            // +++ DEBUGGING ADDED +++
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << "DEBUG: ParmParse object created. Attempting pp.get(\"filename\", ...)\n";
+            }
+            // +++ END DEBUGGING +++
 
             // Use get() to REQUIRE the parameter from the inputs file.
-            pp.get("filename", hdf5_filename);     // EXPECTS 'filename = /path/to/file.h5' in inputs
+            // This is where the original error occurred according to the log
+            pp.get("filename", hdf5_filename);   // EXPECTS 'filename = /path/to/file.h5' in inputs
+
+            // +++ DEBUGGING ADDED +++
+            if (amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << "DEBUG: SUCCESS - pp.get(\"filename\") returned: " << hdf5_filename << "\n";
+                 amrex::Print() << "DEBUG: Attempting pp.get(\"hdf5_dataset\", ...)\n";
+            }
+            // +++ END DEBUGGING +++
+
             pp.get("hdf5_dataset", hdf5_dataset); // EXPECTS 'hdf5_dataset = /t$F/channel$C' in inputs
+
+            // +++ DEBUGGING ADDED +++
+             if (amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << "DEBUG: SUCCESS - pp.get(\"hdf5_dataset\") returned: " << hdf5_dataset << "\n";
+                 amrex::Print() << "DEBUG: Attempting optional queries...\n";
+             }
+            // +++ END DEBUGGING +++
 
             // query() is suitable for optional parameters
             pp.query("write_plotfile", write_plotfile);
             pp.query("box_size", box_size);
             pp.query("threshold_value", threshold_value);
-        }
 
-        // Simple check if input file exists
+            // +++ DEBUGGING ADDED +++
+             if (amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << "DEBUG: Optional queries finished.\n";
+                 amrex::Print() << "DEBUG: === Exiting ParmParse Scope ===\n\n";
+             }
+            // +++ END DEBUGGING +++
+        } // End of ParmParse scope
+
+        // Simple check if input HDF5 file exists (using the value read by ParmParse)
         {
             std::ifstream test_ifs(hdf5_filename);
             if (!test_ifs) {
                  amrex::Error("Error: Cannot open input file specified by 'filename': " + hdf5_filename + "\n"
-                              "       Ensure './inputs' file exists and specifies correct path.");
+                                "       Ensure './inputs' file exists and specifies correct path relative to execution dir.");
             }
         }
 
@@ -82,6 +130,7 @@ int main (int argc, char* argv[])
 
         // --- Test HDF5Reader ---
         std::unique_ptr<OpenImpala::HDF5Reader> reader_ptr;
+        // *** NOTE: These expected dimensions might need adjustment based on the actual HDF5 file ***
         int expected_width = 100;
         int expected_height = 100;
         int expected_depth = 100;
@@ -190,12 +239,13 @@ int main (int argc, char* argv[])
                 } else {
                     datetime_str = "time_error";
                 }
+                // Using fixed step 0 for plotfile name consistency in tests
                 plotfilename = amrex::Concatenate(test_output_dir + "/plt_hdf5_", 0, 5);
                 plotfilename += "_" + datetime_str;
             }
 
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "Writing plot file to: " << plotfilename << "\n";
+                 amrex::Print() << "Writing plot file to: " << plotfilename << "\n";
             }
 
             // Create a MultiFab (Real) to hold the data for plotting
@@ -222,7 +272,7 @@ int main (int argc, char* argv[])
             amrex::WriteSingleLevelPlotfile(plotfilename, mfv, {"phase_threshold"}, geom, 0.0, 0);
 
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "  Plot file written.\n";
+                 amrex::Print() << "  Plot file written.\n";
             }
         }
 
