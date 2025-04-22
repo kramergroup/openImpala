@@ -33,7 +33,7 @@
 namespace OpenImpala {
 
 //-----------------------------------------------------------------------
-// Helper function for reading attributes (moved from anonymous namespace)
+// Helper function for reading attributes
 //-----------------------------------------------------------------------
 namespace { // Keep helpers internal if possible
 std::string readAttributeAsString(const H5::H5Object& obj, const std::string& attr_name) {
@@ -46,7 +46,7 @@ std::string readAttributeAsString(const H5::H5Object& obj, const std::string& at
             H5::StrType str_type = attr.getStrType();
             attr.read(type, value);
         } else {
-             // Attempt to read as double and convert to string for non-string types
+             // Attempt to read as double/int and convert to string for non-string types
              try {
                  if (type.getSize() == sizeof(double) && type.getClass() == H5T_FLOAT) {
                     double dval;
@@ -255,7 +255,7 @@ std::map<std::string, std::string> HDF5Reader::getAllAttributes() const {
 // Threshold Implementation (Main Refactored Logic)
 //-----------------------------------------------------------------------
 
-// Private template helper function with added debugging
+// Private template helper function with corrected memspace and added debugging
 template<typename T_Native>
 void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
                                      int value_if_true, int value_if_false,
@@ -276,7 +276,6 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     else { amrex::Abort("readAndThresholdFab: Unsupported native type T_Native"); }
 
     // +++ DEBUG PRINTS +++
-    // Using amrex::AllPrint() so messages appear even if IOProcessor crashes, include Rank
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: readAndThresholdFab<T_Native> entered for box: " << box << "\n";
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Using HDF5 PredType corresponding to T_Native.\n";
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Creating temp_fab...\n";
@@ -294,7 +293,6 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     hsize_t offset[3], count[3];
     const amrex::IntVect& smallEnd = box.smallEnd();
     const amrex::IntVect& box_size = box.size();
-    // Assuming HDF5 dataset dimension order matches AMReX Box order (X, Y, Z)
     offset[0] = static_cast<hsize_t>(smallEnd[0]); offset[1] = static_cast<hsize_t>(smallEnd[1]); offset[2] = static_cast<hsize_t>(smallEnd[2]);
     count[0] = static_cast<hsize_t>(box_size[0]); count[1] = static_cast<hsize_t>(box_size[1]); count[2] = static_cast<hsize_t>(box_size[2]);
 
@@ -306,17 +304,15 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
 
     filespace.selectHyperslab(H5S_SELECT_SET, count, offset); // Select the chunk in the file
 
-    // Define memory dataspace (matches the layout of the FArrayBox/BaseFab)
-    hsize_t mem_dims[3];
-    mem_dims[0] = count[0]; mem_dims[1] = count[1]; mem_dims[2] = count[2];
-    H5::DataSpace memspace(3, mem_dims); // Rank 3, matching box dimensions
+    // <<< FIX: Define memory dataspace as 1D matching the contiguous buffer size >>>
+    hsize_t mem_dims[1] = { static_cast<hsize_t>(box.numPts()) }; // Total points in the box
+    H5::DataSpace memspace(1, mem_dims);                         // Rank 1
 
     // +++ DEBUG PRINTS +++
-    amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Defined memory dataspace. Calling dataset.read()...\n";
+    amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Defined memory dataspace (Rank " << memspace.getSimpleExtentNdims() << " Size " << mem_dims[0] << "). Calling dataset.read()...\n";
     // +++ END DEBUG PRINTS +++
 
     // *** Read data into temp_fab ***
-    // This is the most likely place for a segfault if arguments are wrong
     dataset.read(temp_fab.dataPtr(), native_pred_type, memspace, filespace);
 
     // +++ DEBUG PRINTS +++
@@ -368,6 +364,8 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             amrex::IArrayBox& fab = mf[mfi]; // Get current FArrayBox
 
             // Dispatch based on stored native type
+            // NOTE: Assumes file uses standard native types.
+            // NOTE: Compare against PredTypes which are singletons.
             if (m_native_type == H5::PredType::NATIVE_UINT8) {
                 readAndThresholdFab<uint8_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_INT8) {
@@ -387,7 +385,7 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             }
             // Add cases for NATIVE_LONG, NATIVE_ULONG, INT64, UINT64 etc. if needed
             else {
-                // Handle unsupported type
+                // Handle unsupported type (Corrected error reporting)
                 H5T_class_t type_class_enum = m_native_type.getClass(); // Correct type
                 std::string err_msg = "[HDF5Reader::threshold] Unsupported native HDF5 data type detected in file. Class enum value: "
                                     + std::to_string(static_cast<int>(type_class_enum));
@@ -397,8 +395,10 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
         } // End MFIter loop
 
     } catch (H5::Exception& error) {
+        // Catch HDF5 specific exceptions during file/dataset open or read
         throw std::runtime_error("[HDF5Reader::threshold] HDF5 Error during threshold operation:\n  " + error.getDetailMsg());
     } catch (std::exception& std_err) {
+        // Catch standard exceptions (e.g., from type dispatch error)
         throw std::runtime_error("[HDF5Reader::threshold] Standard Exception during threshold operation: " + std::string(std_err.what()));
     }
 }
