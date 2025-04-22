@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept> // For std::runtime_error
-#include <fstream>   // For std::ifstream check (needed for debug)
+#include <fstream>   // For std::ifstream check
 #include <iomanip>   // For std::setw, std::setfill
 #include <ctime>
 #include <memory>    // For std::unique_ptr, std::make_unique
@@ -24,9 +24,9 @@
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_Utility.H> // For amrex::UtilCreateDirectory, amrex::Concatenate
-#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, MyProc (needed for debug)
+#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, MyProc
 #include <AMReX_GpuLaunch.H> // Provides amrex::ParallelFor
-#include <AMReX_MFIter.H>    // <<< Needed for MFIter >>>
+#include <AMReX_MFIter.H>    // Needed for MFIter
 
 
 // Output directory relative to executable location
@@ -36,7 +36,6 @@ const int BOX_SIZE = 32;
 
 int main (int argc, char* argv[])
 {
-    // *** NOTE: amrex::Initialize now uses argc, argv correctly ***
     amrex::Initialize(argc, argv);
 
     // Use a block for AMReX object lifetimes
@@ -49,101 +48,31 @@ int main (int argc, char* argv[])
         double threshold_value = 1.0;
 
 
-        // +++ MANUAL READ DEBUGGING (Optional - can be removed if ParmParse works) +++
-        amrex::ParallelDescriptor::Barrier(); // Sync before IO
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "\nDEBUG: === Manually reading ./inputs line by line: ===\n";
-            std::ifstream manual_reader("./inputs"); // Check the symlink directly
-            if (manual_reader) {
-                std::string line;
-                int line_num = 1;
-                while (std::getline(manual_reader, line)) {
-                    amrex::Print() << "DEBUG: Manual Line " << line_num++ << ": [" << line << "]\n";
-                }
-                manual_reader.close();
-                amrex::Print() << "DEBUG: === End of manual read. ===\n";
-            } else {
-                // This check might fail if run *before* the make test target creates ./inputs
-                // It's less useful now we know Initialize needs the command-line arg.
-                amrex::Print() << "DEBUG: Manual read check - could not open ./inputs (symlink might not exist yet).\n";
-            }
-        }
-        amrex::ParallelDescriptor::Barrier(); // Sync after IO
-        // +++ END MANUAL READ DEBUGGING +++
-
-
-        // +++ DEBUGGING ACCESSIBILITY (Less relevant now, but harmless) +++
-        amrex::ParallelDescriptor::Barrier();
-        if (amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "\nDEBUG: === Entering ParmParse Section ===\n";
-            amrex::Print() << "DEBUG: Checking for './inputs' file accessibility...\n";
-            std::ifstream check_inputs("./inputs"); // Check symlink
-            if (check_inputs) {
-                 amrex::Print() << "DEBUG: SUCCESS - './inputs' file exists and is readable (ifstream check).\n";
-                 check_inputs.close();
-            } else {
-                 amrex::Print() << "DEBUG: FAILED - './inputs' file NOT found or readable (ifstream check)!\n";
-            }
-             amrex::Print() << "DEBUG: About to create ParmParse object (no prefix) - relies on Initialize having read the input file from command line.\n";
-        }
-        amrex::ParallelDescriptor::Barrier();
-        // +++ END DEBUGGING +++
-
+        // --- ParmParse ---
         { // Use ParmParse to query the database populated by Initialize
             amrex::ParmParse pp; // No prefix - queries global database
 
-            // +++ Check if ParmParse contains the key +++
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "DEBUG: ParmParse object created. Checking pp.contains(\"filename\")...\n";
-                 if (pp.contains("filename")) {
-                     amrex::Print() << "DEBUG: SUCCESS - pp.contains(\"filename\") is TRUE.\n";
-                 } else {
-                     amrex::Print() << "DEBUG: FAILED - pp.contains(\"filename\") is FALSE! (Did Initialize read the input file?)\n";
-                 }
-                 amrex::Print() << "DEBUG: Now attempting pp.get(\"filename\", ...)\n";
-            }
-            amrex::ParallelDescriptor::Barrier();
-            // +++ End contains check +++
-
-            // This should now work if make test passes ./inputs argument
+            // These should now work if make test passes ./inputs argument
             pp.get("filename", hdf5_filename);
-
-            if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "DEBUG: SUCCESS - pp.get(\"filename\") returned: " << hdf5_filename << "\n";
-                 amrex::Print() << "DEBUG: Attempting pp.get(\"hdf5_dataset\", ...)\n";
-            }
-
             pp.get("hdf5_dataset", hdf5_dataset);
 
-             if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "DEBUG: SUCCESS - pp.get(\"hdf5_dataset\") returned: " << hdf5_dataset << "\n";
-                 amrex::Print() << "DEBUG: Attempting optional queries...\n";
-             }
-
+            // Optional parameters
             pp.query("write_plotfile", write_plotfile);
             pp.query("box_size", box_size);
             pp.query("threshold_value", threshold_value);
 
-             if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "DEBUG: Optional queries finished.\n";
-                 amrex::Print() << "DEBUG: === Exiting ParmParse Scope ===\n\n";
-             }
         } // End of ParmParse scope
 
         // Check the HDF5 file using the path read
         {
             std::ifstream test_ifs(hdf5_filename);
             if (!test_ifs) {
-                 amrex::Error("Error: Cannot open input HDF5 file specified by 'filename': " + hdf5_filename);
-                 // Note: amrex::ParmParse::getInputsfilename() returns the name of the file read by Initialize
-            } else {
-                 if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Successfully opened HDF5 file '" << hdf5_filename << "' for check.\n";
+                amrex::Error("Error: Cannot open input HDF5 file specified by 'filename': " + hdf5_filename);
             }
+            // (Removed DEBUG print for successful open)
         }
 
-        // --- The rest of the code remains the same ---
-
-        // Only IOProcessor should print parameter summary
+        // --- Parameter Summary ---
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "Starting tHDF5Reader Test (Compiled: " << __DATE__ << " " << __TIME__ << ")\n";
             amrex::Print() << "Input HDF5 file (from inputs): " << hdf5_filename << "\n";
@@ -153,29 +82,30 @@ int main (int argc, char* argv[])
             amrex::Print() << "Write plot file: " << (write_plotfile ? "Yes" : "No") << "\n";
         }
 
-        // Test HDF5Reader
+        // --- Test HDF5Reader ---
         std::unique_ptr<OpenImpala::HDF5Reader> reader_ptr;
+        // Expected dimensions (adjust if your sample data is different)
         int expected_width = 100;
         int expected_height = 100;
         int expected_depth = 100;
 
         try {
-             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Creating HDF5Reader object...\n";
+            // (Removed DEBUG print for object creation start)
             reader_ptr = std::make_unique<OpenImpala::HDF5Reader>(hdf5_filename, hdf5_dataset);
-             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: HDF5Reader object created.\n";
+            // (Removed DEBUG print for object creation end)
         } catch (const std::exception& e) {
             amrex::Error("Error creating HDF5Reader: " + std::string(e.what()));
         }
 
         if (!reader_ptr || !reader_ptr->isRead()) {
-             amrex::Error("HDF5Reader object creation or file read failed after construction.");
-        } else {
-             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: HDF5Reader reports isRead() is true.\n";
+            amrex::Error("HDF5Reader object creation or file read failed after construction.");
         }
+        // (Removed DEBUG print for isRead() check)
 
-        // Check Dimensions & Metadata
+
+        // --- Check Dimensions & Metadata ---
         if (amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "Checking dimensions and metadata...\n";
+            amrex::Print() << "Checking dimensions and metadata...\n";
         }
         int actual_width = reader_ptr->width();
         int actual_height = reader_ptr->height();
@@ -183,7 +113,7 @@ int main (int argc, char* argv[])
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "  Read dimensions: " << actual_width << "x" << actual_height << "x" << actual_depth << "\n";
-            amrex::Print() << "  (Skipping metadata checks...).\n";
+            // (Removed skipping metadata checks message)
         }
 
         if (actual_width != expected_width || actual_height != expected_height || actual_depth != expected_depth) {
@@ -197,10 +127,10 @@ int main (int argc, char* argv[])
             amrex::Print() << "  Dimension check passed.\n";
         }
 
-        // Setup AMReX Data Structures
+        // --- Setup AMReX Data Structures ---
         amrex::Geometry geom;
         amrex::Box domain_box = reader_ptr->box();
-         if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Setting up Geometry and BoxArray...\n";
+        // (Removed DEBUG print for geometry/boxarray setup)
         {
             amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)},
                               {AMREX_D_DECL(amrex::Real(domain_box.length(0)),
@@ -213,50 +143,62 @@ int main (int argc, char* argv[])
         ba.maxSize(box_size);
         amrex::DistributionMapping dm(ba);
         amrex::iMultiFab mf(ba, dm, 1, 0);
-        mf.setVal(0);
-         if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: AMReX data structures created.\n";
+        mf.setVal(0); // Initialize to 0
+        // (Removed DEBUG print for data structure creation end)
 
-        // Test Thresholding
+        // --- Test Thresholding ---
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "Performing threshold > " << threshold_value << "...\n";
         }
         try {
             reader_ptr->threshold(threshold_value, mf);
-             if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "DEBUG: Threshold operation completed.\n";
+            // (Removed DEBUG print for threshold completion)
         } catch (const std::exception& e) {
             amrex::Error("Error during threshold operation: " + std::string(e.what()));
         }
 
-        // Check Threshold Result
-        int min_val = mf.min(0, 0, true);
+        // --- Check Threshold Result ---
+        int min_val = mf.min(0, 0, true); // Use mf.min/max on iMultiFab directly
         int max_val = mf.max(0, 0, true);
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "  Threshold result min value (global): " << min_val << "\n";
             amrex::Print() << "  Threshold result max value (global): " << max_val << "\n";
+            // Expecting 0 and 1 for the default threshold overload
             if (min_val != 0 || max_val != 1) {
-                 amrex::Print() << "Warning: Thresholded data min/max (" << min_val << "/" << max_val
-                                << ") not the expected 0/1.\n";
+                amrex::Print() << "Warning: Thresholded data min/max (" << min_val << "/" << max_val
+                               << ") not the expected 0/1.\n";
             } else {
-                 amrex::Print() << "  Threshold value range looks plausible.\n";
+                amrex::Print() << "  Threshold value range looks plausible.\n";
             }
         }
 
-        // Optional: Write Plotfile
+        // --- Optional: Write Plotfile ---
         if (write_plotfile) {
-            // ... (Plotfile writing code remains the same) ...
              std::string plotfilename;
-             if (amrex::ParallelDescriptor::IOProcessor()) { /* ... create dir ... */ }
-             amrex::ParallelDescriptor::Barrier();
-             { /* ... construct filename ... */ }
-             if (amrex::ParallelDescriptor::IOProcessor()) { /* ... print writing message ... */ }
+             const std::string plotfile_prefix = "plt_thresh";
+             if (amrex::ParallelDescriptor::IOProcessor()) {
+                 if (!amrex::UtilCreateDirectory(test_output_dir, 0755)) {
+                     amrex::CreateDirectoryFailed(test_output_dir);
+                 }
+             }
+             amrex::ParallelDescriptor::Barrier(); // Ensure directory exists before proceeding
+
+             // Construct filename (e.g., plt_thresh_00000) - simpler example
+             plotfilename = amrex::Concatenate(test_output_dir + "/" + plotfile_prefix, 5, '0');
+
+             if (amrex::ParallelDescriptor::IOProcessor()) {
+                  amrex::Print() << "Writing plotfile: " << plotfilename << "\n";
+             }
+             // Need to copy iMultiFab to MultiFab for plotting
              amrex::MultiFab mfv(ba, dm, 1, 0);
-             #ifdef AMREX_USE_OMP
-             #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-             #endif
-             for (amrex::MFIter mfi(mfv, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) { /* ... copy mf to mfv ... */ }
+             amrex::Copy(mfv, mf, 0, 0, 1, 0); // Copy component 0 from mf to mfv
+
              amrex::WriteSingleLevelPlotfile(plotfilename, mfv, {"phase_threshold"}, geom, 0.0, 0);
-             if (amrex::ParallelDescriptor::IOProcessor()) { /* ... print written message ... */ }
-        }
+
+             if (amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << "Plotfile writing complete.\n";
+             }
+         }
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "tHDF5Reader Test Completed Successfully.\n";
