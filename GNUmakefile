@@ -127,7 +127,10 @@ test: tests
 	            # passed_all=false; \
 	            # continue; \
 	        fi; \
-	        if mpirun -np 1 --allow-run-as-root $$tst; then \
+	        input_file_arg=""; \
+	        if [ -f "./inputs" ]; then input_file_arg="./inputs"; fi; \
+	        echo "  Executing: mpirun -np 1 --allow-run-as-root $$tst $$input_file_arg"; \
+	        if mpirun -np 1 --allow-run-as-root $$tst $$input_file_arg; then \
 	            echo "  PASS: $$tst"; \
 	        else \
 	            echo "  FAIL: $$tst"; \
