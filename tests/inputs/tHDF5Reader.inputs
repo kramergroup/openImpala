@@ -1,2 +1,2 @@
-filename     = "data/SampleData_2Phase.h5"
-hdf5_dataset     = "/t$F/channel$C"
+filename     = "/data/SampleData_2Phase.h5"
+hdf5_dataset = "/t$F/channel$C"
