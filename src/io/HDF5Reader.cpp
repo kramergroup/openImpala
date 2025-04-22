@@ -19,7 +19,7 @@
 #include <AMReX_iMultiFab.H>
 #include <AMReX_GpuContainers.H> // For amrex::The_Pinned_Arena, amrex::ParallelFor
 #include <AMReX_Utility.H>
-#include <AMReX_MFIter.H>        // Needed for MFIter
+#include <AMReX_MFIter.H>       // Needed for MFIter
 #include <AMReX_BaseFab.H>      // Needed for BaseFab<T> temporary buffer
 #include <AMReX_Array4.H>       // Needed for Array4 access
 #include <AMReX_ParallelDescriptor.H> // Needed for MyProc in debug prints
@@ -49,19 +49,19 @@ std::string readAttributeAsString(const H5::H5Object& obj, const std::string& at
              // Attempt to read as double/int and convert to string for non-string types
              try {
                  if (type.getSize() == sizeof(double) && type.getClass() == H5T_FLOAT) {
-                    double dval;
-                    attr.read(H5::PredType::NATIVE_DOUBLE, &dval);
-                    value = std::to_string(dval);
+                     double dval;
+                     attr.read(H5::PredType::NATIVE_DOUBLE, &dval);
+                     value = std::to_string(dval);
                  } else if (type.getSize() == sizeof(int) && type.getClass() == H5T_INTEGER) {
-                    int ival;
-                    attr.read(H5::PredType::NATIVE_INT, &ival);
-                    value = std::to_string(ival);
+                     int ival;
+                     attr.read(H5::PredType::NATIVE_INT, &ival);
+                     value = std::to_string(ival);
                  } // Add more types as needed
                  else {
-                    value = "<Non-string/unhandled Attribute>";
+                     value = "<Non-string/unhandled Attribute>";
                  }
              } catch (...) { // Catch potential errors during non-string read/convert
-                value = "<Attribute Read Error>";
+                 value = "<Attribute Read Error>";
              }
         }
     } catch (H5::Exception& /*error*/) { // Catch HDF5 error specifically
@@ -173,7 +173,7 @@ bool HDF5Reader::readMetadataInternal()
         m_is_read = true; // Metadata read successfully
         if (amrex::ParallelDescriptor::IOProcessor()) {
              amrex::Print() << "Successfully read HDF5 Metadata: " << m_filename << " [" << m_hdf5dataset << "]"
-                           << " (Dimensions: X=" << m_width << ", Y=" << m_height << ", Z=" << m_depth << ")\n";
+                            << " (Dimensions: X=" << m_width << ", Y=" << m_height << ", Z=" << m_depth << ")\n";
         }
         return true;
 
@@ -274,7 +274,7 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     else if constexpr (std::is_same_v<T_Native, int32_t>)  { native_pred_type = H5::PredType::NATIVE_INT32; }
     else if constexpr (std::is_same_v<T_Native, uint64_t>) { native_pred_type = H5::PredType::NATIVE_UINT64; }
     else if constexpr (std::is_same_v<T_Native, int64_t>)  { native_pred_type = H5::PredType::NATIVE_INT64; }
-    else if constexpr (std::is_same_v<T_Native, float>)    { native_pred_type = H5::PredType::NATIVE_FLOAT; }
+    else if constexpr (std::is_same_v<T_Native, float>)   { native_pred_type = H5::PredType::NATIVE_FLOAT; }
     else if constexpr (std::is_same_v<T_Native, double>)   { native_pred_type = H5::PredType::NATIVE_DOUBLE; }
     else { amrex::Abort("readAndThresholdFab: Unsupported native type T_Native"); }
 
@@ -303,16 +303,26 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     count[2] = static_cast<hsize_t>(box_size[0]); // HDF5 Dim 2 = AMReX Dim 0 (X)
 
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Selecting hyperslab (HDF5 C-Order Z,Y,X): offset=("
-                       << offset[0] << "," << offset[1] << "," << offset[2] << "), count=("
-                       << count[0] << "," << count[1] << "," << count[2] << ")...\n";
+                      << offset[0] << "," << offset[1] << "," << offset[2] << "), count=("
+                      << count[0] << "," << count[1] << "," << count[2] << ")...\n";
 
     filespace.selectHyperslab(H5S_SELECT_SET, count, offset); // Select the chunk in the file
 
-    // Define memory dataspace as 1D matching the contiguous buffer size
-    hsize_t mem_dims[1] = { static_cast<hsize_t>(box.numPts()) }; // Total points in the box
-    H5::DataSpace memspace(1, mem_dims);                         // Rank 1
+    // Define memory dataspace
+    // ********************************************************************
+    // *** MODIFICATION: Use 3D memory dataspace matching hyperslab     ***
+    // ********************************************************************
+    hsize_t mem_dims_3d[3];
+    mem_dims_3d[0] = count[0]; // Size Z
+    mem_dims_3d[1] = count[1]; // Size Y
+    mem_dims_3d[2] = count[2]; // Size X
+    H5::DataSpace memspace(3, mem_dims_3d); // NEW 3D version
 
-    amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Defined memory dataspace (Rank " << memspace.getSimpleExtentNdims() << " Size " << mem_dims[0] << "). Calling dataset.read()...\n";
+    amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Defined memory dataspace (Rank 3 Size "
+                      << mem_dims_3d[0] << "x" << mem_dims_3d[1] << "x" << mem_dims_3d[2] << "). Calling dataset.read()...\n"; // Adjusted debug print
+    // ********************************************************************
+    // *** END MODIFICATION                                             ***
+    // ********************************************************************
 
     // *** Read data into temp_fab ***
     dataset.read(temp_fab.dataPtr(), native_pred_type, memspace, filespace);
@@ -391,12 +401,12 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             }
             // Add cases for NATIVE_LONG, NATIVE_ULONG, INT64, UINT64 etc. if needed
             else {
-                // Handle unsupported type (Corrected error reporting)
-                H5T_class_t type_class_enum = m_native_type.getClass(); // Correct type
-                std::string err_msg = "[HDF5Reader::threshold] Unsupported native HDF5 data type detected in file. Class enum value: "
-                                    + std::to_string(static_cast<int>(type_class_enum));
-                try { err_msg += ", Size (bytes): " + std::to_string(m_native_type.getSize()); } catch (...) {}
-                throw std::runtime_error(err_msg);
+                 // Handle unsupported type (Corrected error reporting)
+                 H5T_class_t type_class_enum = m_native_type.getClass(); // Correct type
+                 std::string err_msg = "[HDF5Reader::threshold] Unsupported native HDF5 data type detected in file. Class enum value: "
+                                     + std::to_string(static_cast<int>(type_class_enum));
+                 try { err_msg += ", Size (bytes): " + std::to_string(m_native_type.getSize()); } catch (...) {}
+                 throw std::runtime_error(err_msg);
             }
         } // End MFIter loop
 
@@ -414,6 +424,5 @@ void HDF5Reader::threshold(double raw_threshold, amrex::iMultiFab& mf) const
 {
     threshold(raw_threshold, 1, 0, mf); // Call the flexible version with 1/0
 }
-
 
 } // namespace OpenImpala
