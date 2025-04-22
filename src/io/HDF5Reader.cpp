@@ -372,13 +372,17 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             }
             // Add cases for NATIVE_LONG, NATIVE_ULONG, INT64, UINT64 etc. if needed
             else {
-                // Get details for error message
-                 std::string type_class_str = "";
-                 H5std_string class_name;
-                 H5::DataTypeClass type_class = m_native_type.getClass();
-                 // ... (code to convert type_class enum to string if desired) ...
+                // Handle unsupported type
+                H5T_class_t type_class_enum = m_native_type.getClass(); // Use correct enum type H5T_class_t
+                std::string err_msg = "[HDF5Reader::threshold] Unsupported native HDF5 data type detected in file. Class enum value: "
+                                    + std::to_string(static_cast<int>(type_class_enum)); // Cast enum to int for printing
 
-                 throw std::runtime_error("[HDF5Reader::threshold] Unsupported native HDF5 data type detected in file. Class: " + std::to_string(type_class));
+                // Optionally add more details if helpful for debugging unknown types
+                try {
+                    err_msg += ", Size (bytes): " + std::to_string(m_native_type.getSize());
+                } catch (...) { /* Ignore potential errors getting size */ }
+
+                throw std::runtime_error(err_msg);
             }
         } // End MFIter loop
 
