@@ -108,51 +108,34 @@ test: tests
 	@echo "--- Running Tests ---"
 	@passed_all=true; \
 	list_of_tests='$(TEST_EXECS_IO) $(TEST_EXECS_PRP)'; \
-	# Ensure no stale './inputs' link exists before starting the loop
 	rm -f ./inputs; \
 	if [ -z "$$list_of_tests" ]; then \
 	    echo "No test executables found to run."; \
 	else \
-	    # Loop through each test executable (e.g., build/tests/tHDF5Reader)
 	    for tst in $$list_of_tests; do \
 	        echo "Running test $$tst..."; \
-	        # Get the base name of the test executable (e.g., tHDF5Reader)
 	        test_name=$$(basename $$tst); \
-	        # Define the path to the expected input file for this specific test
 	        input_file="tests/inputs/$${test_name}.inputs"; \
-	        \
-	        # Check if the specific input file exists
 	        if [ -f "$$input_file" ]; then \
 	            echo "  Using input file: $$input_file"; \
-	            # Create a symbolic link named 'inputs' in the Current Working Directory (CWD)
-	            # pointing to the specific test input file. AMReX ParmParse reads './inputs'.
 	            ln -sf "$$input_file" ./inputs; \
 	        else \
-	            # If no specific input file, decide how to handle it.
-	            # Option 1: Warn and proceed (test might fail or not need inputs)
 	            echo "  Warning: No specific input file found at $$input_file. Running without './inputs'."; \
-	            # Ensure no link exists from a previous iteration if file not found this time
 	            rm -f ./inputs; \
-	            # Option 2: Fail the test immediately (Uncomment below, comment out echo/rm above)
+	            # Optional: Fail if input file is missing (uncomment below) \
 	            # echo "  ERROR: Required input file $$input_file not found for test $$test_name!"; \
 	            # passed_all=false; \
-	            # continue; # Skip to the next test in the loop
+	            # continue; \
 	        fi; \
-	        \
-	        # Run the actual test using mpirun.
-	        # The test executable will now find './inputs' which points to the correct file.
 	        if mpirun -np 1 --allow-run-as-root $$tst; then \
 	            echo "  PASS: $$tst"; \
 	        else \
 	            echo "  FAIL: $$tst"; \
 	            passed_all=false; \
 	        fi; \
-	        \
-	        # IMPORTANT: Clean up the symbolic link before the next test runs
 	        rm -f ./inputs; \
 	    done; \
 	fi; \
-	# Summarize results and exit with appropriate status code
 	echo "--- Test Summary ---"; \
 	if $$passed_all; then \
 	    echo "All tests passed."; \
