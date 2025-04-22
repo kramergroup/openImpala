@@ -330,7 +330,7 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     amrex::Array4<const T_Native> const& temp_arr = temp_fab.const_array(); // Source temp data Array4
 
     // Use ParallelFor for potential OMP/GPU execution
-    // Removed noexcept and added try-catch + assertions for debugging
+    // Removed noexcept and added try-catch for debugging
     amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) /* noexcept */
     {
         // Added Assertions and Kept Try/Catch for Debugging
@@ -372,21 +372,20 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             amrex::Print() << "DEBUG: Thresholding based on detected native HDF5 type Class=" << dt_class << ", Size=" << dt_size << "\n";
         }
 
-        // **********************************************************
-        // *** REVERTED: Open HDF5 File/Dataset OUTSIDE loop      ***
-        // **********************************************************
-        H5::H5File file(m_filename, H5F_ACC_RDONLY);
-        H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
-        // **********************************************************
-
+        // H5::H5File file(m_filename, H5F_ACC_RDONLY);       // MOVED
+        // H5::DataSet dataset = file.openDataSet(m_hdf5dataset); // MOVED
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
 #endif
         for (amrex::MFIter mfi(mf, true); mfi.isValid(); ++mfi) // Use Tiling MFIter
         {
-            // H5::H5File file(m_filename, H5F_ACC_RDONLY); // MOVED BACK OUTSIDE
-            // H5::DataSet dataset = file.openDataSet(m_hdf5dataset); // MOVED BACK OUTSIDE
+            // **********************************************************
+            // *** MODIFICATION: Open HDF5 File/Dataset INSIDE loop   ***
+            // **********************************************************
+            H5::H5File file(m_filename, H5F_ACC_RDONLY);
+            H5::DataSet dataset = file.openDataSet(m_hdf5dataset);
+            // **********************************************************
 
             const amrex::Box& tile_box = mfi.tilebox();
             amrex::IArrayBox& fab = mf[mfi]; // Get current FArrayBox
@@ -397,7 +396,6 @@ void HDF5Reader::threshold(double raw_threshold, int value_if_true, int value_if
             // Dispatch based on stored native type
             if (m_native_type == H5::PredType::NATIVE_UINT8) {
                  amrex::AllPrint() << "DEBUG: Dispatching as uint8_t\n";
-                 // Pass dataset object created OUTSIDE the loop
                  readAndThresholdFab<uint8_t>(dataset, raw_threshold, value_if_true, value_if_false, tile_box, fab);
             } else if (m_native_type == H5::PredType::NATIVE_INT8) {
                  amrex::AllPrint() << "DEBUG: Dispatching as int8_t\n";
