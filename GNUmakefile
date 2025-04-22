@@ -102,82 +102,48 @@ main: $(APP_DIR)/Diffusion
 TEST_EXECS := $(patsubst src/props/%.cpp,$(TST_DIR)/%,$(SOURCES_TST_CPP))
 tests: $(TEST_EXECS_IO) $(TEST_EXECS_PRP)
 
-# ============================================================
-# Test Target (Modified to Capture Backtraces - Revised Syntax)
-# ============================================================
-.PHONY: test
+# Target to run the tests after they are built, linking specific input files
 test: tests
 	@echo ""
 	@echo "--- Running Tests ---"
-	@passed_all=true
-	@list_of_tests='$(TEST_EXECS_IO) $(TEST_EXECS_PRP)'
-	@rm -f ./inputs # Clean up any previous link
-	@# Check if the list of tests is empty
-	@if [ -z "$$list_of_tests" ]; then \
+	@passed_all=true; \
+	list_of_tests='$(TEST_EXECS_IO) $(TEST_EXECS_PRP)'; \
+	rm -f ./inputs; \
+	if [ -z "$$list_of_tests" ]; then \
 	    echo "No test executables found to run."; \
 	else \
-	    # Loop through each test executable
 	    for tst in $$list_of_tests; do \
 	        echo "Running test $$tst..."; \
 	        test_name=$$(basename $$tst); \
 	        input_file="tests/inputs/$${test_name}.inputs"; \
-	        # Check for specific input file and link it as ./inputs
 	        if [ -f "$$input_file" ]; then \
 	            echo "  Using input file: $$input_file"; \
 	            ln -sf "$$input_file" ./inputs; \
 	        else \
 	            echo "  Warning: No specific input file found at $$input_file. Running without './inputs'."; \
 	            rm -f ./inputs; \
-	            # Optional: Fail if input file is missing (uncomment below)
+	            # Optional: Fail if input file is missing (uncomment below) \
 	            # echo "  ERROR: Required input file $$input_file not found for test $$test_name!"; \
 	            # passed_all=false; \
-	            # continue; # Skip running this test if input is mandatory
+	            # continue; \
 	        fi; \
-	        \
-	        # Run the test using mpirun and capture its exit code immediately
-	        mpirun -np 1 --allow-run-as-root $$tst; \
-	        exit_code=$$?; \
-	        \
-	        # Check the exit code
-	        if [ $$exit_code -eq 0 ]; then \
-	            # Test Passed
+	        if mpirun -np 1 --allow-run-as-root $$tst; then \
 	            echo "  PASS: $$tst"; \
 	        else \
-	            # --- Test Failed ---
 	            echo "  FAIL: $$tst"; \
 	            passed_all=false; \
-	            # --- BEGIN Backtrace Capture ---
-	            # Check if the default AMReX backtrace file exists
-	            if [ -f Backtrace.0.0 ]; then \
-	                # Print a clear header and the file content
-	                echo "      vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"; \
-	                echo "      Backtrace from Backtrace.0.0 for failed $$tst:"; \
-	                echo "      ----------------------------------------------------"; \
-	                cat Backtrace.0.0; \
-	                echo "      ----------------------------------------------------"; \
-	                echo "      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"; \
-	            else \
-	                # Message if the file wasn't found
-	                echo "      WARNING: Backtrace.0.0 not found for failed test $$tst."; \
-	            fi; \
-	            # --- END Backtrace Capture ---
 	        fi; \
-	        \
-	        # Clean up the ./inputs symlink before the next test
 	        rm -f ./inputs; \
 	    done; \
-	fi
-	@# --- Final Test Summary (separated from the loop logic) ---
-	@echo "--- Test Summary ---"
-	@if $$passed_all; then \
+	fi; \
+	echo "--- Test Summary ---"; \
+	if $$passed_all; then \
 	    echo "All tests passed."; \
 	    exit 0; \
 	else \
 	    echo "ERROR: One or more tests failed."; \
 	    exit 1; \
 	fi
-
-
 
 # ============================================================
 # Compilation Rules (Using Structure Similar to Working v2)
