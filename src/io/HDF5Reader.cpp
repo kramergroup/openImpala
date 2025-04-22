@@ -309,20 +309,15 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     filespace.selectHyperslab(H5S_SELECT_SET, count, offset); // Select the chunk in the file
 
     // Define memory dataspace
-    // ********************************************************************
-    // *** MODIFICATION: Use 3D memory dataspace matching hyperslab     ***
-    // ********************************************************************
+    // Using 3D memory dataspace (matching hyperslab rank)
     hsize_t mem_dims_3d[3];
     mem_dims_3d[0] = count[0]; // Size Z
     mem_dims_3d[1] = count[1]; // Size Y
     mem_dims_3d[2] = count[2]; // Size X
-    H5::DataSpace memspace(3, mem_dims_3d); // NEW 3D version
+    H5::DataSpace memspace(3, mem_dims_3d); // 3D version
 
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: Defined memory dataspace (Rank 3 Size "
                       << mem_dims_3d[0] << "x" << mem_dims_3d[1] << "x" << mem_dims_3d[2] << "). Calling dataset.read()...\n"; // Adjusted debug print
-    // ********************************************************************
-    // *** END MODIFICATION                                             ***
-    // ********************************************************************
 
     // *** Read data into temp_fab ***
     dataset.read(temp_fab.dataPtr(), native_pred_type, memspace, filespace);
@@ -334,12 +329,26 @@ void HDF5Reader::readAndThresholdFab(H5::DataSet& dataset, double raw_threshold,
     amrex::Array4<const T_Native> const& temp_arr = temp_fab.const_array(); // Source temp data Array4
 
     // Use ParallelFor for potential OMP/GPU execution
-    amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+    // ********************************************************************
+    // *** MODIFICATION: Temporarily removed noexcept, added try-catch  ***
+    // ********************************************************************
+    amrex::ParallelFor(box, [=] AMREX_GPU_DEVICE (int i, int j, int k) /* noexcept */ // DEBUG: Temporarily removed noexcept
     {
-        // Convert native value to double for comparison
-        double value_as_double = static_cast<double>(temp_arr(i, j, k));
-        fab_arr(i, j, k) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
+        try { // DEBUG: Add try-catch for debugging ParallelFor exceptions
+             // Convert native value to double for comparison
+             double value_as_double = static_cast<double>(temp_arr(i, j, k));
+             fab_arr(i, j, k) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
+        } catch (const std::exception& e) {
+             // Using amrex::Print here might be tricky from device code,
+             // but okay for CPU OpenMP threads. Might generate lots of output.
+             amrex::Print() << "EXCEPTION in ParallelFor [" << i << "," << j << "," << k << "]: " << e.what() << "\n";
+        } catch (...) {
+             amrex::Print() << "UNKNOWN EXCEPTION in ParallelFor [" << i << "," << j << "," << k << "]\n";
+        }
     });
+    // ********************************************************************
+    // *** END MODIFICATION                                             ***
+    // ********************************************************************
 
     amrex::AllPrint() << "DEBUG [Rank " << amrex::ParallelDescriptor::MyProc() << "]: ParallelFor completed. Exiting readAndThresholdFab for box: " << box << "\n";
 }
