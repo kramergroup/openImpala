@@ -114,8 +114,9 @@ jobs:
           echo "Make build command failed. See uploaded 'make-build-log' artifact for details."
           exit 1 # Exit with non-zero code to fail the entire job run
 
-      # Step 9: Run Tests using Dependency SIF (only if build succeeded)
-      - name: Run Tests using Dependency SIF
+      # --- MODIFIED STEP 9 ---
+      # Step 9: Run Tests, Check/Copy Backtrace (only if build succeeded)
+      - name: Run Tests, Check/Copy Backtrace
         id: make_test
         if: steps.make_build.outcome == 'success' # Only run if build was successful
         continue-on-error: true # Allow test logs/backtrace to upload even if tests fail
@@ -130,19 +131,32 @@ jobs:
 
           TEST_EXIT_CODE=$?
           echo "Make test exit code: $TEST_EXIT_CODE"
-          # Exit step with the test exit code (relevant for continue-on-error)
+
+          # --- Add checks for Backtrace files ---
+          echo "--- Checking for Backtrace files ---"
+          echo "Listing files in PWD (workspace: $PWD)..."
+          ls -la "$PWD"
+          echo "Listing files in /src inside container..."
+          # Use sudo for exec, consistent with previous steps
+          sudo apptainer exec ./dependency_image.sif ls -la /src
+          echo "Listing files in /tmp inside container..."
+          sudo apptainer exec ./dependency_image.sif ls -la /tmp
+          # --- End checks ---
+
+          # Exit step with the original test exit code
           exit $TEST_EXIT_CODE
 
       # Step 10: Upload Test Log and Backtrace (only if tests were attempted)
+      # (No changes needed here, relies on Backtrace.* being in PWD/workspace)
       - name: Upload Test Log and Backtrace
         # Run if tests were attempted (build succeeded), regardless of test outcome
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: make-test-output-${{ github.run_id }} # Changed name slightly for clarity
+          name: make-test-output-${{ github.run_id }}
           path: |                                     # Use multi-line path syntax
             make_test_output.log
-            Backtrace.* # Add Backtrace files (glob pattern checks PWD)
+            Backtrace.* # Add Backtrace files (glob pattern checks PWD/workspace)
           retention-days: 5
           if-no-files-found: warn                     # Don't fail job if Backtrace.* not found
 
