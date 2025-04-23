@@ -354,7 +354,10 @@ void TiffReader::readDistributedIntoFab(
                     if (!sequence_tif_handle) {
                         // *** ABORT if a sequence file cannot be opened ***
                         // If a file in the sequence is missing or corrupt, we cannot continue reliably.
-                        amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Failed to open sequence file: " + current_filename + " for slice " + std::to_string(k));
+                        // Construct message separately
+                        std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Failed to open sequence file: ";
+                        error_msg += current_filename + " for slice " + std::to_string(k);
+                        amrex::Abort(error_msg.c_str());
                         // continue; // Original code skipped, now aborting
                     }
                     current_tif_raw_ptr = sequence_tif_handle.get();
@@ -362,14 +365,21 @@ void TiffReader::readDistributedIntoFab(
                     // Single stack file: Use the shared handle and set the directory
                     if (!shared_tif_stack_handle) {
                         // This should not happen if the initial open succeeded, but check anyway
-                        amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Shared TIFF handle is null for slice " + std::to_string(k));
+                        // Construct message separately
+                        std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Shared TIFF handle is null for slice " + std::to_string(k);
+                        amrex::Abort(error_msg.c_str());
                     }
                     // *** ADDED CHECK for TIFFSetDirectory ***
                     // Attempt to set the directory for slice 'k'
                     if (!TIFFSetDirectory(shared_tif_stack_handle.get(), static_cast<tdir_t>(k))) {
                         // *** ABORT if setting directory fails ***
-                        // This indicates a problem reading the file structure at this slice.
-                        amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Failed to set directory " + std::to_string(k) + " in file: " + m_filename + ". File may be corrupt.");
+                        // Construct message separately to isolate potential issues
+                        std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Failed to set directory ";
+                        error_msg += std::to_string(k);
+                        error_msg += " in file: ";
+                        error_msg += m_filename; // Append filename
+                        error_msg += ". File may be corrupt.";
+                        amrex::Abort(error_msg.c_str()); // Pass C-style string
                         // continue; // Original code skipped, now aborting
                     }
                     current_tif_raw_ptr = shared_tif_stack_handle.get();
@@ -377,7 +387,9 @@ void TiffReader::readDistributedIntoFab(
 
                 // Defensive check, though aborts above should prevent reaching here with null
                 if (!current_tif_raw_ptr) {
-                     amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Null TIFF pointer encountered unexpectedly for slice " + std::to_string(k));
+                     // Construct message separately
+                     std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Null TIFF pointer encountered unexpectedly for slice " + std::to_string(k);
+                     amrex::Abort(error_msg.c_str());
                 }
 
                 // --- Read data for the current slice (k) ---
@@ -388,14 +400,18 @@ void TiffReader::readDistributedIntoFab(
                     TIFFGetField(current_tif_raw_ptr, TIFFTAG_TILEWIDTH, &tile_width);
                     TIFFGetField(current_tif_raw_ptr, TIFFTAG_TILELENGTH, &tile_height);
                     if (tile_width == 0 || tile_height == 0) {
-                        amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Invalid tile dimensions (0) for slice " + std::to_string(k) + " in file.");
+                        // Construct message separately
+                        std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Invalid tile dimensions (0) for slice " + std::to_string(k) + " in file.";
+                        amrex::Abort(error_msg.c_str());
                         // continue; // Original code skipped
                     }
                     const int chunk_width = static_cast<int>(tile_width); // Used in LoopOnCpu
 
                     tsize_t tile_buffer_size = TIFFTileSize(current_tif_raw_ptr);
                     if (tile_buffer_size <= 0) {
-                         amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Invalid tile buffer size (" + std::to_string(tile_buffer_size) + ") for slice " + std::to_string(k));
+                         // Construct message separately
+                         std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Invalid tile buffer size (" + std::to_string(tile_buffer_size) + ") for slice " + std::to_string(k);
+                         amrex::Abort(error_msg.c_str());
                          // continue; // Original code skipped
                     }
                     // Ensure thread-local buffer is large enough
@@ -418,9 +434,12 @@ void TiffReader::readDistributedIntoFab(
                             if (bytes_read < 0) { // Check specifically for error (-1)
                                 // *** ABORT if reading tile fails ***
                                 std::string current_file_id = m_is_sequence ? generateFilename(m_base_pattern, m_start_index + k, m_digits, m_suffix) : m_filename;
-                                amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Error reading tile index " + std::to_string(tile_index) +
-                                             " (coords " + std::to_string(tx) + "," + std::to_string(ty) + ")" +
-                                             " for slice " + std::to_string(k) + " in file: " + current_file_id);
+                                // Construct message separately
+                                std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Error reading tile index ";
+                                error_msg += std::to_string(tile_index);
+                                error_msg += " (coords " + std::to_string(tx) + "," + std::to_string(ty) + ")";
+                                error_msg += " for slice " + std::to_string(k) + " in file: " + current_file_id;
+                                amrex::Abort(error_msg.c_str());
                                 // continue; // Original code skipped
                             }
                             // Optional: Add warning or abort if bytes_read == 0 or != tile_buffer_size? Depends on expectations.
@@ -482,7 +501,9 @@ void TiffReader::readDistributedIntoFab(
                     tsize_t strip_buffer_size = TIFFStripSize(current_tif_raw_ptr);
                      if (strip_buffer_size <= 0) {
                          std::string current_file_id = m_is_sequence ? generateFilename(m_base_pattern, m_start_index + k, m_digits, m_suffix) : m_filename;
-                         amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Invalid strip buffer size (" + std::to_string(strip_buffer_size) + ") for slice " + std::to_string(k) + " in file: " + current_file_id);
+                         // Construct message separately
+                         std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Invalid strip buffer size (" + std::to_string(strip_buffer_size) + ") for slice " + std::to_string(k) + " in file: " + current_file_id;
+                         amrex::Abort(error_msg.c_str());
                          // continue; // Original code skipped
                      }
                     // Ensure thread-local buffer is large enough
@@ -502,8 +523,11 @@ void TiffReader::readDistributedIntoFab(
                         if (bytes_read < 0) { // Check specifically for error (-1)
                             // *** ABORT if reading strip fails ***
                             std::string current_file_id = m_is_sequence ? generateFilename(m_base_pattern, m_start_index + k, m_digits, m_suffix) : m_filename;
-                            amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Error reading strip " + std::to_string(strip) +
-                                         " for slice " + std::to_string(k) + " in file: " + current_file_id);
+                            // Construct message separately
+                            std::string error_msg = "[TiffReader::readDistributedIntoFab] FATAL: Error reading strip ";
+                            error_msg += std::to_string(strip);
+                            error_msg += " for slice " + std::to_string(k) + " in file: " + current_file_id;
+                            amrex::Abort(error_msg.c_str());
                             // continue; // Original code skipped
                         }
                         // Optional: Add warning or abort if bytes_read == 0? Depends on expectations for empty strips.
