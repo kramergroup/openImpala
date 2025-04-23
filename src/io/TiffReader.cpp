@@ -40,7 +40,7 @@ struct TiffCloser {
 };
 using TiffPtr = std::unique_ptr<TIFF, TiffCloser>;
 
-// Helper to interpret raw bytes based on TIFF metadata
+// Helper to interpret raw bytes based on TIFF metadata (for BPS >= 8)
 // Returns value cast to double for threshold comparison
 // IMPORTANT: Assumes byte_ptr points to the START of the pixel/sample data
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -52,11 +52,10 @@ double interpretBytesAsDouble(const unsigned char* byte_ptr,
     // Note: AMREX_GPU_HOST_DEVICE allows potential use in ParallelFor later if needed
     // Note: This only handles the first sample if spp > 1
 
-    size_t bytes_per_sample = bits_per_sample / 8;
+    size_t bytes_per_sample = bits_per_sample / 8; // Assumes BPS >= 8 here
     double value = 0.0;
 
-    // Ensure memcpy reads the correct number of bytes.
-    // byte_ptr must be valid for at least bytes_per_sample bytes.
+    if (bytes_per_sample == 0) return 0.0; // Should not happen if called correctly
 
     switch (sample_format) {
         case SAMPLEFORMAT_UINT:
@@ -179,7 +178,6 @@ bool TiffReader::readFile(const std::string& filename)
     if (amrex::ParallelDescriptor::IOProcessor()) {
         if (filename.empty()) {
             amrex::Print() << "Error: [TiffReader::readFile] No filename provided.\n";
-            // No easy way to signal failure to broadcast here, abort is safest
             amrex::Abort("Aborting due to missing filename on IOProcessor");
         }
 
@@ -205,19 +203,21 @@ bool TiffReader::readFile(const std::string& filename)
         width_r0 = static_cast<int>(w32);
         height_r0 = static_cast<int>(h32);
 
-        // Basic validation of format read from file
-        if (width_r0 <= 0 || height_r0 <= 0 || bps_r0 == 0 ||
-            planar != PLANARCONFIG_CONTIG) // Add checks for supported bps/fmt/spp if needed
+        // --- Modified Validation ---
+        // Allow BPS=1, check common byte-aligned BPS, reject others for now
+        bool valid_bps = (bps_r0 == 1 || bps_r0 == 8 || bps_r0 == 16 || bps_r0 == 32 || bps_r0 == 64);
+        if (width_r0 <= 0 || height_r0 <= 0 || !valid_bps ||
+            planar != PLANARCONFIG_CONTIG) // Add checks for supported fmt/spp if needed
         {
-            amrex::Print() << "Error: [TiffReader::readFile] Invalid or unsupported format in first directory of file: " << filename << "\n";
+            amrex::Print() << "Error: [TiffReader::readFile] Invalid or unsupported format in first directory of file: " << filename
+                           << " (Width=" << width_r0 << ", Height=" << height_r0 << ", BPS=" << bps_r0 << ", Planar=" << planar << ")\n";
             amrex::Abort("Aborting due to invalid format on IOProcessor");
         }
         // We accept tiled or stripped here, check happens during read
 
         // Count directories for depth
         depth_r0 = 0;
-        // Reset directory to beginning before counting
-        TIFFSetDirectory(tif.get(), 0);
+        TIFFSetDirectory(tif.get(), 0); // Ensure we start counting from the first directory
         do { depth_r0++; } while (TIFFReadDirectory(tif.get()));
 
         if (depth_r0 == 0) {
@@ -247,22 +247,14 @@ bool TiffReader::readFile(const std::string& filename)
     int root = amrex::ParallelDescriptor::IOProcessorNumber();
     if (amrex::ParallelDescriptor::IOProcessor()) {
         int string_len = static_cast<int>(m_filename.length()); // Get length on root
-        // Broadcast the length first using the int* overload of Bcast
         amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
-        // Broadcast the character data using the char* overload of Bcast
-        // Note: Bcast typically takes non-const pointer for buffer
         amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root);
     } else {
         int string_len = 0;
-        // Receive the length first
         amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
-        // Resize the string to hold the incoming data
         m_filename.resize(string_len);
-        // Receive the character data
-        // Note: Bcast typically takes non-const pointer for buffer
         amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root);
     }
-
 
     // Basic check after broadcast
     if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0) {
@@ -326,14 +318,17 @@ bool TiffReader::readFileSequence(
          width_r0 = static_cast<int>(w32);
          height_r0 = static_cast<int>(h32);
 
-         // Basic validation
-        if (width_r0 <= 0 || height_r0 <= 0 || bps_r0 == 0 ||
-            planar != PLANARCONFIG_CONTIG)
-        {
-            amrex::Print() << "Error: [TiffReader::readFileSequence] Invalid or unsupported format in first file: " << first_filename_r0 << "\n";
+         // --- Modified Validation ---
+         // Allow BPS=1, check common byte-aligned BPS, reject others for now
+         bool valid_bps = (bps_r0 == 1 || bps_r0 == 8 || bps_r0 == 16 || bps_r0 == 32 || bps_r0 == 64);
+         if (width_r0 <= 0 || height_r0 <= 0 || !valid_bps ||
+             planar != PLANARCONFIG_CONTIG)
+         {
+            amrex::Print() << "Error: [TiffReader::readFileSequence] Invalid or unsupported format in first file: " << first_filename_r0
+                           << " (Width=" << width_r0 << ", Height=" << height_r0 << ", BPS=" << bps_r0 << ", Planar=" << planar << ")\n";
             amrex::Abort("Aborting due to invalid format on IOProcessor");
-        }
-        // tif closed by RAII
+         }
+         // tif closed by RAII
     } // End IOProcessor Block
 
     // --- Broadcast metadata ---
@@ -405,15 +400,23 @@ void TiffReader::readDistributedIntoFab(
         amrex::Abort("[TiffReader::readDistributedIntoFab] Cannot read, metadata not processed successfully.");
     }
 
-    // Calculate derived info needed by all ranks
-    const size_t bytes_per_sample = m_bits_per_sample / 8;
-    const size_t bytes_per_pixel = bytes_per_sample * m_samples_per_pixel;
-    if (bytes_per_sample == 0) {
-        amrex::Abort("[TiffReader::readDistributedIntoFab] Bytes per sample is zero!");
+    // Store original BPS, calculate bytes needed for storage/pixel (rounds up for bit-based)
+    const int bits_per_sample_val = m_bits_per_sample; // Keep original bps
+    // Calculate bytes per pixel needed for storage/offset calculations.
+    // Note: This assumes SAMPLESPERPIXEL (spp) = 1 for BPS=1 data. A more robust implementation
+    // would handle combinations like SPP=3, BPS=1 if needed (e.g. 3 bits per pixel packed).
+    // For now, assume BPS=1 implies SPP=1.
+    const size_t bytes_per_pixel = (bits_per_sample_val < 8) ?
+                                   (bits_per_sample_val * m_samples_per_pixel + 7) / 8
+                                   : (bits_per_sample_val / 8) * m_samples_per_pixel;
+
+
+    // Check original bits_per_sample value
+    if (bits_per_sample_val == 0) {
+        amrex::Abort("[TiffReader::readDistributedIntoFab] Bits per sample is zero!");
     }
 
     // Shared handle only for single-stack files, opened outside parallel region
-    // Use a raw pointer within the parallel region if needed.
     TiffPtr shared_tif_stack_handle = nullptr;
     if (!m_is_sequence) {
         shared_tif_stack_handle = TiffPtr(TIFFOpen(m_filename.c_str(), "r"), TiffCloser());
@@ -449,27 +452,23 @@ void TiffReader::readDistributedIntoFab(
                 // --- Get the TIFF handle for the current slice k ---
                 if (m_is_sequence) {
                     std::string current_filename = generateFilename(m_base_pattern, m_start_index + k, m_digits, m_suffix);
-                    // Open file for this slice - use the thread-local handle
                     sequence_tif_handle = TiffPtr(TIFFOpen(current_filename.c_str(), "r"), TiffCloser());
                     if (!sequence_tif_handle) {
                         amrex::Warning("[TiffReader] Failed to open sequence file: " + current_filename + ". Skipping slice " + std::to_string(k));
-                        continue; // Skip this slice
+                        continue;
                     }
                     current_tif_raw_ptr = sequence_tif_handle.get();
-                    // TODO: Optional: Verify metadata consistency here if paranoid
                 } else {
-                    // Use the shared handle for the stack file
-                    if (!shared_tif_stack_handle) { // Should have been opened outside parallel region
+                    if (!shared_tif_stack_handle) {
                          amrex::Abort("[TiffReader] Shared stack handle is null inside parallel region!");
                     }
                     if (!TIFFSetDirectory(shared_tif_stack_handle.get(), static_cast<tdir_t>(k))) {
                         amrex::Warning("[TiffReader] Failed to set directory " + std::to_string(k) + " in " + m_filename + ". Skipping slice.");
-                        continue; // Skip this slice
+                        continue;
                     }
                     current_tif_raw_ptr = shared_tif_stack_handle.get();
                 }
-                 // Ensure we have a valid pointer
-                if (!current_tif_raw_ptr) continue;
+                 if (!current_tif_raw_ptr) continue;
 
                 // --- Read data for slice k into the fab for the intersecting region ---
                 if (TIFFIsTiled(current_tif_raw_ptr)) {
@@ -481,67 +480,71 @@ void TiffReader::readDistributedIntoFab(
                         amrex::Warning("[TiffReader] Invalid tile dimensions for slice " + std::to_string(k) + ". Skipping.");
                         continue;
                     }
+                    const int chunk_width = static_cast<int>(tile_width); // Define chunk width for loop
 
                     tsize_t tile_buffer_size = TIFFTileSize(current_tif_raw_ptr);
                     if (tile_buffer_size <= 0) {
                         amrex::Warning("[TiffReader] Invalid tile buffer size for slice " + std::to_string(k) + ". Skipping.");
                         continue;
                     }
-                    // Resize the thread-local buffer if necessary
                     if (temp_buffer.size() < static_cast<size_t>(tile_buffer_size)) {
                         temp_buffer.resize(tile_buffer_size);
                     }
 
-                    // Calculate the range of tiles needed for tile_box
                     int tx_min = tile_box.smallEnd(0) / tile_width;
                     int tx_max = tile_box.bigEnd(0) / tile_width;
                     int ty_min = tile_box.smallEnd(1) / tile_height;
                     int ty_max = tile_box.bigEnd(1) / tile_height;
 
-                    // Loop over required tiles in XY for the current slice k
                     for (int ty = ty_min; ty <= ty_max; ++ty) {
                         for (int tx = tx_min; tx <= tx_max; ++tx) {
-                            // Calculate absolute tile origin coordinates
                             int tile_origin_x = tx * tile_width;
                             int tile_origin_y = ty * tile_height;
+                            // Define origins needed in loop scope
+                            const int chunk_origin_x = tile_origin_x;
+                            const int chunk_origin_y = tile_origin_y;
 
-                            // Read the tile corresponding to (tx, ty) coordinates for slice k
-                            ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, k, 0); // Z=k is dummy here, Sample=0 assumed
+                            ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, k, 0); // Z=k dummy
 
                             tsize_t bytes_read = TIFFReadEncodedTile(current_tif_raw_ptr, tile_index, temp_buffer.data(), tile_buffer_size);
 
-                            if (bytes_read == -1) {
-                                amrex::Warning("[TiffReader] Error reading tile index " + std::to_string(tile_index) + " for slice " + std::to_string(k));
-                                continue; // Skip this tile
-                            }
-                             if (bytes_read == 0) {
-                                // It's possible to have empty tiles/strips depending on encoding/file structure, might not be an error
-                                // amrex::Warning("[TiffReader] Read 0 bytes for tile index " + std::to_string(tile_index) + " slice " + std::to_string(k));
-                                continue; // Skip empty tile
+                            if (bytes_read <= 0) { // Check for error or empty read
+                                if (bytes_read == -1) amrex::Warning("[TiffReader] Error reading tile index " + std::to_string(tile_index) + " for slice " + std::to_string(k));
+                                continue;
                             }
 
-                            // Define the box covered by this specific tile
                             amrex::Box tile_abs_box(amrex::IntVect(tile_origin_x, tile_origin_y, k),
                                                     amrex::IntVect(tile_origin_x + tile_width - 1, tile_origin_y + tile_height - 1, k));
-
-                            // Find the intersection of the current MFIter tile_box and the tile we just read
                             amrex::Box intersection = tile_box & tile_abs_box;
 
                             if (intersection.ok()) {
-                                // Loop over the intersection region and copy/threshold data
-                                amrex::LoopOnCpu(intersection, [&](int i, int j, int k_loop /*same as k*/) {
-                                    // Calculate offset within the temporary tile buffer
-                                    int i_in_tile = i - tile_origin_x;
-                                    int j_in_tile = j - tile_origin_y;
-                                    size_t offset_in_buffer = (static_cast<size_t>(j_in_tile) * tile_width + i_in_tile) * bytes_per_pixel;
+                                amrex::LoopOnCpu(intersection, [&](int i, int j, int k_loop ) {
+                                    double value_as_double = 0.0;
+                                    if (bits_per_sample_val == 1) {
+                                        // Handle 1-bit data
+                                        int i_in_chunk = i - chunk_origin_x;
+                                        int j_in_chunk = j - chunk_origin_y;
+                                        size_t linear_pixel_index_in_chunk = static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk;
+                                        size_t byte_index_in_buffer = linear_pixel_index_in_chunk / 8;
+                                        int bit_index_in_byte = linear_pixel_index_in_chunk % 8;
 
-                                    // Bounds check (optional but recommended)
-                                    if (offset_in_buffer + bytes_per_sample > static_cast<size_t>(bytes_read)) return;
+                                        if (byte_index_in_buffer < static_cast<size_t>(bytes_read)) {
+                                             unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
+                                             int bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1; // Assume MSB fill order
+                                             value_as_double = static_cast<double>(bit_value);
+                                        } // Else remains 0.0
+                                    } else {
+                                        // Handle byte-aligned data (BPS >= 8)
+                                        const size_t bytes_per_sample = bits_per_sample_val / 8;
+                                        int i_in_chunk = i - chunk_origin_x;
+                                        int j_in_chunk = j - chunk_origin_y;
+                                        size_t offset_in_buffer = (static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk) * bytes_per_pixel;
 
-                                    // Interpret bytes, threshold, and store in destination Fab using Array4
-                                    double value_as_double = interpretBytesAsDouble(temp_buffer.data() + offset_in_buffer,
-                                                                                    m_bits_per_sample, m_sample_format);
-                                    // Use corrected Array4 access syntax
+                                        if (offset_in_buffer + bytes_per_sample <= static_cast<size_t>(bytes_read)) {
+                                             const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
+                                             value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
+                                        } // Else remains 0.0
+                                    }
                                     fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                                 });
                             } // end if intersection ok
@@ -551,69 +554,75 @@ void TiffReader::readDistributedIntoFab(
                 } else {
                     // --- Striped Reading Logic ---
                     uint32_t rows_per_strip = 0;
-                    uint32_t current_height32 = static_cast<uint32_t>(m_height); // Use current height for strip calcs
+                    uint32_t current_height32 = static_cast<uint32_t>(m_height);
                     TIFFGetFieldDefaulted(current_tif_raw_ptr, TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
                     if (rows_per_strip == 0 || rows_per_strip > current_height32) {
                         rows_per_strip = current_height32;
                     }
+                     // Define chunk width for loop
+                    const int chunk_width = m_width;
 
                     tsize_t strip_buffer_size = TIFFStripSize(current_tif_raw_ptr);
                      if (strip_buffer_size <= 0) {
                         amrex::Warning("[TiffReader] Invalid strip buffer size for slice " + std::to_string(k) + ". Skipping.");
                         continue;
                     }
-                    // Resize the thread-local buffer if necessary
                     if (temp_buffer.size() < static_cast<size_t>(strip_buffer_size)) {
                         temp_buffer.resize(strip_buffer_size);
                     }
 
-                    tstrip_t num_strips = TIFFNumberOfStrips(current_tif_raw_ptr);
-
-                    // Calculate the range of strips needed for tile_box
                     int strip_y_min = tile_box.smallEnd(1);
                     int strip_y_max = tile_box.bigEnd(1);
-                    tstrip_t first_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_min, 0); // Sample 0
-                    tstrip_t last_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_max, 0);  // Sample 0
+                    tstrip_t first_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_min, 0);
+                    tstrip_t last_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_max, 0);
 
-                    // Loop over required strips for the current slice k
                     for (tstrip_t strip = first_strip; strip <= last_strip; ++strip) {
                         tsize_t bytes_read = TIFFReadEncodedStrip(current_tif_raw_ptr, strip, temp_buffer.data(), strip_buffer_size);
 
-                        if (bytes_read == -1) {
-                            amrex::Warning("[TiffReader] Error reading strip " + std::to_string(strip) + " for slice " + std::to_string(k));
-                            continue; // Skip this strip
-                        }
-                         if (bytes_read == 0) {
-                             // It's possible to have empty tiles/strips depending on encoding/file structure, might not be an error
-                             // amrex::Warning("[TiffReader] Read 0 bytes for strip " + std::to_string(strip) + " slice " + std::to_string(k));
-                             continue; // Skip empty strip
+                        if (bytes_read <= 0) { // Check for error or empty read
+                             if (bytes_read == -1) amrex::Warning("[TiffReader] Error reading strip " + std::to_string(strip) + " for slice " + std::to_string(k));
+                             continue;
                          }
 
-                        // Define the box covered by this specific strip
                         uint32_t strip_origin_y = strip * rows_per_strip;
-                        // Careful: end row is exclusive for size, inclusive for index
                         uint32_t strip_rows_this = std::min(rows_per_strip, current_height32 - strip_origin_y);
-                        uint32_t strip_end_y = strip_origin_y + strip_rows_this - 1; // Inclusive index
-                         amrex::Box strip_abs_box(amrex::IntVect(0, static_cast<int>(strip_origin_y), k),
-                                                 amrex::IntVect(m_width - 1, static_cast<int>(strip_end_y), k));
+                        uint32_t strip_end_y = strip_origin_y + strip_rows_this - 1;
+                        // Define origin needed in loop scope
+                        const int chunk_origin_x = 0;
+                        const int chunk_origin_y = static_cast<int>(strip_origin_y);
 
-                        // Find the intersection of the current MFIter tile_box and the strip we just read
+                        amrex::Box strip_abs_box(amrex::IntVect(0, static_cast<int>(strip_origin_y), k),
+                                                 amrex::IntVect(m_width - 1, static_cast<int>(strip_end_y), k));
                         amrex::Box intersection = tile_box & strip_abs_box;
 
                         if (intersection.ok()) {
-                            // Loop over the intersection region and copy/threshold data
-                            amrex::LoopOnCpu(intersection, [&](int i, int j, int k_loop /*same as k*/) {
-                                // Calculate offset within the temporary strip buffer
-                                int j_in_strip = j - static_cast<int>(strip_origin_y); // Y relative to strip start
-                                size_t offset_in_buffer = (static_cast<size_t>(j_in_strip) * m_width + i) * bytes_per_pixel;
+                            amrex::LoopOnCpu(intersection, [&](int i, int j, int k_loop ) {
+                                double value_as_double = 0.0; // Initialize
+                                if (bits_per_sample_val == 1) {
+                                    // Handle 1-bit data
+                                    int i_in_chunk = i - chunk_origin_x; // i itself for strips
+                                    int j_in_chunk = j - chunk_origin_y; // Y relative to strip start
+                                    size_t linear_pixel_index_in_chunk = static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk;
+                                    size_t byte_index_in_buffer = linear_pixel_index_in_chunk / 8;
+                                    int bit_index_in_byte = linear_pixel_index_in_chunk % 8;
 
-                                // Bounds check (optional but recommended)
-                                if (offset_in_buffer + bytes_per_sample > static_cast<size_t>(bytes_read)) return;
+                                    if (byte_index_in_buffer < static_cast<size_t>(bytes_read)) {
+                                         unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
+                                         int bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1; // Assume MSB fill order
+                                         value_as_double = static_cast<double>(bit_value);
+                                    } // Else remains 0.0
+                                } else {
+                                    // Handle byte-aligned data (BPS >= 8)
+                                    const size_t bytes_per_sample = bits_per_sample_val / 8;
+                                    int i_in_chunk = i - chunk_origin_x;
+                                    int j_in_chunk = j - chunk_origin_y;
+                                    size_t offset_in_buffer = (static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk) * bytes_per_pixel;
 
-                                // Interpret bytes, threshold, and store in destination Fab using Array4
-                                double value_as_double = interpretBytesAsDouble(temp_buffer.data() + offset_in_buffer,
-                                                                                m_bits_per_sample, m_sample_format);
-                                // Use corrected Array4 access syntax
+                                    if (offset_in_buffer + bytes_per_sample <= static_cast<size_t>(bytes_read)) {
+                                         const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
+                                         value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
+                                    } // Else remains 0.0
+                                }
                                 fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                             });
                         } // end if intersection ok
@@ -622,7 +631,7 @@ void TiffReader::readDistributedIntoFab(
 
                 // Close sequence file handle via RAII if looping
                 if (m_is_sequence) {
-                    sequence_tif_handle.reset(); // Explicitly close here if needed, or rely on loop destruction
+                    sequence_tif_handle.reset();
                 }
 
             } // End loop k (Z-slices)
@@ -631,15 +640,10 @@ void TiffReader::readDistributedIntoFab(
 
     // Close shared stack file handle via RAII (happens when shared_tif_stack_handle goes out of scope)
 
-    // Barrier ensures all ranks finish reading before proceeding
     amrex::ParallelDescriptor::Barrier("TiffReader::readDistributedIntoFab");
-
-    // Data is now in dest_mf. The reader class itself might not need to be marked "read" anymore,
-    // as its purpose is fulfilled by filling the MultiFab. Keep m_is_read for metadata status.
 }
 
 // Public threshold method with custom values - calls private helper
-// *** THIS DEFINITION WAS MISSING BEFORE ***
 void TiffReader::threshold(double raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
 {
     // Calls the private implementation function
@@ -649,8 +653,7 @@ void TiffReader::threshold(double raw_threshold, int value_if_true, int value_if
 
 // Overload for 1/0 threshold output
 void TiffReader::threshold(double raw_threshold, amrex::iMultiFab& mf) const {
-    // Calls the main function with default values for true/false
-    // Note: This now calls the 3-argument public version, which then calls the private helper.
+    // Calls the 3-argument public version, which then calls the private helper.
     threshold(raw_threshold, 1, 0, mf);
 }
 
