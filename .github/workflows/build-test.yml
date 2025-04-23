@@ -131,12 +131,19 @@ jobs:
         continue-on-error: true # Keep this true
         run: |
           echo "Running make test..."
-          # Run tests, redirect stdout/stderr to log file
-          sudo apptainer exec \
+          # Add timeout (e.g., 1200 seconds = 20 minutes). Adjust time as needed.
+          # Run tests within timeout, redirect stdout/stderr to log file
+          timeout 1200 sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make test' > make_test_output.log 2>&1
           TEST_EXIT_CODE=$?
+          # Check if timeout occurred (exit code 124 for GNU timeout)
+          if [ $TEST_EXIT_CODE -eq 124 ]; then
+             echo "::error::Test step timed out after 20 minutes!"
+             # The job will fail later based on steps.make_test.outcome == 'failure' anyway,
+             # but this provides an explicit error message in the logs.
+          fi
           echo "Make test exit code: $TEST_EXIT_CODE"
 
           # --- Attempt to copy Backtrace files from container's /src to host's PWD ---
@@ -157,7 +164,7 @@ jobs:
 
       # Step 11: Upload Test Log and Backtrace <<< RENUMBERED (was Step 10)
       - name: Upload Test Log and Backtrace
-        # This step is only reached if the build (Step 7/9) succeeded
+        # This step runs even if make_test failed (due to continue-on-error), but only if build succeeded
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
@@ -166,7 +173,7 @@ jobs:
             make_test_output.log
             Backtrace.*
           retention-days: 5
-          if-no-files-found: warn
+          if-no-files-found: warn # Use warn instead of error if no backtrace files found
 
       # Step 12: Explicitly fail the JOB if the make test step failed <<< RENUMBERED (was Step 11)
       - name: Check test outcome
