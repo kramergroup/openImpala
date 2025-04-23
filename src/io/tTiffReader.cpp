@@ -98,7 +98,7 @@ int main (int argc, char* argv[])
         int expected_width = 100;
         int expected_height = 100;
         int expected_depth = 100;
-        int expected_bps = 8;       // e.g., 8-bit
+        int expected_bps = 1;       // e.g., 8-bit
         int expected_format = 1;    // e.g., SAMPLEFORMAT_UINT from tiff.h
         int expected_spp = 1;       // e.g., grayscale
 
