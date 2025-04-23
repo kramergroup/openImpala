@@ -33,7 +33,7 @@ INCLUDE       := -Isrc \
 LDFLAGS       := -L$(AMREX_HOME)/lib -lamrex \
                  -L$(HYPRE_HOME)/lib -lHYPRE \
                  -L$(HDF5_HOME)/lib -lhdf5 -lhdf5_cpp \
-                 -L$(TIFF_HOME)/lib64 -ltiff \
+                 -L$(TIFF_HOME)/lib -ltiff \
                  -lm \
                  -lgfortran
 
