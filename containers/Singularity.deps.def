@@ -5,11 +5,11 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     Container providing the build environment and runtime dependencies for OpenImpala.
     Installs CMake via RPM (cmake3 from EPEL).
     Installs Parallel HDF5 (linked with OpenMPI) via RPM from EPEL.
-    Installs OpenMPI, AMReX, HYPRE from source using GCC 11.
+    Installs OpenMPI, libtiff, AMReX, HYPRE from source using GCC 11.
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.37-deps-gcc11-hdf5rpm # <-- Version from response #75
+    Version 2.37-deps-gcc11-hdf5rpm-libtiff460 # <-- UPDATED Version
 
 %post
     set -e # Ensure commands exit on error early
@@ -19,34 +19,32 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
     export HDF5_VERSION=1.12.3  # Choose a suitable HDF5 version
+    export LIBTIFF_VERSION=4.6.0 # Build specific libtiff version
     export ZLIB_VERSION=system # Or specify if building zlib from source
 
     # --- Define Install Prefixes ---
     export OPENMPI_INSTALL_PREFIX=/usr/local
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION} # New HDF5 install path
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION} # Custom libtiff prefix
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     export ZLIB_ROOT=/usr # Assuming using system zlib
 
     # Add ldconfig paths early if needed
     echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
-    echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf # If building HDF5
+    echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf
+    echo "${LIBTIFF_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/custom-libtiff.conf # Add custom libtiff path
 
     # --- Install Repositories and Packages ---
     echo "--- Updating system and installing EPEL ---"
     dnf update -y
-    # Install tools for managing repos and EPEL itself
-    # epel-release provides the EPEL repo definitions
     dnf install -y dnf-utils epel-release
 
     echo "--- Enabling PowerTools repository ---"
-    # Enable the PowerTools repository (needed for hwloc-devel, flex-devel on Rocky 8)
-    # Note: On Rocky 9+ this would be 'crb'
     dnf config-manager --set-enabled powertools
 
     echo "--- Installing Development Tools and Core Packages ---"
-    # Now install all required packages, including those from BaseOS, AppStream, EPEL, and PowerTools
-    # Ensure backslashes (\) are correct for line continuation
+    # libtiff-devel REMOVED, libjpeg-turbo-devel ADDED
     dnf install -y \
         '@Development Tools' \
         gcc-gfortran \
@@ -60,7 +58,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         hostname \
         infiniband-diags \
         libibverbs-devel \
-        libtiff-devel \
+        libjpeg-turbo-devel \
         boost-devel \
         hwloc-devel \
         libevent-devel \
@@ -72,12 +70,10 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         zlib-devel && \
     dnf clean all -y
 
-
     # --- Verification Step (Your existing check) ---
     echo "--- Verifying wget installation post dnf ---"
     which wget || { echo "!!! ERROR: wget command not found right after dnf install!"; exit 1; }
     echo "--- wget found, continuing build ---"
-
 
     mkdir /tmp/build_src && cd /tmp/build_src
 
@@ -112,10 +108,9 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
     # --- Install HDF5 from Source (Parallel Version) ---
     echo "--- Building HDF5 ${HDF5_VERSION} from Source ---"
+    # Using --no-check-certificate as wget sometimes has issues with HDFGroup certs in containers
     wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
     tar -xzf hdf5-${HDF5_VERSION}.tar.gz && cd hdf5-${HDF5_VERSION}
-    # Configure HDF5 for parallel I/O using the MPI wrappers now in PATH
-    # Ensure zlib is found (installed via dnf into /usr)
     CC=mpicc CXX=mpicxx FC=mpifort ./configure \
         --prefix=${HDF5_INSTALL_PREFIX} \
         --enable-parallel \
@@ -135,17 +130,33 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     which h5pcc && h5pcc -showconfig || { echo "*** ERROR: h5pcc not found or failed after HDF5 source install!"; exit 1; }
     ldconfig -p | grep libhdf5 || echo "WARNING: libhdf5 not found in ldconfig cache"
 
+    # <<< NEW SECTION: Install libtiff from Source >>>
+    echo "--- Building libtiff ${LIBTIFF_VERSION} from Source ---"
+    cd /tmp/build_src
+    # Using --no-check-certificate as wget sometimes has issues with OSGeo certs in containers
+    wget https://download.osgeo.org/libtiff/tiff-${LIBTIFF_VERSION}.tar.gz --no-check-certificate
+    tar -xzf tiff-${LIBTIFF_VERSION}.tar.gz
+    cd tiff-${LIBTIFF_VERSION}
+    # Configure libtiff - using default options which usually include tools and common codecs
+    # Point to system zlib and jpeg if installed (ensure zlib-devel, libjpeg-turbo-devel are installed above)
+    ./configure --prefix=${LIBTIFF_INSTALL_PREFIX} --with-zlib=yes --with-jpeg=yes
+    make -j$(nproc)
+    make install
+    cd ..
+    rm -rf tiff-${LIBTIFF_VERSION}*
+    # --- Run ldconfig AFTER libtiff install ---
+    ldconfig # Update linker cache NOW including the custom libtiff
+
+    # <<< END NEW SECTION >>>
+
     # --- Install AMReX ---
-    # Note: Ensure SCL is sourced and mpicc/mpicxx/mpif90 are in PATH before this step
     echo "--- Building AMReX ${AMREX_VERSION} ---"
+    cd /tmp/build_src # Make sure we are in the right place
     git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
     cd amrex
     mkdir build && cd build
-
     echo "--- Configuring AMReX ---"
-    # Explicitly set MPI compilers via `which` to use the correct ones from PATH
-    # Explicitly enable shared library building
-    # Only list HDF5 in CMAKE_PREFIX_PATH as MPI should be found via compilers
+    # CMAKE_PREFIX_PATH needs to include custom HDF5 and libtiff paths now
     cmake .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
@@ -160,36 +171,22 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         -DCMAKE_CXX_FLAGS="-O3 -march=native" \
         -DCMAKE_C_FLAGS="-O3 -march=native" \
         -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX}" \
+        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};${LIBTIFF_INSTALL_PREFIX}" \
     || { echo "*** AMReX Configure Failed!"; exit 1; }
-
     echo "--- Building AMReX (make) ---"
     make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
-
     echo "--- Installing AMReX (make install) ---"
-    # Removed VERBOSE=1
     make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
-
-    # Removed specific checks for AMReX_ParallelFor.H
-    # Kept original general checks
-
-    # Verification step (Your original checks are still good)
-    echo "--- Checking AMReX installation contents in ${AMREX_INSTALL_PREFIX} ---"
-    ls -lR ${AMREX_INSTALL_PREFIX} || echo "!!! WARNING: Failed to list AMReX install directory!"
-    find ${AMREX_INSTALL_PREFIX} -name "libamrex*.so" || echo "--- WARNING: No libamrex*.so files found in AMReX install directory ---"
     echo "--- Finished checking AMReX installation ---"
-
-    # Go back to the main build source directory
     cd ../..
-
     echo "--- Cleaning up AMReX source ---"
     rm -rf amrex
 
     # --- Install HYPRE ---
     echo "--- Building HYPRE ---"
+    cd /tmp/build_src # Make sure we are in the right place
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
-    # Configure should find MPI (mpicc) and HDF5 (h5pcc) via PATH now
     ./configure --prefix=${HYPRE_INSTALL_PREFIX} --with-MPI --enable-shared \
         CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
     make -j$(nproc) && make install # Serial install
@@ -209,34 +206,36 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     source /opt/rh/gcc-toolset-11/enable
     export LC_ALL=C; export LANG=C
 
-    # Define versions (adjust HDF5 version if needed)
+    # Define versions (match versions used in %post)
     export OPENMPI_VERSION=4.1.6
     export AMREX_VERSION=23.11
     export HYPRE_VERSION=v2.30.0
-    export HDF5_VERSION=1.12.3 # Match version used in %post
+    export HDF5_VERSION=1.12.3
+    export LIBTIFF_VERSION=4.6.0 # Custom libtiff version
 
     # Define Install Prefixes
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     export OPENMPI_INSTALL_PREFIX=/usr/local
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION} # Updated HDF5 path
-    export TIFF_HOME=/usr # System TIFF
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION} # Custom libtiff path
 
-    # Define HOME vars
+    # Define HOME vars (Using custom libtiff prefix for TIFF_HOME)
     export AMREX_HOME=${AMREX_INSTALL_PREFIX}
     export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
-    export HDF5_HOME=${HDF5_INSTALL_PREFIX} # Updated HDF5 path
-    export H5CPP_HOME=${HDF5_HOME} # Assuming this follows HDF5_HOME
-    export TIFF_HOME=${TIFF_HOME}
+    export HDF5_HOME=${HDF5_INSTALL_PREFIX}
+    export H5CPP_HOME=${HDF5_HOME}
+    export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX} # Use custom libtiff path
 
-    # PATH: Prepend installed bins to SCL PATH
-    export PATH=${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${HDF5_HOME}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH} # Added HDF5 bin
+    # PATH: Prepend installed bins (including custom libtiff)
+    export PATH=${LIBTIFF_INSTALL_PREFIX}/bin:${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${HDF5_HOME}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
 
-    # LD_LIBRARY_PATH: Prepend installed libs
-    export LD_LIBRARY_PATH=${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${HDF5_HOME}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${TIFF_HOME}/lib64:${LD_LIBRARY_PATH} # Added HDF5 lib, removed old system HDF5 path assumption
+    # LD_LIBRARY_PATH: Prepend installed libs (including custom libtiff)
+    # Assuming custom libtiff installs to ${LIBTIFF_INSTALL_PREFIX}/lib
+    export LD_LIBRARY_PATH=${LIBTIFF_INSTALL_PREFIX}/lib:${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${HDF5_HOME}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
 
-    # CMAKE_PREFIX_PATH: Point to install locations
-    export CMAKE_PREFIX_PATH=${AMREX_HOME}:${HYPRE_HOME}:${HDF5_HOME}:${OPENMPI_INSTALL_PREFIX}:${TIFF_HOME}:${CMAKE_PREFIX_PATH} # Added HDF5 path
+    # CMAKE_PREFIX_PATH: Point to install locations (including custom libtiff)
+    export CMAKE_PREFIX_PATH=${LIBTIFF_INSTALL_PREFIX}:${AMREX_HOME}:${HYPRE_HOME}:${HDF5_HOME}:${OPENMPI_INSTALL_PREFIX}:${CMAKE_PREFIX_PATH}
 
     export OMPI_MCA_btl_vader_single_copy_mechanism=none; export OMPI_MCA_rmaps_base_oversubscribe=1
 
@@ -244,37 +243,42 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     set -e
     source /opt/rh/gcc-toolset-11/enable
     # Source the runtime environment defined in %environment for tests
-    # (Variables like HDF5_HOME will be set based on %environment)
-    export HDF5_VERSION=1.12.3 # Make sure version matches if needed directly
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION} # Define prefix for test section too
-    export AMREX_VERSION=23.11 # Define AMReX version for test section
-    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION} # Define AMReX prefix for test section
-    export HYPRE_VERSION=v2.30.0 # Define HYPRE version for test section
-    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION} # Define HYPRE prefix for test section
-    export OPENMPI_INSTALL_PREFIX=/usr/local # Define OpenMPI prefix for test section
+
+    # Define prefixes needed for tests (Match %environment)
+    export HDF5_VERSION=1.12.3
+    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
+    export AMREX_VERSION=23.11
+    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
+    export HYPRE_VERSION=v2.30.0
+    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
+    export OPENMPI_INSTALL_PREFIX=/usr/local
+    export LIBTIFF_VERSION=4.6.0
+    export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
 
     echo "--- Verifying Tool Versions ---";
     echo "Checking mpicc..."; which mpicc; mpicc --version
     echo "Checking mpic++..."; which mpic++; mpic++ --version
     echo "Checking cmake..."; which cmake; cmake --version
-    echo "Checking h5pcc..."; which h5pcc; ${HDF5_INSTALL_PREFIX}/bin/h5pcc -showconfig # Check source-built h5pcc
+    echo "Checking h5pcc..."; which h5pcc; ${HDF5_INSTALL_PREFIX}/bin/h5pcc -showconfig
     echo "Checking gcc version..."; which gcc; gcc --version | grep "(GCC) 11."
+    # Add check for custom tiffinfo version
+    echo "Checking tiffinfo version..."; ${LIBTIFF_INSTALL_PREFIX}/bin/tiffinfo --version | grep "${LIBTIFF_VERSION}"
 
     echo "--- Verifying Library Linking ---"
-    # Check HDF5 library in the new location
-    HDF5_MPI_LIB="${HDF5_INSTALL_PREFIX}/lib/libhdf5.so"
-    if [ ! -f "$HDF5_MPI_LIB" ]; then echo "*** ERROR: HDF5 library not found at $HDF5_MPI_LIB!"; exit 1; fi
-    echo "Checking HDF5 lib ($HDF5_MPI_LIB)..."; ldd "$HDF5_MPI_LIB"
+    # Check custom libtiff library
+    LIBTIFF_LIB="${LIBTIFF_INSTALL_PREFIX}/lib/libtiff.so"
+    if [ ! -f "$LIBTIFF_LIB" ]; then echo "*** ERROR: Custom libtiff library not found at $LIBTIFF_LIB!"; exit 1; fi
+    echo "Checking libtiff lib ($LIBTIFF_LIB)..."; ldd "$LIBTIFF_LIB"
 
     # Check other libraries
+    echo "Checking HDF5 lib (${HDF5_INSTALL_PREFIX}/lib/libhdf5.so)..."; ldd "${HDF5_INSTALL_PREFIX}/lib/libhdf5.so"
     echo "Checking AMReX lib (${AMREX_INSTALL_PREFIX}/lib/libamrex.so)..."; ldd "${AMREX_INSTALL_PREFIX}/lib/libamrex.so"
     echo "Checking HYPRE lib (${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so)..."; ldd "${HYPRE_INSTALL_PREFIX}/lib/libHYPRE.so"
     echo "Checking OpenMPI lib (${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so)..."; ldd "${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so"
-
-    # Removed the specific check for AMReX_ParallelFor.H in the test section
 
     echo "--- Basic dependency container tests passed. ---"
 
 %runscript
     echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
+    echo "Includes custom build of libtiff ${LIBTIFF_VERSION}."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
