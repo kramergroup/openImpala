@@ -213,7 +213,6 @@ bool TiffReader::readFile(const std::string& filename)
                            << " (Width=" << width_r0 << ", Height=" << height_r0 << ", BPS=" << bps_r0 << ", Planar=" << planar << ")\n";
             amrex::Abort("Aborting due to invalid format on IOProcessor");
         }
-        // We accept tiled or stripped here, check happens during read
 
         // Count directories for depth
         depth_r0 = 0;
@@ -403,13 +402,10 @@ void TiffReader::readDistributedIntoFab(
     // Store original BPS, calculate bytes needed for storage/pixel (rounds up for bit-based)
     const int bits_per_sample_val = m_bits_per_sample; // Keep original bps
     // Calculate bytes per pixel needed for storage/offset calculations.
-    // Note: This assumes SAMPLESPERPIXEL (spp) = 1 for BPS=1 data. A more robust implementation
-    // would handle combinations like SPP=3, BPS=1 if needed (e.g. 3 bits per pixel packed).
-    // For now, assume BPS=1 implies SPP=1.
+    // Note: Assumes SPP=1 for BPS=1 data. Needs adjustment if packing multi-sample bit data.
     const size_t bytes_per_pixel = (bits_per_sample_val < 8) ?
                                    (bits_per_sample_val * m_samples_per_pixel + 7) / 8
                                    : (bits_per_sample_val / 8) * m_samples_per_pixel;
-
 
     // Check original bits_per_sample value
     if (bits_per_sample_val == 0) {
@@ -504,11 +500,13 @@ void TiffReader::readDistributedIntoFab(
                             const int chunk_origin_x = tile_origin_x;
                             const int chunk_origin_y = tile_origin_y;
 
-                            ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, k, 0); // Z=k dummy
+                            // Corrected: Use z=0 for TIFFComputeTile's 3rd arg (if Z is within tile structure, else irrelevant)
+                            // Use sample=0 for 5th arg.
+                            ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, 0, 0);
 
                             tsize_t bytes_read = TIFFReadEncodedTile(current_tif_raw_ptr, tile_index, temp_buffer.data(), tile_buffer_size);
 
-                            if (bytes_read <= 0) { // Check for error or empty read
+                            if (bytes_read <= 0) {
                                 if (bytes_read == -1) amrex::Warning("[TiffReader] Error reading tile index " + std::to_string(tile_index) + " for slice " + std::to_string(k));
                                 continue;
                             }
@@ -519,20 +517,24 @@ void TiffReader::readDistributedIntoFab(
 
                             if (intersection.ok()) {
                                 amrex::LoopOnCpu(intersection, [&](int i, int j, int k_loop ) {
-                                    double value_as_double = 0.0;
+                                    double value_as_double = 0.0; // Initialize
                                     if (bits_per_sample_val == 1) {
                                         // Handle 1-bit data
                                         int i_in_chunk = i - chunk_origin_x;
                                         int j_in_chunk = j - chunk_origin_y;
                                         size_t linear_pixel_index_in_chunk = static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk;
                                         size_t byte_index_in_buffer = linear_pixel_index_in_chunk / 8;
-                                        int bit_index_in_byte = linear_pixel_index_in_chunk % 8;
+                                        int bit_index_in_byte = linear_pixel_index_in_chunk % 8; // 0..7
 
-                                        if (byte_index_in_buffer < static_cast<size_t>(bytes_read)) {
-                                             unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
-                                             int bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1; // Assume MSB fill order
-                                             value_as_double = static_cast<double>(bit_value);
-                                        } // Else remains 0.0
+                                        // Bounds check BEFORE accessing buffer
+                                        if (byte_index_in_buffer >= static_cast<size_t>(bytes_read)) {
+                                            amrex::Warning("TiffReader: Calculated byte index out of bounds in Tiled 1-bit read!");
+                                            return; // Skip this pixel
+                                        }
+                                        unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
+                                        int bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1; // Assume MSB fill order
+                                        value_as_double = static_cast<double>(bit_value);
+
                                     } else {
                                         // Handle byte-aligned data (BPS >= 8)
                                         const size_t bytes_per_sample = bits_per_sample_val / 8;
@@ -540,10 +542,13 @@ void TiffReader::readDistributedIntoFab(
                                         int j_in_chunk = j - chunk_origin_y;
                                         size_t offset_in_buffer = (static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk) * bytes_per_pixel;
 
-                                        if (offset_in_buffer + bytes_per_sample <= static_cast<size_t>(bytes_read)) {
-                                             const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
-                                             value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
-                                        } // Else remains 0.0
+                                        // Bounds check BEFORE accessing buffer
+                                        if (offset_in_buffer + bytes_per_sample > static_cast<size_t>(bytes_read)) {
+                                            amrex::Warning("TiffReader: Calculated byte offset out of bounds in Tiled >=8-bit read!");
+                                            return; // Skip this pixel
+                                        }
+                                        const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
+                                        value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
                                     }
                                     fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                                 });
@@ -559,8 +564,7 @@ void TiffReader::readDistributedIntoFab(
                     if (rows_per_strip == 0 || rows_per_strip > current_height32) {
                         rows_per_strip = current_height32;
                     }
-                     // Define chunk width for loop
-                    const int chunk_width = m_width;
+                    const int chunk_width = m_width; // Define chunk width for loop
 
                     tsize_t strip_buffer_size = TIFFStripSize(current_tif_raw_ptr);
                      if (strip_buffer_size <= 0) {
@@ -579,7 +583,7 @@ void TiffReader::readDistributedIntoFab(
                     for (tstrip_t strip = first_strip; strip <= last_strip; ++strip) {
                         tsize_t bytes_read = TIFFReadEncodedStrip(current_tif_raw_ptr, strip, temp_buffer.data(), strip_buffer_size);
 
-                        if (bytes_read <= 0) { // Check for error or empty read
+                        if (bytes_read <= 0) {
                              if (bytes_read == -1) amrex::Warning("[TiffReader] Error reading strip " + std::to_string(strip) + " for slice " + std::to_string(k));
                              continue;
                          }
@@ -606,11 +610,15 @@ void TiffReader::readDistributedIntoFab(
                                     size_t byte_index_in_buffer = linear_pixel_index_in_chunk / 8;
                                     int bit_index_in_byte = linear_pixel_index_in_chunk % 8;
 
-                                    if (byte_index_in_buffer < static_cast<size_t>(bytes_read)) {
-                                         unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
-                                         int bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1; // Assume MSB fill order
-                                         value_as_double = static_cast<double>(bit_value);
-                                    } // Else remains 0.0
+                                    // Bounds check BEFORE accessing buffer
+                                    if (byte_index_in_buffer >= static_cast<size_t>(bytes_read)) {
+                                        amrex::Warning("TiffReader: Calculated byte index out of bounds in Striped 1-bit read!");
+                                        return; // Skip this pixel
+                                    }
+                                    unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
+                                    int bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1; // Assume MSB fill order
+                                    value_as_double = static_cast<double>(bit_value);
+
                                 } else {
                                     // Handle byte-aligned data (BPS >= 8)
                                     const size_t bytes_per_sample = bits_per_sample_val / 8;
@@ -618,10 +626,13 @@ void TiffReader::readDistributedIntoFab(
                                     int j_in_chunk = j - chunk_origin_y;
                                     size_t offset_in_buffer = (static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk) * bytes_per_pixel;
 
-                                    if (offset_in_buffer + bytes_per_sample <= static_cast<size_t>(bytes_read)) {
-                                         const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
-                                         value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
-                                    } // Else remains 0.0
+                                    // Bounds check BEFORE accessing buffer
+                                     if (offset_in_buffer + bytes_per_sample > static_cast<size_t>(bytes_read)) {
+                                        amrex::Warning("TiffReader: Calculated byte offset out of bounds in Striped >=8-bit read!");
+                                        return; // Skip this pixel
+                                     }
+                                    const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
+                                    value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
                                 }
                                 fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                             });
