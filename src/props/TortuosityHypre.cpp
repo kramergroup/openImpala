@@ -412,8 +412,9 @@ bool OpenImpala::TortuosityHypre::solve()
             ierr = HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructJacobiSetTol(solver, m_eps); HYPRE_CHECK(ierr);
             ierr = HYPRE_StructJacobiSetMaxIter(solver, m_maxiter); HYPRE_CHECK(ierr);
-            // Add logging for Jacobi if available/needed
-            if (m_verbose > 1) { HYPRE_StructJacobiSetLogging(solver, 1); } // Enable iteration logging if verbose
+            // NOTE: HYPRE_StructJacobiSetLogging does not appear to exist in Hypre v2.30.0
+            // Iteration progress for Jacobi is usually less critical to log than Krylov methods.
+            // if (m_verbose > 1) { /* No specific Jacobi logging function found */ }
 
             if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructJacobiSetup..." << std::endl;
             ierr = HYPRE_StructJacobiSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
@@ -769,6 +770,10 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int n
  * @param[out] fxout Total flux exiting the domain at the high face.
  */
 void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const {
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+         amrex::Print() << "TortuosityHypre::global_fluxes() calculating..." << std::endl;
+    }
+
     fxin = 0.0;
     fxout = 0.0;
     amrex::Real local_fxin = 0.0;
@@ -805,8 +810,8 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         const amrex::Box& bx = mfi.validbox();
         // Need const access to potential (SolnComp) and phase (from m_mf_phase)
         const auto& phi   = phi_soln_local.const_array(mfi); // Use local copy with filled ghosts
-        const auto& phase = m_mf_phase.const_array(mfi); // Original phase data (assuming component 0 if phase_id logic depends on it?)
-                                                         // OR use m_mf_phi const_array(mfi, PhaseComp) if filled by getCellTypes
+        // Use the cell type component that was filled by getCellTypes
+        const auto& cell_type = m_mf_phi.const_array(mfi, PhaseComp); // Assuming PhaseComp holds 0/1 for non-phase/phase
 
         // Calculate flux on the low domain face (idir = domlo_dir)
         amrex::Box lo_face_box = domain;
@@ -817,12 +822,10 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         if (lo_face_box.ok()) {
             // Use central difference across the low boundary face
             amrex::Loop(lo_face_box, [=, &local_fxin] (int i, int j, int k) noexcept {
-                amrex::IntVect iv_face(i, j, k);    // Cell on the face index
-                amrex::IntVect iv_ghost = iv_face; iv_ghost[idir] -= 1; // Ghost cell outside at index 'lo-1'
-                amrex::IntVect iv_cell1 = iv_face;                      // Cell inside at index 'lo'
+                amrex::IntVect iv_cell1(i, j, k);    // Cell inside domain at index 'lo'
 
-                // Check if cell INSIDE boundary is target phase
-                if (phase(iv_cell1) == m_phase) {
+                // Check if cell INSIDE boundary is target phase (using PhaseComp)
+                if (cell_type(iv_cell1) == 1) { // Assuming 1 marks the conducting phase here
                     // Flux = - D * (phi_cell1 - phi_ghost) / dx
                     // Here D=1, phi_ghost is effectively m_vlo
                     // Flux entering = -1.0 * (phi(iv_cell1) - m_vlo) / dx
@@ -835,17 +838,18 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         amrex::Box hi_face_box = domain;
         hi_face_box.setSmall(idir, domhi_dir + 1); // Face index
         hi_face_box.setBig(idir, domhi_dir + 1);
-        hi_face_box &= bx; // Intersect face box with current valid box
+        // Intersect face box with current valid box. Need grow cell for phi access inside.
+        // MFIter is over valid cells, need access to phi(domhi_dir)
+        amrex::Box bx_grown = bx; bx_grown.grow(idir, 1); // Grow box in direction of interest
+        amrex::Box hi_face_intersect = hi_face_box & bx_grown; // Intersect with grown box
 
-         if (hi_face_box.ok()) {
+         if (hi_face_intersect.ok()) {
              // Use central difference across the high boundary face
-             amrex::Loop(hi_face_box, [=, &local_fxout] (int i, int j, int k) noexcept {
-                 amrex::IntVect iv_face(i, j, k); // Index represents the face location (hi+1)
-                 amrex::IntVect iv_cell1 = iv_face; iv_cell1[idir] -= 1; // Cell inside at index 'hi'
-                 amrex::IntVect iv_ghost = iv_face;                     // Ghost cell outside at index 'hi+1'
+             amrex::Loop(hi_face_intersect, [=, &local_fxout] (int i, int j, int k) noexcept {
+                 amrex::IntVect iv_cell1(i, j, k); iv_cell1[idir] -= 1; // Cell inside at index 'hi'
 
-                 // Check if cell INSIDE boundary is target phase
-                 if (phase(iv_cell1) == m_phase) {
+                 // Check if cell INSIDE boundary is target phase (using PhaseComp)
+                 if (cell_type(iv_cell1) == 1) { // Assuming 1 marks the conducting phase here
                      // Flux = - D * (phi_ghost - phi_cell1) / dx
                      // Here D=1, phi_ghost is effectively m_vhi
                      // Flux exiting = -1.0 * (m_vhi - phi(iv_cell1)) / dx
@@ -859,8 +863,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     local_fxin *= face_area;
     local_fxout *= face_area;
 
-    // Reduce across MPI processes - Sum results from all ranks
-    // Note: ReduceRealSum sums to all processes by default
+    // Reduce across MPI processes - Sum results from all processes
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
     amrex::ParallelDescriptor::ReduceRealSum(local_fxout);
 
@@ -868,9 +871,10 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     fxin = local_fxin;   // Flux entering at low face (should be positive if Vhi > Vlo)
     fxout = local_fxout; // Flux exiting at high face (should be positive if Vhi > Vlo)
 
-    // Optional: Broadcast if only IOProc reduced (but ReduceRealSum goes to all)
-    // amrex::ParallelDescriptor::Bcast(&fxin, 1, amrex::ParallelDescriptor::IOProcessorNumber());
-    // amrex::ParallelDescriptor::Bcast(&fxout, 1, amrex::ParallelDescriptor::IOProcessorNumber());
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+         amrex::Print() << "  Reduced fluxes: fxin=" << fxin << ", fxout=" << fxout << std::endl;
+    }
+
 }
 
 
