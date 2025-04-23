@@ -1,15 +1,31 @@
 # Input file for tTortuosity test
 
 # Path to the input image file used to define the geometry/phases.
-# Based on other tests, using the sample TIFF file. Adjust if needed.
 tifffile = data/SampleData_2Phase.tif
 
-# --- Add other parameters required specifically by tTortuosity below ---
-# Example parameters (uncomment and adjust as needed):
-#
-# phase_id = 1             # ID of the phase to calculate tortuosity for
-# direction = 0            # 0=X, 1=Y, 2=Z
-# solver_type = hypre      # Or 'direct'
-# output_file = tort.txt   # Optional output file
-# hypre.max_iter = 200     # Example solver parameter
-# hypre.tolerance = 1e-9   # Example solver parameter
+# --- Tortuosity specific parameters ---
+
+# Set these explicitly based on your test case needs.
+# Examples:
+# phase_id = 1             # ID of the phase to calculate tortuosity for (MUST BE SET if not default in C++)
+# direction = 0            # 0=X, 1=Y, 2=Z (MUST BE SET if not default in C++)
+# solver_type = GMRES      # Solver type (e.g., GMRES, PCG, FlexGMRES, Jacobi)
+
+# --- Solver Controls (Crucial for Debugging/Testing) ---
+# Reduce iterations and loosen tolerance to check for hangs/slowness quickly.
+# Increase maxiter and tighten eps for production runs or accuracy tests.
+hypre.maxiter = 50      # Max solver iterations (Reduced for faster testing/debugging hangs)
+hypre.eps = 1e-6        # Solver relative tolerance (Loosened for faster testing)
+
+# --- Test Verbosity ---
+# Increase verbosity for more detailed output during test run.
+# Assumes TortuosityHypre class checks this value.
+verbose = 2
+
+# Optional output file (usually not needed for automated tests)
+# output_file = tort.txt
+
+# Expected values for verification (Optional - set if known for the sample data)
+# expected_vf = 0.5
+# expected_tau = 2.0
+# tolerance = 1e-6      # Tolerance for comparing expected vs actual values
