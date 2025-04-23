@@ -262,7 +262,18 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "Checking h5pcc..."; which h5pcc; ${HDF5_INSTALL_PREFIX}/bin/h5pcc -showconfig
     echo "Checking gcc version..."; which gcc; gcc --version | grep "(GCC) 11."
     # Add check for custom tiffinfo version
-    echo "Checking tiffinfo version..."; ${LIBTIFF_INSTALL_PREFIX}/bin/tiffinfo --version | grep "${LIBTIFF_VERSION}"
+    # --- Check custom tiffinfo version ---
+    echo "Checking tiffinfo version..."
+    # Run tiffinfo (it errors on --version but prints version string to stdout after stderr)
+    # Redirect stderr to stdout (2>&1), pipe to grep -q (quiet), check grep's exit status
+    if ${LIBTIFF_INSTALL_PREFIX}/bin/tiffinfo --version 2>&1 | grep -q "LIBTIFF, Version ${LIBTIFF_VERSION}"; then
+        echo "  tiffinfo version ${LIBTIFF_VERSION} confirmed."
+    else
+        echo "*** ERROR: Could not confirm tiffinfo version ${LIBTIFF_VERSION} in output!"
+        # Optional: show output for debugging
+        # ${LIBTIFF_INSTALL_PREFIX}/bin/tiffinfo --version || true
+        exit 1
+    fi
 
     echo "--- Verifying Library Linking ---"
     # Check custom libtiff library
