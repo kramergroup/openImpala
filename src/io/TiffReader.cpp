@@ -241,8 +241,9 @@ bool TiffReader::readFile(const std::string& filename)
     m_sample_format     = static_cast<uint16_t>(idata[4]);
     m_samples_per_pixel = static_cast<uint16_t>(idata[5]);
     m_is_sequence       = static_cast<bool>(idata[6]);
-    // Also broadcast sequence parameters if needed, or just the filename/pattern
-    amrex::ParallelDescriptor::Bcast(m_filename, amrex::ParallelDescriptor::IOProcessorNumber());
+
+    // Also broadcast the filename (now using correct string Broadcast)
+    amrex::ParallelDescriptor::Broadcast(m_filename, amrex::ParallelDescriptor::IOProcessorNumber());
 
 
     // Basic check after broadcast
@@ -323,9 +324,9 @@ bool TiffReader::readFileSequence(
                               static_cast<int>(m_is_sequence), m_start_index, m_digits}; // Include sequence params
     amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), amrex::ParallelDescriptor::IOProcessorNumber());
 
-    // Broadcast string parameters
-    amrex::ParallelDescriptor::Bcast(m_base_pattern, amrex::ParallelDescriptor::IOProcessorNumber());
-    amrex::ParallelDescriptor::Bcast(m_suffix, amrex::ParallelDescriptor::IOProcessorNumber());
+    // Broadcast string parameters (now using correct string Broadcast)
+    amrex::ParallelDescriptor::Broadcast(m_base_pattern, amrex::ParallelDescriptor::IOProcessorNumber());
+    amrex::ParallelDescriptor::Broadcast(m_suffix, amrex::ParallelDescriptor::IOProcessorNumber());
 
 
     // All ranks set members from broadcast
@@ -391,7 +392,7 @@ void TiffReader::readDistributedIntoFab(
         // Loop over boxes owned by this MPI rank (and potentially thread)
         for (amrex::MFIter mfi(dest_mf, true); mfi.isValid(); ++mfi) // Use tiling MFIter
         {
-            amrex::IArrayBox& fab = dest_mf[mfi];      // Get the destination Fab
+            amrex::Array4<int> fab_arr = dest_mf.array(mfi); // Get Array4 view for writing
             const amrex::Box& tile_box = mfi.tilebox(); // Get the box for this tile/patch
 
             // Determine the Z-range needed for this box
@@ -462,8 +463,6 @@ void TiffReader::readDistributedIntoFab(
                             int tile_origin_y = ty * tile_height;
 
                             // Read the tile corresponding to (tx, ty) coordinates for slice k
-                            // Note: TIFFComputeTile is complex; easier to use TIFFReadTile if available & suitable,
-                            // or calculate the tile index manually if needed. TIFFReadEncodedTile uses index.
                             ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, k, 0); // Z, Sample=0 assumed
 
                             tsize_t bytes_read = TIFFReadEncodedTile(current_tif_raw_ptr, tile_index, temp_buffer.data(), tile_buffer_size);
@@ -476,7 +475,6 @@ void TiffReader::readDistributedIntoFab(
                                 amrex::Warning("[TiffReader] Read 0 bytes for tile index " + std::to_string(tile_index) + " slice " + std::to_string(k));
                                 continue; // Skip empty tile
                             }
-
 
                             // Define the box covered by this specific tile
                             amrex::Box tile_abs_box(amrex::IntVect(tile_origin_x, tile_origin_y, k),
@@ -496,10 +494,11 @@ void TiffReader::readDistributedIntoFab(
                                     // Bounds check (optional but recommended)
                                     if (offset_in_buffer + bytes_per_sample > static_cast<size_t>(bytes_read)) return;
 
-                                    // Interpret bytes, threshold, and store in destination Fab
+                                    // Interpret bytes, threshold, and store in destination Fab using Array4
                                     double value_as_double = interpretBytesAsDouble(temp_buffer.data() + offset_in_buffer,
                                                                                     m_bits_per_sample, m_sample_format);
-                                    fab(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
+                                    // Use corrected Array4 access syntax
+                                    fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                                 });
                             } // end if intersection ok
                         } // end loop tx
@@ -564,10 +563,11 @@ void TiffReader::readDistributedIntoFab(
                                 // Bounds check (optional but recommended)
                                 if (offset_in_buffer + bytes_per_sample > static_cast<size_t>(bytes_read)) return;
 
-                                // Interpret bytes, threshold, and store in destination Fab
+                                // Interpret bytes, threshold, and store in destination Fab using Array4
                                 double value_as_double = interpretBytesAsDouble(temp_buffer.data() + offset_in_buffer,
                                                                                 m_bits_per_sample, m_sample_format);
-                                fab(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
+                                // Use corrected Array4 access syntax
+                                fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                             });
                         } // end if intersection ok
                     } // end loop over strips
