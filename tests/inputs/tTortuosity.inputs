@@ -1,0 +1,15 @@
+# Input file for tTortuosity test
+
+# Path to the input image file used to define the geometry/phases.
+# Based on other tests, using the sample TIFF file. Adjust if needed.
+tifffile = data/SampleData_2Phase.tif
+
+# --- Add other parameters required specifically by tTortuosity below ---
+# Example parameters (uncomment and adjust as needed):
+#
+# phase_id = 1             # ID of the phase to calculate tortuosity for
+# direction = 0            # 0=X, 1=Y, 2=Z
+# solver_type = hypre      # Or 'direct'
+# output_file = tort.txt   # Optional output file
+# hypre.max_iter = 200     # Example solver parameter
+# hypre.tolerance = 1e-9   # Example solver parameter
