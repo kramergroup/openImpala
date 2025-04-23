@@ -197,7 +197,7 @@ private:
     uint16_t m_bits_per_sample = 0; /**< TIFFTAG_BITSPERSAMPLE */
     uint16_t m_sample_format = 0;   /**< TIFFTAG_SAMPLEFORMAT */
     uint16_t m_samples_per_pixel = 0;/**< TIFFTAG_SAMPLESPERPIXEL */
-    uint16_t m_fill_order = FILLORDER_MSB2LSB;
+    uint16_t m_fill_order; // Initialized in constructor(s)
 
     // Private helper function implementing the core distributed read logic
     // Called by the public threshold methods.
