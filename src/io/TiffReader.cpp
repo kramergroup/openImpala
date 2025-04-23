@@ -638,10 +638,20 @@ void TiffReader::readDistributedIntoFab(
     // as its purpose is fulfilled by filling the MultiFab. Keep m_is_read for metadata status.
 }
 
+// Public threshold method with custom values - calls private helper
+// *** THIS DEFINITION WAS MISSING BEFORE ***
+void TiffReader::threshold(double raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
+{
+    // Calls the private implementation function
+    readDistributedIntoFab(mf, value_if_true, value_if_false, raw_threshold);
+}
+
+
 // Overload for 1/0 threshold output
 void TiffReader::threshold(double raw_threshold, amrex::iMultiFab& mf) const {
     // Calls the main function with default values for true/false
-    readDistributedIntoFab(mf, 1, 0, raw_threshold);
+    // Note: This now calls the 3-argument public version, which then calls the private helper.
+    threshold(raw_threshold, 1, 0, mf);
 }
 
 
