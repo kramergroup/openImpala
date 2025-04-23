@@ -123,6 +123,25 @@ jobs:
           echo "Make build command failed. See uploaded 'make-build-log' artifact for details."
           exit 1 # Job stops here if make build failed
 
+      # Step 9.5: Check Test TIFF File Before Running Tests
+      - name: Check Test TIFF File Status Inside Container
+        # Run only if build succeeded, before running tests
+        if: steps.make_build.outcome == 'success'
+        run: |
+          echo "Checking status of data/SampleData_2Phase.tif inside container..."
+          TARGET_FILE="data/SampleData_2Phase.tif"
+          sudo apptainer exec \
+            --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c "cd /src && \
+                     echo '--- Running ls -l:' && \
+                     ls -l \"${TARGET_FILE}\" && \
+                     echo '--- Running file command:' && \
+                     file \"${TARGET_FILE}\" && \
+                     echo '--- Running tiffinfo:' && \
+                     tiffinfo \"${TARGET_FILE}\"" || echo "::warning::Checking test file failed, proceeding anyway..."
+          echo "Finished checking test file status."
+
       # Step 10: Run Tests and Copy Backtrace <<< RENUMBERED (was Step 9)
       - name: Run Tests and Copy Backtrace
         id: make_test
