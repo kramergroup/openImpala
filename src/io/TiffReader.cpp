@@ -21,7 +21,7 @@
 #include <AMReX_Extension.H>
 #include <AMReX_GpuQualifiers.H>
 #include <AMReX_Utility.H>        // Included for AMREX_ALWAYS_ASSERT
-#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, Broadcast
+#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, Bcast
 #include <AMReX_MFIter.H>         // Needed for MFIter
 #include <AMReX_Array4.H>         // Needed for Array4 access
 #include <AMReX_Loop.H>           // For LoopOnCpu / amrex::ParallelFor
@@ -228,12 +228,13 @@ bool TiffReader::readFile(const std::string& filename)
     } // End IOProcessor Block
 
     // --- Broadcast metadata from Rank 0 to all ranks ---
+    // Broadcast integer/flag data
     std::vector<int> idata = {width_r0, height_r0, depth_r0,
                               static_cast<int>(bps_r0), static_cast<int>(fmt_r0), static_cast<int>(spp_r0),
                               static_cast<int>(m_is_sequence)}; // Include is_sequence flag
     amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), amrex::ParallelDescriptor::IOProcessorNumber());
 
-    // All ranks set their member variables from broadcasted data
+    // All ranks set their member variables from broadcasted integer data
     m_width             = idata[0];
     m_height            = idata[1];
     m_depth             = idata[2];
@@ -242,8 +243,25 @@ bool TiffReader::readFile(const std::string& filename)
     m_samples_per_pixel = static_cast<uint16_t>(idata[5]);
     m_is_sequence       = static_cast<bool>(idata[6]);
 
-    // Also broadcast the filename (now using correct string Broadcast)
-    amrex::ParallelDescriptor::Broadcast(m_filename, amrex::ParallelDescriptor::IOProcessorNumber());
+    // Broadcast filename manually (size first, then data) using Bcast (lowercase)
+    int root = amrex::ParallelDescriptor::IOProcessorNumber();
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_filename.length()); // Get length on root
+        // Broadcast the length first using the int* overload of Bcast
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        // Broadcast the character data using the char* overload of Bcast
+        // Note: Bcast typically takes non-const pointer for buffer
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root);
+    } else {
+        int string_len = 0;
+        // Receive the length first
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        // Resize the string to hold the incoming data
+        m_filename.resize(string_len);
+        // Receive the character data
+        // Note: Bcast typically takes non-const pointer for buffer
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root);
+    }
 
 
     // Basic check after broadcast
@@ -319,17 +337,13 @@ bool TiffReader::readFileSequence(
     } // End IOProcessor Block
 
     // --- Broadcast metadata ---
+    // Broadcast integer/flag data
     std::vector<int> idata = {width_r0, height_r0, depth_r0,
                               static_cast<int>(bps_r0), static_cast<int>(fmt_r0), static_cast<int>(spp_r0),
                               static_cast<int>(m_is_sequence), m_start_index, m_digits}; // Include sequence params
     amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), amrex::ParallelDescriptor::IOProcessorNumber());
 
-    // Broadcast string parameters (now using correct string Broadcast)
-    amrex::ParallelDescriptor::Broadcast(m_base_pattern, amrex::ParallelDescriptor::IOProcessorNumber());
-    amrex::ParallelDescriptor::Broadcast(m_suffix, amrex::ParallelDescriptor::IOProcessorNumber());
-
-
-    // All ranks set members from broadcast
+    // All ranks set members from broadcast integer data
     m_width             = idata[0];
     m_height            = idata[1];
     m_depth             = idata[2];
@@ -340,8 +354,36 @@ bool TiffReader::readFileSequence(
     m_start_index       = idata[7];
     m_digits            = idata[8];
 
+    // Broadcast string parameters manually (size first, then data) using Bcast (lowercase)
+    int root = amrex::ParallelDescriptor::IOProcessorNumber();
+
+    // Broadcast m_base_pattern
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_base_pattern.length());
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_base_pattern.data()), string_len, root);
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        m_base_pattern.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_base_pattern.data()), string_len, root);
+    }
+
+    // Broadcast m_suffix
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_suffix.length());
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_suffix.data()), string_len, root);
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        m_suffix.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_suffix.data()), string_len, root);
+    }
+
+
     // Basic check after broadcast
-    if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0 || m_base_pattern.empty()) {
+    if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0 || (m_is_sequence && m_base_pattern.empty())) {
         amrex::Abort("TiffReader::readFileSequence: Invalid metadata received after broadcast.");
     }
 
@@ -351,6 +393,7 @@ bool TiffReader::readFileSequence(
 
 
 // --- readDistributedIntoFab Method ---
+// This is the private helper called by the public threshold methods
 void TiffReader::readDistributedIntoFab(
     amrex::iMultiFab& dest_mf,
     int value_if_true,
@@ -463,7 +506,7 @@ void TiffReader::readDistributedIntoFab(
                             int tile_origin_y = ty * tile_height;
 
                             // Read the tile corresponding to (tx, ty) coordinates for slice k
-                            ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, k, 0); // Z, Sample=0 assumed
+                            ttile_t tile_index = TIFFComputeTile(current_tif_raw_ptr, tile_origin_x, tile_origin_y, k, 0); // Z=k is dummy here, Sample=0 assumed
 
                             tsize_t bytes_read = TIFFReadEncodedTile(current_tif_raw_ptr, tile_index, temp_buffer.data(), tile_buffer_size);
 
@@ -472,7 +515,8 @@ void TiffReader::readDistributedIntoFab(
                                 continue; // Skip this tile
                             }
                              if (bytes_read == 0) {
-                                amrex::Warning("[TiffReader] Read 0 bytes for tile index " + std::to_string(tile_index) + " slice " + std::to_string(k));
+                                // It's possible to have empty tiles/strips depending on encoding/file structure, might not be an error
+                                // amrex::Warning("[TiffReader] Read 0 bytes for tile index " + std::to_string(tile_index) + " slice " + std::to_string(k));
                                 continue; // Skip empty tile
                             }
 
@@ -528,8 +572,8 @@ void TiffReader::readDistributedIntoFab(
                     // Calculate the range of strips needed for tile_box
                     int strip_y_min = tile_box.smallEnd(1);
                     int strip_y_max = tile_box.bigEnd(1);
-                    tstrip_t first_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_min, 0);
-                    tstrip_t last_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_max, 0);
+                    tstrip_t first_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_min, 0); // Sample 0
+                    tstrip_t last_strip = TIFFComputeStrip(current_tif_raw_ptr, strip_y_max, 0);  // Sample 0
 
                     // Loop over required strips for the current slice k
                     for (tstrip_t strip = first_strip; strip <= last_strip; ++strip) {
@@ -540,13 +584,16 @@ void TiffReader::readDistributedIntoFab(
                             continue; // Skip this strip
                         }
                          if (bytes_read == 0) {
-                             amrex::Warning("[TiffReader] Read 0 bytes for strip " + std::to_string(strip) + " slice " + std::to_string(k));
+                             // It's possible to have empty tiles/strips depending on encoding/file structure, might not be an error
+                             // amrex::Warning("[TiffReader] Read 0 bytes for strip " + std::to_string(strip) + " slice " + std::to_string(k));
                              continue; // Skip empty strip
                          }
 
                         // Define the box covered by this specific strip
                         uint32_t strip_origin_y = strip * rows_per_strip;
-                        uint32_t strip_end_y = std::min(strip_origin_y + rows_per_strip, current_height32) -1;
+                        // Careful: end row is exclusive for size, inclusive for index
+                        uint32_t strip_rows_this = std::min(rows_per_strip, current_height32 - strip_origin_y);
+                        uint32_t strip_end_y = strip_origin_y + strip_rows_this - 1; // Inclusive index
                          amrex::Box strip_abs_box(amrex::IntVect(0, static_cast<int>(strip_origin_y), k),
                                                  amrex::IntVect(m_width - 1, static_cast<int>(strip_end_y), k));
 
