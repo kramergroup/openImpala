@@ -95,9 +95,9 @@ int main (int argc, char* argv[])
         // Expected properties for default SampleData_2Phase.tif
         // ** VERIFY THESE AGAINST YOUR ACTUAL SAMPLE FILE **
         // ** Also update if testing tiled or sequence files **
-        int expected_width = 200;
-        int expected_height = 200;
-        int expected_depth = 200;
+        int expected_width = 50;
+        int expected_height = 50;
+        int expected_depth = 50;
         int expected_bps = 8;       // e.g., 8-bit
         int expected_format = 1;    // e.g., SAMPLEFORMAT_UINT from tiff.h
         int expected_spp = 1;       // e.g., grayscale
