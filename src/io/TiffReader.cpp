@@ -24,7 +24,7 @@
 #include <AMReX_Extension.H>
 #include <AMReX_GpuQualifiers.H>
 #include <AMReX_Utility.H>       // Included for AMREX_ALWAYS_ASSERT
-#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, Bcast
+#include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, Bcast, MyProc, Communicator
 #include <AMReX_MFIter.H>       // Needed for MFIter
 #include <AMReX_Array4.H>       // Needed for Array4 access
 #include <AMReX_Loop.H>         // For LoopOnCpu / amrex::ParallelFor
@@ -158,7 +158,8 @@ int TiffReader::depth() const { return m_depth; }
 int TiffReader::bitsPerSample() const { return m_bits_per_sample; }
 int TiffReader::sampleFormat() const { return m_sample_format; }
 int TiffReader::samplesPerPixel() const { return m_samples_per_pixel; }
-bool TiffReader::isRead() const { return m_is_read; }
+// ** NOTE: isRead() definition is removed from here, assumed to be in TiffReader.H **
+// bool TiffReader::isRead() const { return m_is_read; } // <-- REMOVED
 
 amrex::Box TiffReader::box() const {
     if (!m_is_read) { return amrex::Box(); } // Return empty box if not read
@@ -251,8 +252,19 @@ bool TiffReader::readFile(const std::string& filename)
     m_is_sequence       = static_cast<bool>(idata[6]); // Should be false here
     m_fill_order        = static_cast<uint16_t>(idata[7]); // Unpack fill_order
 
-    // Broadcast filename manually (as before)
-    amrex::BroadcastString(m_filename, amrex::ParallelDescriptor::IOProcessorNumber());
+    // ** CORRECTED: Manually Broadcast filename string **
+    int root = amrex::ParallelDescriptor::IOProcessorNumber();
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_filename.length());
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root); // Send length
+        // Use const_cast carefully if necessary, Bcast takes void*
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root); // Send data
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root); // Receive length
+        m_filename.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root); // Receive data
+    }
 
     // Final validation on all ranks after broadcast
     if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0) {
@@ -317,12 +329,13 @@ bool TiffReader::readFileSequence(
     } // End IOProcessor block
 
     // --- Broadcast Metadata ---
+    int root = amrex::ParallelDescriptor::IOProcessorNumber();
     // Add fill_order_r0 to broadcast data
     std::vector<int> idata = {width_r0, height_r0, depth_r0,
                               static_cast<int>(bps_r0), static_cast<int>(fmt_r0), static_cast<int>(spp_r0),
                               static_cast<int>(m_is_sequence), m_start_index, m_digits,
                               static_cast<int>(fill_order_r0)}; // Added fill_order
-    amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), amrex::ParallelDescriptor::IOProcessorNumber());
+    amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), root);
 
     // Unpack data on all ranks
     m_width             = idata[0];
@@ -336,9 +349,30 @@ bool TiffReader::readFileSequence(
     m_digits            = idata[8];
     m_fill_order        = static_cast<uint16_t>(idata[9]); // Unpack fill_order
 
-    // Broadcast string parameters manually (as before)
-    amrex::BroadcastString(m_base_pattern, amrex::ParallelDescriptor::IOProcessorNumber());
-    amrex::BroadcastString(m_suffix, amrex::ParallelDescriptor::IOProcessorNumber());
+    // ** CORRECTED: Manually Broadcast string parameters **
+    // Bcast m_base_pattern
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_base_pattern.length());
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_base_pattern.data()), string_len, root);
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        m_base_pattern.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_base_pattern.data()), string_len, root);
+    }
+    // Bcast m_suffix
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_suffix.length());
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_suffix.data()), string_len, root);
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root);
+        m_suffix.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_suffix.data()), string_len, root);
+    }
+
 
     // Final validation on all ranks
     if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0 || (m_is_sequence && m_base_pattern.empty())) {
@@ -365,8 +399,9 @@ void TiffReader::readDistributedIntoFab(
     }
 
     // Ensure destination MultiFab matches geometry
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dest_mf.boxArray() == this->box().minimalBox(),
-                                     "TiffReader::readDistributedIntoFab: Destination MultiFab BoxArray does not match reader Box.");
+    // ** CORRECTED ASSERTION **
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dest_mf.boxArray().minimalBox() == this->box(),
+                                     "TiffReader::readDistributedIntoFab: Destination MultiFab BoxArray domain does not match reader Box.");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dest_mf.nComp() == 1,
                                      "TiffReader::readDistributedIntoFab: Destination MultiFab must have exactly 1 component.");
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(dest_mf.nGrow() == 0,
@@ -388,6 +423,7 @@ void TiffReader::readDistributedIntoFab(
     TIFF* shared_tif_stack_raw_ptr = nullptr;
     TiffPtr shared_tif_stack_handle = nullptr; // Keep unique_ptr for lifetime management
     if (!m_is_sequence) {
+        // Use TIFFOpen instead of C++ fstream for libtiff handle
         shared_tif_stack_handle = TiffPtr(TIFFOpen(m_filename.c_str(), "r"), TiffCloser());
         if (!shared_tif_stack_handle) {
             amrex::Abort("[TiffReader::readDistributedIntoFab] FATAL: Failed to open shared TIFF file: " + m_filename);
@@ -417,6 +453,7 @@ void TiffReader::readDistributedIntoFab(
 
                 if (m_is_sequence) {
                     // --- Sequence Reading Logic (Thread-Safe per slice) ---
+                    // [This block remains the same as the previous correct version]
                     std::string current_filename = generateFilename(m_base_pattern, m_start_index + k, m_digits, m_suffix);
                     std::string current_file_id_for_error = current_filename;
                     // Open handle locally for this slice
@@ -583,6 +620,7 @@ void TiffReader::readDistributedIntoFab(
 
                                      if (intersection.ok()) { // Process only if there is overlap
                                          ttile_t tile_index = TIFFComputeTile(shared_tif_stack_raw_ptr, chunk_origin_x, chunk_origin_y, 0, 0);
+                                         // Read the tile data into the thread-local buffer
                                          tsize_t bytes_read = TIFFReadEncodedTile(shared_tif_stack_raw_ptr, tile_index, temp_buffer.data(), tile_buffer_size);
                                          if (bytes_read < 0) {
                                              std::string error_msg = "[TiffReader] FATAL: Error reading tile index " + std::to_string(tile_index) + " slice " + std::to_string(k);
@@ -595,23 +633,44 @@ void TiffReader::readDistributedIntoFab(
                                              if (bits_per_sample_val == 1) {
                                                   int i_in_chunk = i - chunk_origin_x;
                                                   int j_in_chunk = j - chunk_origin_y;
+                                                  // Use chunk_width (tile_width) for linear index calculation
                                                   size_t linear_pixel_index_in_chunk = static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk;
                                                   size_t byte_index_in_buffer = linear_pixel_index_in_chunk / 8;
                                                   int bit_index_in_byte = linear_pixel_index_in_chunk % 8;
+
+                                                  // Check bounds using bytes_read from TIFFReadEncodedTile
                                                   if (byte_index_in_buffer < static_cast<size_t>(bytes_read)) {
                                                        unsigned char packed_byte = temp_buffer[byte_index_in_buffer];
-                                                       int bit_value = (m_fill_order == FILLORDER_MSB2LSB) ? (packed_byte >> (7 - bit_index_in_byte)) & 1 : (packed_byte >> bit_index_in_byte) & 1;
+                                                       int bit_value = 0;
+                                                       // Apply FillOrder
+                                                       if (m_fill_order == FILLORDER_MSB2LSB) {
+                                                           bit_value = (packed_byte >> (7 - bit_index_in_byte)) & 1;
+                                                       } else { // Assume FILLORDER_LSB2MSB
+                                                           bit_value = (packed_byte >> bit_index_in_byte) & 1;
+                                                       }
                                                        value_as_double = static_cast<double>(bit_value);
+                                                  } else {
+                                                       // Index out of bounds - handle error or assign default? Assign default for now.
+                                                       value_as_double = 0.0; // Or some other indicator?
                                                   }
-                                             } else {
+                                             }
+                                             // Handle BPS >= 8 data
+                                             else {
+                                                  // Use correct bytes_per_pixel calculated earlier
                                                   int i_in_chunk = i - chunk_origin_x;
                                                   int j_in_chunk = j - chunk_origin_y;
                                                   size_t offset_in_buffer = (static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk) * bytes_per_pixel;
+
+                                                  // Check bounds using bytes_read and bytes_per_sample
                                                   if (offset_in_buffer + bytes_per_sample <= static_cast<size_t>(bytes_read)) {
-                                                     const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
-                                                     value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
+                                                      const unsigned char* src_ptr = temp_buffer.data() + offset_in_buffer;
+                                                      value_as_double = interpretBytesAsDouble(src_ptr, bits_per_sample_val, m_sample_format);
+                                                  } else {
+                                                       // Index out of bounds
+                                                       value_as_double = 0.0; // Or handle error
                                                   }
                                              }
+                                             // Apply threshold and assign to destination fab
                                              fab_arr(i, j, k_loop) = (value_as_double > raw_threshold) ? value_if_true : value_if_false;
                                          }); // End LoopOnCpu
                                      } // end if intersection ok
@@ -622,7 +681,7 @@ void TiffReader::readDistributedIntoFab(
                              uint32_t rows_per_strip = 0; uint32_t current_height32 = static_cast<uint32_t>(m_height);
                              TIFFGetFieldDefaulted(shared_tif_stack_raw_ptr, TIFFTAG_ROWSPERSTRIP, &rows_per_strip);
                              if (rows_per_strip == 0 || rows_per_strip > current_height32) { rows_per_strip = current_height32; }
-                             const int chunk_width = m_width;
+                             const int chunk_width = m_width; // Strip width is image width
 
                              tsize_t strip_buffer_size = TIFFStripSize(shared_tif_stack_raw_ptr);
                              // Add checks for missing StripByteCounts / Compression if necessary
@@ -659,7 +718,7 @@ void TiffReader::readDistributedIntoFab(
                                      amrex::LoopOnCpu(intersection, [&](int i, int j, int k_loop ) {
                                          double value_as_double = 0.0;
                                          if (bits_per_sample_val == 1) { /* 1-bit logic */
-                                              int i_in_chunk = i - chunk_origin_x; int j_in_chunk = j - chunk_origin_y;
+                                              int i_in_chunk = i - chunk_origin_x; int j_in_chunk = j - chunk_origin_y; // j relative to strip start
                                               size_t linear_pixel_index_in_chunk = static_cast<size_t>(j_in_chunk) * chunk_width + i_in_chunk;
                                               size_t byte_index_in_buffer = linear_pixel_index_in_chunk / 8;
                                               int bit_index_in_byte = linear_pixel_index_in_chunk % 8;
