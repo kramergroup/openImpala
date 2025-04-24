@@ -413,6 +413,14 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
          amrex::Print() << "TortuosityHypre: Finished Fortran call. Assembling matrix..." << std::endl;
     }
 
+    // Before HYPRE_StructMatrixAssemble(m_A) call (~ line 298)
+if (amrex::ParallelDescriptor::IOProcessor()) {
+    std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc()
+              << "] Finished MFIter loop, about to call HYPRE_StructMatrixAssemble(m_A)."
+              << std::endl << std::flush;
+}
+ierr = HYPRE_StructMatrixAssemble(m_A); // This call likely returns 1
+HYPRE_CHECK(ierr); // This check detects the error
     // Finalize matrix assembly
     ierr = HYPRE_StructMatrixAssemble(m_A);
     HYPRE_CHECK(ierr);
