@@ -117,6 +117,75 @@ jobs:
           path: dependency_image.sif
           key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
 
+      
+      # Step 6.1: Verify hypre_test.cpp exists in src/props/
+      - name: Verify hypre_test.cpp exists
+        id: check_hypre_test_file
+        run: |
+          # Check relative to the repository root ($PWD in the runner)
+          if [ ! -f ./src/props/hypre_test.cpp ]; then
+            echo "::error::Standalone test file ./src/props/hypre_test.cpp not found!"
+            exit 1
+          else
+            echo "Standalone test file ./src/props/hypre_test.cpp found."
+          fi
+
+      # Step 6.2: Compile Standalone HYPRE Test inside Container
+      - name: Compile Standalone HYPRE Test
+        id: compile_hypre_test
+        # Run only if the test file exists
+        if: steps.check_hypre_test_file.outcome == 'success'
+        run: |
+          echo "Compiling hypre_test.cpp inside container..."
+          # Execute compile command inside the container
+          # Use mpic++ for C++ file
+          # The source file path is now relative to the /src mount point inside the container
+          sudo apptainer exec \
+            --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && \
+                     cd /src && \
+                     echo "Running: mpic++ src/props/hypre_test.cpp -o hypre_test -I/opt/hypre/v2.32.0/include -L/opt/hypre/v2.32.0/lib -lHYPRE -fopenmp -lm" && \
+                     mpic++ src/props/hypre_test.cpp -o hypre_test -I/opt/hypre/v2.32.0/include -L/opt/hypre/v2.32.0/lib -lHYPRE -fopenmp -lm' > compile_hypre_test.log 2>&1
+          COMPILE_EXIT_CODE=$?
+          cat compile_hypre_test.log # Print compile output
+          if [ $COMPILE_EXIT_CODE -ne 0 ]; then
+            echo "::error::Standalone HYPRE test compilation failed! Exit code: $COMPILE_EXIT_CODE"
+            exit $COMPILE_EXIT_CODE
+          fi
+          echo "Standalone HYPRE test compilation successful."
+          # The executable 'hypre_test' will be created in /src (which is $PWD on the host)
+          ls -l ./hypre_test # Verify executable exists
+
+      # Step 6.3: Run Standalone HYPRE Test inside Container
+      - name: Run Standalone HYPRE Test
+        id: run_hypre_test
+        # Run only if compilation succeeded
+        if: steps.compile_hypre_test.outcome == 'success'
+        run: |
+          echo "Running hypre_test inside container..."
+          # Execute run command inside the container
+          # The executable path is relative to the /src mount point
+          sudo apptainer exec \
+            --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && \
+                     cd /src && \
+                     echo "Running: mpirun -np 1 --allow-run-as-root ./hypre_test" && \
+                     mpirun -np 1 --allow-run-as-root ./hypre_test' > run_hypre_test.log 2>&1
+          RUN_EXIT_CODE=$?
+          cat run_hypre_test.log # Print runtime output
+          if [ $RUN_EXIT_CODE -ne 0 ]; then
+            echo "::error::Standalone HYPRE test execution failed! Exit code: $RUN_EXIT_CODE"
+            # Decide if this failure should stop the whole workflow
+            # exit $RUN_EXIT_CODE
+            echo "::warning::Standalone HYPRE test failed, but continuing workflow..." # Example: Warn but continue
+          fi
+          echo "Standalone HYPRE test execution finished."
+          # Optional: Upload logs as artifacts if needed
+          # actions/upload-artifact@v4 ... with path: compile_hypre_test.log, run_hypre_test.log
+
+
       # Step 7: Build OpenImpala using Dependency SIF
       - name: Build OpenImpala using Dependency SIF
         id: make_build
