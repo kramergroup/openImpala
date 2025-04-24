@@ -22,8 +22,9 @@
 #include <AMReX_ParmParse.H>
 #include <AMReX_Vector.H>
 #include <AMReX_Array.H>
-#include <AMReX_GpuQualifiers.H> // Needed for AMREX_HOST_DEVICE_FOR_BOX if used
+#include <AMReX_GpuQualifiers.H> // Needed for AMREX_GPU_DEVICE if used elsewhere
 #include <AMReX_Box.H>           // Needed for Box operations
+#include <AMReX_IntVect.H>       // Needed for amrex::IntVect
 
 // HYPRE includes
 #include <HYPRE.h>
@@ -418,13 +419,19 @@ bool OpenImpala::TortuosityHypre::solve() {
             HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
             if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed in solve() for plotfile!"); }
 
-            // *** Reverted to AMREX_HOST_DEVICE_FOR_BOX for copy ***
+            // *** Use standard nested loops for copy ***
             amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
-            AMREX_HOST_DEVICE_FOR_BOX(bx, i, j, k) {
-                amrex::IntVect iv(i,j,k);
-                long long linear_offset = bx.index(iv);
-                if (linear_offset >= 0 && linear_offset < npts) {
-                     soln_arr(i,j,k) = soln_buffer[linear_offset];
+            const amrex::IntVect lo = bx.smallEnd();
+            const amrex::IntVect hi = bx.bigEnd();
+            long long k = 0; // Linear index for buffer (assuming C-order)
+            for (int kk = lo[2]; kk <= hi[2]; ++kk) {
+                for (int jj = lo[1]; jj <= hi[1]; ++jj) {
+                    for (int ii = lo[0]; ii <= hi[0]; ++ii) {
+                        if (k < npts) { // Basic bounds check
+                            soln_arr(ii,jj,kk) = soln_buffer[k];
+                        }
+                        k++;
+                    }
                 }
             }
         }
@@ -535,14 +542,20 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
         if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed in global_fluxes!"); }
 
-        // *** Reverted to AMREX_HOST_DEVICE_FOR_BOX for copy ***
+        // *** Use standard nested loops for copy ***
         amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
-        AMREX_HOST_DEVICE_FOR_BOX(bx, i, j, k) {
-             amrex::IntVect iv(i,j,k);
-             long long linear_offset = bx.index(iv);
-             if (linear_offset >= 0 && linear_offset < npts) {
-                  soln_arr(i,j,k) = soln_buffer[linear_offset];
-             }
+        const amrex::IntVect lo = bx.smallEnd();
+        const amrex::IntVect hi = bx.bigEnd();
+        long long k = 0; // Linear index for buffer (assuming C-order)
+        for (int kk = lo[2]; kk <= hi[2]; ++kk) {
+            for (int jj = lo[1]; jj <= hi[1]; ++jj) {
+                for (int ii = lo[0]; ii <= hi[0]; ++ii) {
+                    if (k < npts) { // Basic bounds check
+                        soln_arr(ii,jj,kk) = soln_buffer[k];
+                    }
+                    k++;
+                }
+            }
         }
     }
     mf_soln_temp.FillBoundary(m_geom.periodicity());
@@ -569,21 +582,33 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         amrex::Real grad, flux;
         amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
 
-        // *** Reverted to AMREX_HOST_DEVICE_FOR_BOX for flux calculation loops ***
-        AMREX_HOST_DEVICE_FOR_BOX(lobox, i, j, k) {
-             if (phase(i,j,k) == m_phase) {
-                 grad = (soln(i,j,k) - soln(i-shift[0], j-shift[1], k-shift[2])) / dx[idir];
-                 flux = -grad;
-                 local_fxin += flux;
-             }
+        // *** Use standard nested loops for flux calculation loops ***
+        const amrex::IntVect lo_flux = lobox.smallEnd();
+        const amrex::IntVect hi_flux = lobox.bigEnd();
+        for (int k = lo_flux[2]; k <= hi_flux[2]; ++k) {
+            for (int j = lo_flux[1]; j <= hi_flux[1]; ++j) {
+                for (int i = lo_flux[0]; i <= hi_flux[0]; ++i) {
+                     if (phase(i,j,k) == m_phase) {
+                         grad = (soln(i,j,k) - soln(i-shift[0], j-shift[1], k-shift[2])) / dx[idir];
+                         flux = -grad;
+                         local_fxin += flux;
+                     }
+                }
+            }
         }
 
-        AMREX_HOST_DEVICE_FOR_BOX(hibox, i, j, k) {
-             if (phase(i,j,k) == m_phase) {
-                 grad = (soln(i+shift[0], j+shift[1], k+shift[2]) - soln(i,j,k)) / dx[idir];
-                 flux = -grad;
-                 local_fxout += flux;
-             }
+        const amrex::IntVect lo_flux_hi = hibox.smallEnd();
+        const amrex::IntVect hi_flux_hi = hibox.bigEnd();
+        for (int k = lo_flux_hi[2]; k <= hi_flux_hi[2]; ++k) {
+            for (int j = lo_flux_hi[1]; j <= hi_flux_hi[1]; ++j) {
+                for (int i = lo_flux_hi[0]; i <= hi_flux_hi[0]; ++i) {
+                     if (phase(i,j,k) == m_phase) {
+                         grad = (soln(i+shift[0], j+shift[1], k+shift[2]) - soln(i,j,k)) / dx[idir];
+                         flux = -grad;
+                         local_fxout += flux;
+                     }
+                }
+            }
         }
     } // End MFIter
 
