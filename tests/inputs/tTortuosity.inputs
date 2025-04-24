@@ -1,7 +1,7 @@
 # Input file for tTortuosity test
 
 # Path to the input image file used to define the geometry/phases.
-tifffile = data/SampleData_2Phase.tif
+tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
 
 # --- Tortuosity specific parameters ---
 
