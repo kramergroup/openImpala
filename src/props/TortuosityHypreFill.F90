@@ -239,12 +239,15 @@ contains
               xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
           end if
 
-          ! <<< --- ADDED DEBUG CHECK for near-zero diagonals --- >>>
+          ! <<< --- ADDED DEBUG CHECK for near-zero diagonals (Corrected) --- >>>
           ! Check the diagonal coefficient AFTER all modifications (Neumann, Dirichlet)
           ! Only check for cells belonging to the phase being simulated.
           if ( p(i,j,k,comp_phase) == phase ) then
              if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
-                write(*,'(A,3I5,A,ES10.3)') "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, " value=", a(stencil_idx_start + istn_c)
+                 ! Break the write statement into multiple lines using '&'
+                 write(*,'(A,3I5,A,ES10.3)') &
+                      "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, &
+                      " value=", a(stencil_idx_start + istn_c)
              end if
           end if
           ! <<< --- END ADDED DEBUG CHECK --- >>>
