@@ -1,3 +1,4 @@
+# .github/workflows/build-test.yml
 Bootstrap: docker
 From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
@@ -16,8 +17,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
     # Define versions
     export OPENMPI_VERSION=4.1.6
-    export AMREX_VERSION=25.03     # AMReX version
-    export HYPRE_VERSION=v2.32.0   # HYPRE version
+    export AMREX_VERSION=25.03      # AMReX version
+    export HYPRE_VERSION=v2.32.0    # HYPRE version
     export HDF5_VERSION=1.12.3
     export LIBTIFF_VERSION=4.6.0
     export ZLIB_VERSION=system
@@ -85,7 +86,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
     # --- Verify Compilers ---
     echo "--- Verifying CMake (from dnf) ---"
-    which cmake && cmake --version || { echo "CMake (from dnf) verification failed!"; exit 1; }
+    # Use cmake3 executable name if cmake link isn't created automatically
+    which cmake3 && cmake3 --version || { echo "CMake (from dnf) verification failed! Trying 'cmake'"; which cmake && cmake --version || { echo "CMake verification failed!"; exit 1; }; }
     which gcc && gcc --version | grep "(GCC) 11." || { echo "GCC 11 verification failed!"; exit 1; }
 
     # --- Install OpenMPI ---
@@ -150,7 +152,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     cd amrex
     mkdir build && cd build
     echo "--- Configuring AMReX ---"
-    cmake .. \
+    # Use cmake3 if cmake isn't the default command name
+    cmake3 .. \
         -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
         -DCMAKE_BUILD_TYPE=Release \
         -DAMReX_MPI=ON \
@@ -189,18 +192,19 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Making HYPRE library ---"
     make -j$(nproc)
 
-    # *** MODIFIED: Run 'make test' from top-level hypre directory ***
+    # *** MODIFIED: Run 'make test' from top-level hypre directory using subshell ***
     echo "--- Running HYPRE internal tests (make test) ---"
-    cd .. # Go up from src to the top-level hypre directory
-    # Redirect directly to the final location. Use '|| true' to prevent SIF build failure if tests fail.
-    make test > /hypre_make_test.log 2>&1 || true
+    (cd .. && make test > /hypre_make_test.log 2>&1 || true)
     echo "--- Finished running HYPRE internal tests (Log at /hypre_make_test.log) ---"
     # *** END MODIFIED STEP ***
 
     echo "--- Installing HYPRE ---"
-    make install # Install usually run from top-level or src, check hypre docs if needed
+    # *** Run make install from the src directory ***
+    make install
 
-    cd .. # Go back to /tmp/build_src
+    # *** Go back to /tmp/build_src directory from hypre/src ***
+    cd ../..
+
     # Log file should be at /hypre_make_test.log, no copy needed here
     rm -rf hypre # Clean up source
 
@@ -251,10 +255,12 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     export OPENMPI_INSTALL_PREFIX=/usr/local
     export LIBTIFF_VERSION=4.6.0
     export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
+    # Explicitly set TIFF_HOME for the %test section as well
+    export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX} 
     echo "--- Verifying Tool Versions ---";
     echo "Checking mpicc..."; which mpicc; mpicc --version
     echo "Checking mpic++..."; which mpic++; mpic++ --version
-    echo "Checking cmake..."; which cmake; cmake --version
+    echo "Checking cmake..."; which cmake3; cmake3 --version # Use cmake3
     echo "Checking h5pcc..."; which h5pcc; ${HDF5_INSTALL_PREFIX}/bin/h5pcc -showconfig
     echo "Checking gcc version..."; which gcc; gcc --version | grep "(GCC) 11."
     echo "Checking tiffinfo version..."
@@ -265,7 +271,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         exit 1
     fi
     echo "--- Verifying Library Linking ---"
-    LIBTIFF_LIB="${TIFF_HOME}/lib/libtiff.so"
+    # Use the correct TIFF_HOME variable here
+    LIBTIFF_LIB="${TIFF_HOME}/lib/libtiff.so" 
     if [ ! -f "$LIBTIFF_LIB" ]; then echo "*** ERROR: Custom libtiff library not found at $LIBTIFF_LIB!"; exit 1; fi
     echo "Checking libtiff lib ($LIBTIFF_LIB)..."; ldd "$LIBTIFF_LIB"
     HDF5_LIB="${HDF5_HOME}/lib/libhdf5.so"
@@ -287,4 +294,3 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "Using AMReX ${AMREX_VERSION}, HYPRE ${HYPRE_VERSION}."
     echo "Includes custom build of libtiff ${LIBTIFF_VERSION}."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
-
