@@ -1,9 +1,6 @@
-// Generated on Tuesday, March 25, 2025, at 10:21 PM GMT in Oxford.
-// Corrected to remove deprecated TiffStackReader usage.
-// Corrected scope for TortuosityHypre and its nested SolverType enum.
-// Corrected duplicate enum definition.
-// Removed check for non-existent DatReader::isRead method.
-// Corrected namespace issues identified in recent build.
+// Main application driver for diffusion/tortuosity calculations.
+// Reads various image formats (TIFF, DAT, HDF5), calculates volume fraction,
+// and computes tortuosity using TortuosityHypre solver.
 
 #include <cmath>
 #include <cstdlib> // Prefer over <stdlib.h>
@@ -35,21 +32,16 @@
 #include <AMReX_Utility.H> // For amrex::UtilCreateDirectory
 
 // OpenImpala includes (assuming namespace OpenImpala)
-#include "../io/DatReader.H"       // Assuming DatReader.H includes needed types like RawDataType, parseRawDataType
+#include "../io/DatReader.H"        // Assuming DatReader.H includes needed types like RawDataType, parseRawDataType
 #include "../io/HDF5Reader.H"
 #include "../io/TiffReader.H"
-// #include "../io/TiffStackReader.H" // REMOVED - Deprecated
-#include "TortuosityHypre.H"       // Defines OpenImpala::TortuosityHypre and OpenImpala::TortuosityHypre::SolverType
+#include "TortuosityHypre.H"        // Defines OpenImpala::TortuosityHypre and OpenImpala::TortuosityHypre::SolverType
 #include "VolumeFraction.H"
-#include "Tortuosity.H"           // Include base class and OpenImpala::Direction enum
-
-// Namespace already declared in Tortuosity.H and TortuosityHypre.H
-// No need to redeclare enums here.
+#include "Tortuosity.H"             // Include base class and OpenImpala::Direction enum
 
 namespace // Anonymous namespace for helpers
 {
     // Helper to convert string ("X", "Y", "Z") to Direction enum
-    // Returns Direction::X if input is invalid, prints warning.
     OpenImpala::Direction string_to_direction(const std::string& s) {
         std::string upper_s = s;
         std::transform(upper_s.begin(), upper_s.end(), upper_s.begin(), ::toupper);
@@ -70,12 +62,10 @@ namespace // Anonymous namespace for helpers
         }
     }
 
-    // Helper to convert string to SolverType (Example, needs actual enum)
-    // FIX 1: Qualify return type with namespace
+    // Helper to convert string to SolverType
     OpenImpala::TortuosityHypre::SolverType string_to_solver(const std::string& s) {
         std::string upper_s = s;
         std::transform(upper_s.begin(), upper_s.end(), upper_s.begin(), ::toupper);
-        // FIX 1: Qualify enum values with full namespace::class::enum
         if (upper_s == "FLEXGMRES") { return OpenImpala::TortuosityHypre::SolverType::FlexGMRES; }
         if (upper_s == "JACOBI")    { return OpenImpala::TortuosityHypre::SolverType::Jacobi; }
         if (upper_s == "GMRES")     { return OpenImpala::TortuosityHypre::SolverType::GMRES; }
@@ -128,7 +118,6 @@ int main(int argc, char* argv[])
         // Solver Parameters
         std::string solver_type_str = "FlexGMRES";
         pp.query("solver_type", solver_type_str);
-        // FIX 2: Resolved by fixing string_to_solver return type
         auto solver_type = string_to_solver(solver_type_str);
 
         double hypre_eps = 1e-9; // Solver tolerance
@@ -207,17 +196,18 @@ int main(int argc, char* argv[])
 
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Diffusion Calculation Setup ---\n";
-            amrex::Print() << " Input File:            " << full_input_path << "\n";
-            if (!hdf5_dataset.empty()) amrex::Print() << " HDF5 Dataset:          " << hdf5_dataset << "\n";
-            amrex::Print() << " Analysis Phase ID:     " << phase_id << "\n";
-            amrex::Print() << " Threshold Value:       " << threshold_value << "\n";
-            amrex::Print() << " Direction(s):          " << direction_str << "\n";
-            amrex::Print() << " Results Directory:     " << results_dir << "\n";
-            amrex::Print() << " Output Filename:       " << output_filename << "\n";
-            amrex::Print() << " Max Grid Size:         " << box_size << "\n";
-            amrex::Print() << " Solver:                " << solver_type_str << "\n";
-            amrex::Print() << " Solver Tol:            " << hypre_eps << "\n";
-            amrex::Print() << " Solver MaxIter:        " << hypre_maxiter << "\n";
+            amrex::Print() << " Input File:           " << full_input_path << "\n";
+            if (!hdf5_dataset.empty()) amrex::Print() << " HDF5 Dataset:         " << hdf5_dataset << "\n";
+            amrex::Print() << " Analysis Phase ID:    " << phase_id << "\n";
+            amrex::Print() << " Threshold Value:      " << threshold_value << "\n";
+            amrex::Print() << " Direction(s):         " << direction_str << "\n";
+            amrex::Print() << " Results Directory:    " << results_dir << "\n";
+            amrex::Print() << " Output Filename:      " << output_filename << "\n";
+            amrex::Print() << " Max Grid Size:        " << box_size << "\n";
+            amrex::Print() << " Solver:               " << solver_type_str << "\n";
+            amrex::Print() << " Solver Tol:           " << hypre_eps << "\n";
+            amrex::Print() << " Solver MaxIter:       " << hypre_maxiter << "\n";
+            amrex::Print() << " Write Plotfile:       " << write_plotfile << "\n";
             amrex::Print() << "-----------------------------------\n\n";
         }
 
@@ -236,57 +226,56 @@ int main(int argc, char* argv[])
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             }
 
+            // Determine domain and define BoxArray, DistributionMapping first
             if (ext == ".tif" || ext == ".tiff") {
-                if (verbose > 0) amrex::Print() << " Reading TIFF file: " << full_input_path << "\n";
-                OpenImpala::TiffReader reader(full_input_path.string());
-                domain_box = reader.box();
-                if (domain_box.isEmpty()) throw std::runtime_error("TiffReader returned empty domain box.");
-                reader_success = true;
-                 ba.define(domain_box);
-                 ba.maxSize(box_size);
-                 dm.define(ba);
-                 mf_phase.define(ba, dm, 1, 1); // 1 ghost cell for solver
-                 reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase); // Assign phase_id to > T
-
+                 OpenImpala::TiffReader reader(full_input_path.string());
+                 domain_box = reader.box();
             } else if (ext == ".dat") {
-                 if (verbose > 0) amrex::Print() << " Reading DAT file: " << full_input_path << "\n";
                  OpenImpala::DatReader reader(full_input_path.string());
                  domain_box = reader.box();
-                 if (domain_box.isEmpty()) throw std::runtime_error("DatReader returned empty domain box.");
-                 reader_success = true;
-                 ba.define(domain_box);
-                 ba.maxSize(box_size);
-                 dm.define(ba);
-                 mf_phase.define(ba, dm, 1, 1);
-                 // Assuming DatReader's threshold uses its internal DataType or can handle double
-                 // Adjust cast if needed based on DatReader implementation
-                 reader.threshold(static_cast<OpenImpala::DatReader::DataType>(threshold_value), phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
-
-            } else if (ext == ".raw") { // Example: Handle raw if needed distinctly
-                 if (verbose > 0) amrex::Print() << " Reading RAW file: " << full_input_path << "\n";
-                 if (raw_width <= 0 || raw_height <= 0 || raw_depth <= 0 || raw_datatype_str.empty()) {
-                     throw std::runtime_error("raw_width, raw_height, raw_depth, and raw_datatype must be specified in inputs for RAW files.");
+            } else if (ext == ".raw") {
+                 if (raw_width <= 0 || raw_height <= 0 || raw_depth <= 0) {
+                      throw std::runtime_error("raw_width, raw_height, raw_depth must be specified for RAW files.");
                  }
-                 // TODO: Implement or use appropriate RawReader
-                 throw std::runtime_error("RAW file reading not fully implemented in this example.");
-
+                 domain_box = amrex::Box({0,0,0}, {raw_width-1, raw_height-1, raw_depth-1});
             } else if (ext == ".h5" || ext == ".hdf5") {
-                 if (verbose > 0) amrex::Print() << " Reading HDF5 file: " << full_input_path << ", Dataset: " << hdf5_dataset << "\n";
-                 if (hdf5_dataset.empty()) {
-                     throw std::runtime_error("hdf5_dataset must be specified in inputs for HDF5 files.");
-                 }
+                 if (hdf5_dataset.empty()) throw std::runtime_error("hdf5_dataset must be specified for HDF5 files.");
                  OpenImpala::HDF5Reader reader(full_input_path.string(), hdf5_dataset);
                  domain_box = reader.box();
-                 if (domain_box.isEmpty()) throw std::runtime_error("HDF5Reader returned empty domain box.");
-                 reader_success = true;
-                 ba.define(domain_box);
-                 ba.maxSize(box_size);
-                 dm.define(ba);
-                 mf_phase.define(ba, dm, 1, 1);
-                 reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_phase);
-
             } else {
                  amrex::Abort("File format not recognized or supported: " + filename + " (Extension: " + ext + ")");
+            }
+
+            if (domain_box.isEmpty()) throw std::runtime_error("Reader returned empty domain box.");
+
+            ba.define(domain_box);
+            ba.maxSize(box_size);
+            dm.define(ba);
+            mf_phase.define(ba, dm, 1, 1); // Define phase MF with 1 ghost cell
+
+            // Now read data into temporary MF without ghosts and copy
+            if (ext == ".tif" || ext == ".tiff") {
+                 if (verbose > 0) amrex::Print() << " Reading TIFF file: " << full_input_path << "\n";
+                 OpenImpala::TiffReader reader(full_input_path.string()); // Re-open or modify reader if needed
+                 amrex::iMultiFab mf_temp_no_ghost(ba, dm, 1, 0);
+                 reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_temp_no_ghost);
+                 amrex::Copy(mf_phase, mf_temp_no_ghost, 0, 0, 1, 0);
+            } else if (ext == ".dat") {
+                 if (verbose > 0) amrex::Print() << " Reading DAT file: " << full_input_path << "\n";
+                 OpenImpala::DatReader reader(full_input_path.string()); // Re-open or modify reader if needed
+                 amrex::iMultiFab mf_temp_no_ghost(ba, dm, 1, 0);
+                 reader.threshold(static_cast<OpenImpala::DatReader::DataType>(threshold_value), phase_id, (phase_id == 0 ? 1 : 0), mf_temp_no_ghost);
+                 amrex::Copy(mf_phase, mf_temp_no_ghost, 0, 0, 1, 0);
+            } else if (ext == ".raw") {
+                 if (verbose > 0) amrex::Print() << " Reading RAW file: " << full_input_path << "\n";
+                 // TODO: Implement RawReader logic using mf_phase or temporary pattern
+                 throw std::runtime_error("RAW file reading requires implementation using the temporary MultiFab pattern.");
+            } else if (ext == ".h5" || ext == ".hdf5") {
+                 if (verbose > 0) amrex::Print() << " Reading HDF5 file: " << full_input_path << ", Dataset: " << hdf5_dataset << "\n";
+                 OpenImpala::HDF5Reader reader(full_input_path.string(), hdf5_dataset); // Re-open or modify reader
+                 amrex::iMultiFab mf_temp_no_ghost(ba, dm, 1, 0);
+                 reader.threshold(threshold_value, phase_id, (phase_id == 0 ? 1 : 0), mf_temp_no_ghost);
+                 amrex::Copy(mf_phase, mf_temp_no_ghost, 0, 0, 1, 0);
             }
 
             // --- Setup Geometry and Fill Ghost Cells ---
@@ -297,7 +286,7 @@ int main(int argc, char* argv[])
             amrex::Array<int, AMREX_SPACEDIM> is_periodic{0, 0, 0}; // Assuming non-periodic
             geom.define(domain_box, &rb, 0, is_periodic.data());
 
-            mf_phase.FillBoundary(geom.periodicity());
+            mf_phase.FillBoundary(geom.periodicity()); // Fill ghosts *after* copying valid data
 
         } catch (const std::exception& e) {
             amrex::Abort("Error during file reading or grid setup: " + std::string(e.what()));
@@ -307,7 +296,9 @@ int main(int argc, char* argv[])
         if (verbose > 0) amrex::Print() << " Calculating Volume Fraction for Phase ID: " << phase_id << "\n";
         OpenImpala::VolumeFraction vf(mf_phase, phase_id, 0); // Assume phase data in component 0
         amrex::Real actual_vf = vf.value(false); // Global calculation
-        amrex::Print() << "  Volume Fraction = " << std::fixed << std::setprecision(6) << actual_vf << "\n";
+        if (amrex::ParallelDescriptor::IOProcessor()) { // Print only once
+            amrex::Print() << "  Volume Fraction = " << std::fixed << std::setprecision(6) << actual_vf << "\n";
+        }
 
         // --- Calculate Tortuosity ---
         std::vector<OpenImpala::Direction> directions_to_compute;
@@ -319,44 +310,68 @@ int main(int argc, char* argv[])
         } else {
              std::stringstream ss(direction_str);
              std::string single_dir_str;
-             while (ss >> single_dir_str) {
-                 directions_to_compute.push_back(string_to_direction(single_dir_str));
+             while (std::getline(ss, single_dir_str, ',')) { // Split by comma, handle spaces later
+                 // Trim leading/trailing whitespace
+                 single_dir_str.erase(0, single_dir_str.find_first_not_of(" \t\n\r\f\v"));
+                 single_dir_str.erase(single_dir_str.find_last_not_of(" \t\n\r\f\v") + 1);
+                 if (!single_dir_str.empty()) {
+                     directions_to_compute.push_back(string_to_direction(single_dir_str));
+                 }
              }
+             // If only one specified without comma
              if (directions_to_compute.empty() && !direction_str.empty()) {
                  directions_to_compute.push_back(string_to_direction(direction_str));
              }
         }
+        // Remove duplicates if needed (e.g., if user enters "X,X")
+        std::sort(directions_to_compute.begin(), directions_to_compute.end());
+        directions_to_compute.erase(std::unique(directions_to_compute.begin(), directions_to_compute.end()), directions_to_compute.end());
+
 
         std::map<OpenImpala::Direction, amrex::Real> tortuosity_results;
 
         for (const auto& dir : directions_to_compute) {
-            if (verbose > 0) amrex::Print() << "\n Calculating Tortuosity for Direction: " << direction_to_string(dir) << "\n";
+            if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+                amrex::Print() << "\n Calculating Tortuosity for Direction: " << direction_to_string(dir) << "\n";
+            }
+
+            // Only proceed if VF > 0 for the phase of interest
+            if (actual_vf <= 0.0) {
+                 if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+                    amrex::Print() << "  Skipping Tortuosity calculation for direction " << direction_to_string(dir) << " because Volume Fraction is zero.\n";
+                 }
+                 tortuosity_results[dir] = std::numeric_limits<amrex::Real>::quiet_NaN(); // Or some indicator value
+                 continue; // Skip to next direction
+            }
 
             try {
-                // FIX 3: Qualify TortuosityHypre with namespace
-                OpenImpala::TortuosityHypre tortuosity_solver( // Use qualified name
+                // <<< UPDATED CONSTRUCTOR CALL >>>
+                OpenImpala::TortuosityHypre tortuosity_solver(
                     geom, ba, dm, mf_phase,
                     actual_vf,
                     phase_id,
-                     dir,
+                    dir, // Current direction in loop
                     solver_type,
                     results_dir.string(), // resultspath
-                    // Use defaults for vlo, vhi, verbose, or pass them if needed
                     0.0, // vlo example
                     1.0, // vhi example
-                    verbose // verbose
+                    verbose, // verbose
+                    (write_plotfile != 0) // Pass boolean plotfile flag <<< CHANGED
                 );
 
-                // FIX 4: Variable name tortuosity_solver should now be correct and in scope
                 amrex::Real tau_value = tortuosity_solver.value(); // Calculate tortuosity
                 tortuosity_results[dir] = tau_value;
-                amrex::Print() << "  Tortuosity (" << direction_to_string(dir) << ") = " << std::fixed << std::setprecision(6) << tau_value << "\n";
+                 // Print immediately after calculation
+                 if (amrex::ParallelDescriptor::IOProcessor()) {
+                    amrex::Print() << "  Tortuosity (" << direction_to_string(dir) << ") = " << std::fixed << std::setprecision(6) << tau_value << "\n";
+                 }
+
 
             } catch (const std::exception& e) {
                  amrex::Warning("Error calculating tortuosity for direction " + direction_to_string(dir) + ": " + std::string(e.what()));
-                 tortuosity_results[dir] = -1.0; // Indicate failure
+                 tortuosity_results[dir] = std::numeric_limits<amrex::Real>::quiet_NaN(); // Indicate failure
             }
-        }
+        } // End loop over directions
 
         // --- Write Results to File ---
         if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -373,8 +388,13 @@ int main(int argc, char* argv[])
                  outfile << "# Solver Max Iter: " << hypre_maxiter << "\n"; // Reporting input param
                  outfile << "# -----------------------------\n";
                  outfile << "VolumeFraction: " << std::fixed << std::setprecision(9) << actual_vf << "\n";
-                 for (const auto& pair : tortuosity_results) {
-                     outfile << "Tortuosity_" << direction_to_string(pair.first) << ": " << std::fixed << std::setprecision(9) << pair.second << "\n";
+                 for (const auto& dir_enum : {OpenImpala::Direction::X, OpenImpala::Direction::Y, OpenImpala::Direction::Z} ) {
+                      if (tortuosity_results.count(dir_enum)) {
+                          outfile << "Tortuosity_" << direction_to_string(dir_enum) << ": " << std::fixed << std::setprecision(9) << tortuosity_results[dir_enum] << "\n";
+                      } else {
+                           // Optionally write placeholder if not calculated
+                           // outfile << "Tortuosity_" << direction_to_string(dir_enum) << ": Not Computed\n";
+                      }
                  }
                  outfile.close();
              } else {
@@ -386,7 +406,9 @@ int main(int argc, char* argv[])
         // --- Final Timing ---
         amrex::Real stop_time = amrex::second() - strt_time;
         amrex::ParallelDescriptor::ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber());
-        amrex::Print() << std::endl << "Total run time (seconds) = " << stop_time << std::endl;
+        if (amrex::ParallelDescriptor::IOProcessor()) { // Print timing only once
+             amrex::Print() << std::endl << "Total run time (seconds) = " << stop_time << std::endl;
+        }
 
     } // End AMReX scope block
 

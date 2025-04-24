@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>   // For std::numeric_limits
 #include <stdexcept> // For potential error throwing (optional)
+#include <iomanip>  // For std::setprecision
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>       // For amrex::average_down (potentially needed elsewhere, good include)
@@ -83,7 +84,8 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              const std::string& resultspath,
                                              const amrex::Real vlo, // Default args from H
                                              const amrex::Real vhi, // Default args from H
-                                             int verbose)           // Default args from H
+                                             int verbose,           // Default args from H
+                                             bool write_plotfile)   // <<< PARAMETER ADDED
     : m_geom(geom), m_ba(ba), m_dm(dm),
       m_mf_phase(mf_phase_input, amrex::make_alias, 0, mf_phase_input.nComp()), // Create owned copy/alias
       m_phase(phase), m_vf(vf),
@@ -92,6 +94,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
       m_eps(1e-9), m_maxiter(200),
       m_vlo(vlo), m_vhi(vhi),
       m_resultspath(resultspath), m_verbose(verbose),
+      m_write_plotfile(write_plotfile), // <<< MEMBER INITIALIZED
       m_mf_phi(ba, dm, numComponents, 1), // Allocate solution multifab (SolnComp + PhaseComp), 1 ghost cell
       m_first_call(true), m_value(std::numeric_limits<amrex::Real>::quiet_NaN()), // Initialize value to NaN
       // Initialize HYPRE handles to NULL
@@ -112,6 +115,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
          amrex::Print() << "  HYPRE Params: eps=" << m_eps << ", maxiter=" << m_maxiter << std::endl;
          amrex::Print() << "  Class Verbose Level: " << m_verbose << std::endl;
+         amrex::Print() << "  Write Plotfile Flag: " << m_write_plotfile << std::endl; // Print new flag
     }
 
 
@@ -186,11 +190,10 @@ void OpenImpala::TortuosityHypre::setupGrids()
     ierr = HYPRE_StructGridAssemble(m_grid);
     HYPRE_CHECK(ierr);
 
-    // +++ Add Check +++
+    // Check added previously
     if (!m_grid) {
         amrex::Abort("FATAL: m_grid handle is NULL after HYPRE_StructGridAssemble!");
     }
-    // +++ End Check +++
 }
 
 
@@ -356,13 +359,13 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
         // +++ START DEBUG CHECK (for NaN/Inf) +++
         bool rhs_ok = true;
-        for(size_t idx = 0; idx < npts; ++idx) {
+        // Use int for index to avoid sign compare warning (npts is int)
+        for(int idx = 0; idx < npts; ++idx) { // <<< WARNING FIX
             if (std::isnan(rhs_values[idx]) || std::isinf(rhs_values[idx])) {
                 // Print only once per rank to avoid flooding logs
                 if (amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
                     amrex::Print() << "!!! Invalid value detected in rhs_values[" << idx << "] = " << rhs_values[idx]
                                    << " within box " << bx << " (Rank " << amrex::ParallelDescriptor::MyProc() << ")" << std::endl;
-                    // Optional: Print neighbouring phase values from p_ptr around the error index for context
                 }
                 rhs_ok = false;
                 // break; // Optional: stop checking after first error found
@@ -597,18 +600,23 @@ bool OpenImpala::TortuosityHypre::solve()
     getCellTypes(m_mf_phi, PhaseComp);
 
     // --- Write Plotfile ---
-    if (write_plotfile != 0 && !m_resultspath.empty()) { // Check flag write_plotfile
-        if (!amrex::UtilCreateDirectory(m_resultspath, 0755)) {
-             amrex::Warning("Could not create results directory: " + m_resultspath);
-             // Decide if plotfile writing failure should affect return status? Probably not.
-        } else {
-            std::string plotfilename = m_resultspath + "/hypre_soln_" + std::string(datetime);
-            amrex::Vector<std::string> plot_varnames = {"potential", "cell_type"};
+    // if (!m_resultspath.empty() && amrex::ParallelDescriptor::IOProcessor()) { // Original check
+    if (m_write_plotfile && !m_resultspath.empty()) { // <<< USE MEMBER VARIABLE
+         // Create dir only once
+         if (amrex::ParallelDescriptor::IOProcessor()) {
+             if (!amrex::UtilCreateDirectory(m_resultspath, 0755)) {
+                 amrex::Warning("Could not create results directory: " + m_resultspath);
+             }
+         }
+         amrex::ParallelDescriptor::Barrier(); // Ensure dir exists before writing
 
-            if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Writing plotfile: " << plotfilename << std::endl;
-            amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, plot_varnames, m_geom, 0.0, 0);
-        }
+         std::string plotfilename = m_resultspath + "/hypre_soln_" + std::string(datetime);
+         amrex::Vector<std::string> plot_varnames = {"potential", "cell_type"};
+
+         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Writing plotfile: " << plotfilename << std::endl;
+         amrex::WriteSingleLevelPlotfile(plotfilename, m_mf_phi, plot_varnames, m_geom, 0.0, 0);
     }
+
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
          amrex::Print() << "TortuosityHypre::solve() finished. Converged OK: " << (converged_ok ? "Yes" : "No") << std::endl;
@@ -891,7 +899,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
                 if (cell_type(iv_cell1) == 1) { // Assuming 1 marks the conducting phase here
                     // Flux = - D * (phi_cell1 - phi_ghost) / dx
                     // Here D=1, phi_ghost is effectively m_vlo
-                    // Flux entering = -1.0 * (phi(iv_cell1) - m_vlo) / dx
+                    // Flux entering = -1.0 * (phi(iv_cell1) - m_vlo) * dxinv_dir;
                     local_fxin += -1.0 * (phi(iv_cell1) - m_vlo) * dxinv_dir;
                 }
             });
