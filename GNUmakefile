@@ -66,7 +66,7 @@ SOURCES_TEST_DRIVERS:= $(SOURCES_IO_TESTS) $(SOURCES_PRP_TESTS)
 
 # --- Identify Library Sources (excluding drivers) ---
 SOURCES_IO_LIB     := $(filter-out $(SOURCES_IO_TESTS), $(SOURCES_IO_ALL))
-SOURCES_PRP_LIB    := $(filter-out $(SOURCES_PRP_TESTS) $(SOURCES_APP_DRIVER), $(SOURCES_PRP_ALL))
+SOURCES_PRP_LIB    := $(filter-out $(SOURCES_PRP_TESTS) $(SOURCES_APP_DRIVER) src/props/hypre_test.cpp, $(SOURCES_PRP_ALL)) 
 SOURCES_F90_LIB    := $(SOURCES_F90_ALL) # Assuming all F90 are library code
 
 # --- Define Object Files based on Categories ---
