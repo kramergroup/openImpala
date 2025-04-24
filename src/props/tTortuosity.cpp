@@ -3,16 +3,16 @@
 #include "VolumeFraction.H"   // Assuming VolumeFraction is in OpenImpala namespace
 
 #include <AMReX.H>
-#include <AMReX_ParmParse.H>       // For reading parameters
-#include <AMReX_Utility.H>         // For amrex::UtilCreateDirectory
+#include <AMReX_ParmParse.H>      // For reading parameters
+#include <AMReX_Utility.H>        // For amrex::UtilCreateDirectory
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Print.H>
-#include <AMReX_PlotFileUtil.H>    // Include for plotfile writing if enabled
-#include <AMReX_MultiFabUtil.H>    // For amrex::Copy
+#include <AMReX_PlotFileUtil.H>   // Include for plotfile writing if enabled
+#include <AMReX_MultiFabUtil.H>   // For amrex::Copy
 
 #include <cstdlib>   // For getenv
 #include <string>    // For std::string
@@ -20,6 +20,7 @@
 #include <cmath>     // For std::abs
 #include <limits>    // For numeric_limits
 #include <memory>    // For std::unique_ptr
+#include <iomanip>   // For std::setprecision
 
 // Helper function to convert string to Direction enum
 // (Assumes Direction enum exists in OpenImpala namespace)
@@ -122,7 +123,7 @@ int main (int argc, char* argv[])
             amrex::Print() << " Solver:               " << solver_str << "\n";
             amrex::Print() << " Box Size:             " << box_size << "\n";
             amrex::Print() << " Verbose:              " << verbose << "\n";
-            amrex::Print() << " Write Plotfile:       " << write_plotfile << "\n";
+            amrex::Print() << " Write Plotfile:       " << write_plotfile << "\n"; // Print the int value read
             amrex::Print() << " Comparison Tolerance: " << tolerance << "\n";
             if (expected_vf >= 0.0) amrex::Print() << " Expected VF:          " << expected_vf << "\n";
             if (expected_tau >= 0.0) amrex::Print() << " Expected Tortuosity:  " << expected_tau << "\n";
@@ -176,12 +177,12 @@ int main (int argc, char* argv[])
             // *** Verification Step (Optional but Recommended) ***
             int min_phase_tmp = mf_phase_no_ghost.min(0);
             int max_phase_tmp = mf_phase_no_ghost.max(0);
-             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n";
-             }
-             if (min_phase_tmp == max_phase_tmp) {
-                 amrex::Abort("FAIL: Phase field is uniform after thresholding! Check threshold/data.");
-             }
+              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+                   amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n";
+              }
+              if (min_phase_tmp == max_phase_tmp && ba.numPts() > 0) { // Check numPts > 0
+                  amrex::Abort("FAIL: Phase field is uniform after thresholding! Check threshold/data.");
+              }
 
             // *** Step 3: Define the final phase MultiFab with 1 ghost cell ***
             // TortuosityHypre constructor requires >= 1 ghost cell
@@ -207,18 +208,18 @@ int main (int argc, char* argv[])
         OpenImpala::VolumeFraction vf(mf_phase_with_ghost, phase_id);
         amrex::Real actual_vf = vf.value(false); // Get global value
 
-        if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Volume Fraction: " << actual_vf << "\n";
+         if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Volume Fraction: " << actual_vf << "\n";
         if (expected_vf >= 0.0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Expected Volume Fraction:   " << expected_vf << "\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Expected Volume Fraction:   " << expected_vf << "\n";
             if (std::abs(actual_vf - expected_vf) > tolerance) {
                 amrex::Abort("FAIL: Volume Fraction mismatch. Diff: " + std::to_string(std::abs(actual_vf - expected_vf)));
             }
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    PASS\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    PASS\n";
         } else {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
         }
          if (actual_vf <= 0.0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
          }
 
 
@@ -238,17 +239,23 @@ int main (int argc, char* argv[])
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Tortuosity for phase " << phase_id << " in direction " << direction_str << " using " << solver_str << "...\n";
 
             // *** Step 6: Pass the ghosted MultiFab to TortuosityHypre constructor ***
-            OpenImpala::TortuosityHypre tortuosity(geom, ba, dm, mf_phase_with_ghost, actual_vf, phase_id, direction, solver_type, resultsdir, 1.0, 0.0, verbose); // Default Vhi=1, Vlo=0
+            // <<< UPDATED CONSTRUCTOR CALL >>>
+            OpenImpala::TortuosityHypre tortuosity(geom, ba, dm, mf_phase_with_ghost,
+                                                   actual_vf, phase_id, direction,
+                                                   solver_type, resultsdir,
+                                                   0.0, 1.0, // vlo=0, vhi=1 (Specific values for this test?)
+                                                   verbose,
+                                                   (write_plotfile != 0)); // Pass boolean plotfile flag
 
             actual_tau = tortuosity.value(); // Calculate tortuosity
         } else {
-             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Skipping Tortuosity calculation because Volume Fraction is zero.\n";
+              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Skipping Tortuosity calculation because Volume Fraction is zero.\n";
         }
 
 
-        if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Tortuosity:    " << actual_tau << "\n";
+         if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Tortuosity:    " << actual_tau << "\n";
         if (expected_tau >= 0.0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Expected Tortuosity:    " << expected_tau << "\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Expected Tortuosity:    " << expected_tau << "\n";
             bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
             bool expected_is_invalid = std::isnan(expected_tau) || std::isinf(expected_tau);
 
@@ -257,17 +264,17 @@ int main (int argc, char* argv[])
             } else if (!actual_is_invalid && std::abs(actual_tau - expected_tau) > tolerance) {
                  amrex::Abort("FAIL: Tortuosity mismatch. Diff: " + std::to_string(std::abs(actual_tau - expected_tau)));
             }
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Tortuosity Check:         PASS\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Tortuosity Check:         PASS\n";
         } else {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
         }
 
         // --- Success & Timing ---
-        if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
+         if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
 
         amrex::Real stop_time = amrex::second() - strt_time;
         amrex::ParallelDescriptor::ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber());
-        if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Run time = " << stop_time << " sec\n";
+         if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Run time = " << stop_time << " sec\n";
 
     } // End of scope for AMReX objects
     amrex::Finalize();
