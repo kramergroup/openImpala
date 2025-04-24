@@ -10,6 +10,7 @@
 #include <limits>   // For std::numeric_limits
 #include <stdexcept> // For potential error throwing (optional)
 #include <iomanip>  // For std::setprecision
+#include <iostream> // For std::cout, std::flush <<< ADDED
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>       // For amrex::average_down (potentially needed elsewhere, good include)
@@ -85,7 +86,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              const amrex::Real vlo, // Default args from H
                                              const amrex::Real vhi, // Default args from H
                                              int verbose,           // Default args from H
-                                             bool write_plotfile)   // <<< PARAMETER ADDED
+                                             bool write_plotfile)
     : m_geom(geom), m_ba(ba), m_dm(dm),
       m_mf_phase(mf_phase_input, amrex::make_alias, 0, mf_phase_input.nComp()), // Create owned copy/alias
       m_phase(phase), m_vf(vf),
@@ -94,7 +95,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
       m_eps(1e-9), m_maxiter(200),
       m_vlo(vlo), m_vhi(vhi),
       m_resultspath(resultspath), m_verbose(verbose),
-      m_write_plotfile(write_plotfile), // <<< MEMBER INITIALIZED
+      m_write_plotfile(write_plotfile),
       m_mf_phi(ba, dm, numComponents, 1), // Allocate solution multifab (SolnComp + PhaseComp), 1 ghost cell
       m_first_call(true), m_value(std::numeric_limits<amrex::Real>::quiet_NaN()), // Initialize value to NaN
       // Initialize HYPRE handles to NULL
@@ -115,7 +116,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
          amrex::Print() << "  HYPRE Params: eps=" << m_eps << ", maxiter=" << m_maxiter << std::endl;
          amrex::Print() << "  Class Verbose Level: " << m_verbose << std::endl;
-         amrex::Print() << "  Write Plotfile Flag: " << m_write_plotfile << std::endl; // Print new flag
+         amrex::Print() << "  Write Plotfile Flag: " << m_write_plotfile << std::endl;
     }
 
 
@@ -245,18 +246,13 @@ void OpenImpala::TortuosityHypre::preconditionPhaseFab()
         amrex::IArrayBox& fab = m_mf_phase[mfi]; // Get non-const fab to modify
 
         // --- Call Fortran routine tortuosity_remspot ---
-        // Pass FAB data pointer, tile box bounds, and domain bounds
-        // Need Fortran function signature from Tortuosity_filcc_F.H
-        // void tortuosity_remspot(int* q, const int* q_lo, const int* q_hi, const int* ncomp,
-        //                         const int* bxlo, const int* bxhi,
-        //                         const int* domlo, const int* domhi);
         int ncomp = fab.nComp();
         tortuosity_remspot(fab.dataPtr(),         // q
-                           fab.loVect(),          // q_lo (Fortran bounds of fab, incl. ghost)
-                           fab.hiVect(),          // q_hi (Fortran bounds of fab, incl. ghost)
+                           fab.loVect(),          // q_lo
+                           fab.hiVect(),          // q_hi
                            &ncomp,                // ncomp
-                           tile_box.loVect(),     // bxlo (valid box to iterate over)
-                           tile_box.hiVect(),     // bxhi (valid box to iterate over)
+                           tile_box.loVect(),     // bxlo
+                           tile_box.hiVect(),     // bxhi
                            domain_box.loVect(),   // domlo
                            domain_box.hiVect());  // domhi
     }
@@ -284,11 +280,10 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
     HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorInitialize(m_b);
     HYPRE_CHECK(ierr);
-    // +++ Add Check +++
+    // Check added previously
     if (!m_b) {
         amrex::Abort("FATAL: m_b handle is NULL after HYPRE_StructVectorInitialize!");
     }
-    // +++ End Check +++
     ierr = HYPRE_StructVectorSetConstantValues(m_b, 0.0); // Initialize RHS to zero
     HYPRE_CHECK(ierr);
 
@@ -360,7 +355,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         // +++ START DEBUG CHECK (for NaN/Inf) +++
         bool rhs_ok = true;
         // Use int for index to avoid sign compare warning (npts is int)
-        for(int idx = 0; idx < npts; ++idx) { // <<< WARNING FIX
+        for(int idx = 0; idx < npts; ++idx) {
             if (std::isnan(rhs_values[idx]) || std::isinf(rhs_values[idx])) {
                 // Print only once per rank to avoid flooding logs
                 if (amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
@@ -387,15 +382,24 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
         // Pass pointers from amrex::Array using .data()
         ierr = HYPRE_StructMatrixSetBoxValues(m_A, hypre_lo.data(), hypre_hi.data(), 7, stencil_indices, matrix_values.data());
-        HYPRE_CHECK(ierr);
+        HYPRE_CHECK(ierr); // Check Matrix A set
+        // +++ Explicit check of preceding call +++
+        if (ierr != 0) {
+             amrex::Abort("HYPRE_StructMatrixSetBoxValues FAILED explicitly with code: " + std::to_string(ierr));
+        }
+        // +++ End explicit check +++
 
-        // +++ Add Box Print +++
-        // Print unconditionally for now, or use m_verbose > 1
-        amrex::Print() << "Rank " << amrex::ParallelDescriptor::MyProc()
-                       << " processing box " << bx << " before HYPRE_StructVectorSetBoxValues(m_b)" << std::endl;
-        // Flush output to ensure it appears before potential crash
-        amrex::OutStream().flush();
-        // +++ End Box Print +++
+
+        // +++ Modify Print Statement +++
+        if (amrex::ParallelDescriptor::IOProcessor()) { // Only Rank 0 should print
+             // Use std::cout and std::flush for more direct output
+             std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc() << "] Processing box " << bx
+                       << " before HYPRE_StructVectorSetBoxValues(m_b)" << std::endl << std::flush;
+        }
+        // Optional: Add a barrier if running multi-rank, but likely unnecessary for np=1
+        // amrex::ParallelDescriptor::Barrier();
+        // +++ End Modify Print Statement +++
+
 
         // Failing call:
         ierr = HYPRE_StructVectorSetBoxValues(m_b, hypre_lo.data(), hypre_hi.data(), rhs_values.data());
@@ -600,8 +604,7 @@ bool OpenImpala::TortuosityHypre::solve()
     getCellTypes(m_mf_phi, PhaseComp);
 
     // --- Write Plotfile ---
-    // if (!m_resultspath.empty() && amrex::ParallelDescriptor::IOProcessor()) { // Original check
-    if (m_write_plotfile && !m_resultspath.empty()) { // <<< USE MEMBER VARIABLE
+    if (m_write_plotfile && !m_resultspath.empty()) {
          // Create dir only once
          if (amrex::ParallelDescriptor::IOProcessor()) {
              if (!amrex::UtilCreateDirectory(m_resultspath, 0755)) {
