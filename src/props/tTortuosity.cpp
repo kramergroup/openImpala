@@ -3,16 +3,16 @@
 #include "VolumeFraction.H"   // Assuming VolumeFraction is in OpenImpala namespace
 
 #include <AMReX.H>
-#include <AMReX_ParmParse.H>       // For reading parameters
-#include <AMReX_Utility.H>         // For amrex::UtilCreateDirectory
+#include <AMReX_ParmParse.H>        // For reading parameters
+#include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Print.H>
-#include <AMReX_PlotFileUtil.H>    // Include for plotfile writing if enabled
-#include <AMReX_MultiFabUtil.H>    // For amrex::Copy
+#include <AMReX_PlotFileUtil.H>     // Include for plotfile writing if enabled
+#include <AMReX_MultiFabUtil.H>     // For amrex::Copy
 
 #include <cstdlib>   // For getenv
 #include <string>    // For std::string
@@ -119,20 +119,20 @@ int main (int argc, char* argv[])
         // Print configuration (only Rank 0)
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Tortuosity Test Configuration ---\n";
-            amrex::Print() << " TIF File:              " << tifffile << "\n";
-            amrex::Print() << " Results Directory:     " << resultsdir << "\n";
-            amrex::Print() << " Phase ID to Analyze:   " << phase_id << "\n";
-            amrex::Print() << " Threshold Value:       " << threshold_val << "\n";
-            amrex::Print() << " Direction:             " << direction_str << "\n";
-            amrex::Print() << " Solver:                " << solver_str << "\n";
-            amrex::Print() << " Box Size:              " << box_size << "\n";
-            amrex::Print() << " Verbose:               " << verbose << "\n";
-            amrex::Print() << " Write Plotfile:        " << write_plotfile << "\n"; // Print the int value read
-            amrex::Print() << " Comparison Tolerance:  " << tolerance << "\n";
-            amrex::Print() << " Boundary Potential Lo: " << v_lo << "\n";
-            amrex::Print() << " Boundary Potential Hi: " << v_hi << "\n";
-            if (expected_vf >= 0.0) amrex::Print() << " Expected VF:           " << expected_vf << "\n";
-            if (expected_tau >= 0.0) amrex::Print() << " Expected Tortuosity:   " << expected_tau << "\n";
+            amrex::Print() << " TIF File:               " << tifffile << "\n";
+            amrex::Print() << " Results Directory:      " << resultsdir << "\n";
+            amrex::Print() << " Phase ID to Analyze:    " << phase_id << "\n";
+            amrex::Print() << " Threshold Value:        " << threshold_val << "\n";
+            amrex::Print() << " Direction:              " << direction_str << "\n";
+            amrex::Print() << " Solver:                 " << solver_str << "\n";
+            amrex::Print() << " Box Size:               " << box_size << "\n";
+            amrex::Print() << " Verbose:                " << verbose << "\n";
+            amrex::Print() << " Write Plotfile:         " << write_plotfile << "\n"; // Print the int value read
+            amrex::Print() << " Comparison Tolerance:   " << tolerance << "\n";
+            amrex::Print() << " Boundary Potential Lo:  " << v_lo << "\n";
+            amrex::Print() << " Boundary Potential Hi:  " << v_hi << "\n";
+            if (expected_vf >= 0.0) amrex::Print() << " Expected VF:            " << expected_vf << "\n";
+            if (expected_tau >= 0.0) amrex::Print() << " Expected Tortuosity:    " << expected_tau << "\n";
             amrex::Print() << "------------------------------------\n\n";
         }
 
@@ -184,10 +184,10 @@ int main (int argc, char* argv[])
             int min_phase_tmp = mf_phase_no_ghost.min(0);
             int max_phase_tmp = mf_phase_no_ghost.max(0);
              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n";
+                  amrex::Print() << "    Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n";
              }
              if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) { // Check numPts > 0
-                 amrex::Abort("FAIL: Phase field is uniform after thresholding! Check threshold/data.");
+                  amrex::Abort("FAIL: Phase field is uniform after thresholding! Check threshold/data.");
              }
 
             // *** Step 3: Define the final phase MultiFab with 1 ghost cell using ORIGINAL BA/DM ***
@@ -222,7 +222,7 @@ int main (int argc, char* argv[])
              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
         }
          if (actual_vf <= 0.0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
          }
 
 
@@ -241,26 +241,13 @@ int main (int argc, char* argv[])
         {
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Tortuosity for phase " << phase_id << " in direction " << direction_str << " using " << solver_str << "...\n";
 
-            // *** DEBUGGING STEP: Create simplified BA/DM for TortuosityHypre ***
-            amrex::Box domain_box = geom.Domain();
-            amrex::BoxArray simplified_ba(domain_box); // BoxArray containing only the domain
-            // Make a default mapping (assigns all boxes - just one here - to rank 0)
-            // This assumes the test runs with a single MPI rank (-np 1)
-            amrex::DistributionMapping simplified_dm(simplified_ba, amrex::ParallelDescriptor::NProcs());
+            // <<< --- REMOVED THE DEBUGGING STEP THAT CREATED simplified_ba/dm --- >>>
 
-            if (verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "   DEBUG: Using simplified BoxArray/DM for TortuosityHypre constructor.\n";
-                amrex::Print() << "   Simplified BA: " << simplified_ba << "\n";
-            }
-            // *** END DEBUGGING STEP ***
-
-
-            // *** Step 6: Pass the GHOSTED MultiFab and SIMPLIFIED BA/DM to TortuosityHypre constructor ***
-            // <<< UPDATED CONSTRUCTOR CALL >>>
+            // *** Pass the GHOSTED MultiFab and ORIGINAL BA/DM to TortuosityHypre constructor ***
             OpenImpala::TortuosityHypre tortuosity(
                 geom,
-                simplified_ba,   // <--- Use simplified BoxArray
-                simplified_dm,   // <--- Use simplified DistributionMapping
+                ba_original,         // <--- Use original BoxArray
+                dm_original,         // <--- Use original DistributionMapping
                 mf_phase_with_ghost, // Use the original ghosted phase data
                 actual_vf, phase_id, direction,
                 solver_type, resultsdir,
@@ -269,7 +256,7 @@ int main (int argc, char* argv[])
                 (write_plotfile != 0) // Pass boolean plotfile flag
             );
 
-            actual_tau = tortuosity.value(); // Calculate tortuosity
+            actual_tau = tortuosity.value(); // Calculate tortuosity (will likely fail inside if setup fails)
         } else {
              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Skipping Tortuosity calculation because Volume Fraction is zero.\n";
         }
