@@ -1,4 +1,4 @@
-#include "TortuosityHypre.H"
+    #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"     // For tortuosity_remspot
 #include "TortuosityHypreFill_F.H"  // For tortuosity_fillmtx
 
@@ -332,6 +332,29 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
                            &m_vhi,                     // vhi (Real*)
                            &m_phase,                   // phase (int*)
                            &dir_int);                  // dir (int*)
+
+        // +++ START DEBUG CHECK +++
+        bool rhs_ok = true;
+        for(size_t idx = 0; idx < npts; ++idx) {
+            if (std::isnan(rhs_values[idx]) || std::isinf(rhs_values[idx])) {
+                // Print only once per rank to avoid flooding logs
+                if (amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
+                    amrex::Print() << "!!! Invalid value detected in rhs_values[" << idx << "] = " << rhs_values[idx]
+                                   << " within box " << bx << " (Rank " << amrex::ParallelDescriptor::MyProc() << ")" << std::endl;
+                    // Optional: Print neighbouring phase values from p_ptr around the error index for context
+                }
+                rhs_ok = false;
+                // break; // Optional: stop checking after first error found
+            }
+        }
+        // Ensure all ranks know if an error occurred
+        int global_rhs_ok = rhs_ok; // Initialize with local status
+        amrex::ParallelDescriptor::ReduceIntMin(global_rhs_ok); // Find if *any* rank failed (0=FAIL, 1=OK)
+
+        if (global_rhs_ok == 0) { // If any rank found bad data
+             amrex::Abort("NaN/Inf found in rhs_values after tortuosity_fillmtx Fortran call!");
+        }
+        // +++ END DEBUG CHECK +++
 
         // Set values in HYPRE structures for this box
         // Use static helpers qualified with class name
