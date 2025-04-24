@@ -31,20 +31,26 @@ contains
 
   ! ::: -----------------------------------------------------------
   ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
-  ! ::: (Documentation comments remain the same)
+  ! ::: Includes debug prints to check array indices.
   ! ::: -----------------------------------------------------------
   subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
                                 bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir) bind(c)
 
-    ! Argument declarations (remain the same)
+    ! Argument declarations
     integer,            intent(in)  :: nval
     ! Fortran declaration uses 0-based indexing matching C++ std::vector
+    ! a: matrix coefficients (size nval * nstencil)
+    ! rhs: right-hand side vector (size nval)
+    ! xinit: initial guess vector (size nval)
     real(amrex_real), intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval)
-    integer,            intent(in)  :: p_lo(3), p_hi(3), bxlo(3), bxhi(3), domlo(3), domhi(3)
+    integer,            intent(in)  :: p_lo(3), p_hi(3) ! Bounds of the phase FAB (incl. ghost cells)
+    integer,            intent(in)  :: bxlo(3), bxhi(3) ! Bounds of the current valid box (tilebox)
+    integer,            intent(in)  :: domlo(3), domhi(3) ! Bounds of the overall problem domain
+    ! p: phase data FAB (indexed using p_lo/p_hi)
     integer,            intent(in)  :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), *)
     real(amrex_real), intent(in)  :: dxinv(3) ! [1/dx^2, 1/dy^2, 1/dz^2]
-    integer,            intent(in)  :: phase, dir
-    real(amrex_real), intent(in)  :: vlo, vhi
+    integer,            intent(in)  :: phase, dir ! Phase ID to treat as conductive, direction of flow
+    real(amrex_real), intent(in)  :: vlo, vhi ! Potential values at low/high boundaries
 
     ! Local variables
     integer :: i, j, k, m_idx, stencil_idx_start
@@ -53,7 +59,7 @@ contains
     real(amrex_real) :: domain_extent, factor
     logical :: print_debug_info
 
-    ! Calculate box dimensions
+    ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
     len_y = bxhi(2) - bxlo(2) + 1
     len_z = bxhi(3) - bxlo(3) + 1
@@ -71,22 +77,24 @@ contains
     end if
     if (nval <= 0) return ! Nothing to do for empty box
 
-    ! --- DEBUG PRINT: Print initial info once per call ---
+    ! --- DEBUG PRINT: Print initial info once per call (Optional: Uncomment if needed) ---
     ! write(*,*) "[Fortran] tortuosity_fillmtx called. nval=", nval, " nstencil=", nstencil
     ! write(*,*) "[Fortran] Box Lo/Hi:", bxlo, bxhi
     ! write(*,*) "[Fortran] Phase Box Lo/Hi:", p_lo, p_hi
     ! write(*,*) "[Fortran] Domain Lo/Hi:", domlo, domhi
     ! --- END DEBUG PRINT ---
 
-    ! Use standard nested DO loops
+    ! Loop over the valid box defined by bxlo/bxhi
     do k = bxlo(3), bxhi(3)
       do j = bxlo(2), bxhi(2)
         do i = bxlo(1), bxhi(1)
 
-          ! Calculate the 1D index 'm_idx' (1-based Fortran index)
+          ! Calculate the 1D index 'm_idx' (1-based Fortran index within the current box)
+          ! This represents the point number (1 to nval) within this box's data vectors
           m_idx = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
 
           ! Calculate the starting 0-based index in the flat 'a' array for this point
+          ! This corresponds to the C++ index for the first stencil entry (center) for point m_idx
           stencil_idx_start = nstencil * (m_idx - 1)
 
           ! --- DEBUG PRINT: Check indices for first and last point in box ---
@@ -96,13 +104,14 @@ contains
               write(*,'(A,I9,A,I9,A,I9,A,I9,A,I9)') "[Fortran] Point (i,j,k,m_idx):", &
                    i, ",", j, ",", k, " -> m_idx=", m_idx, &
                    ", stencil_start_idx=", stencil_idx_start
+              ! Note: Fortran rhs/xinit are 1-based, C++ a is 0-based
               write(*,'(A,I9,A,I9)') "         Bounds: rhs/xinit(1:", nval, "), a(0:", nval*nstencil-1, ")"
           end if
           ! --- END DEBUG PRINT ---
 
 
           ! --- Determine stencil based on phase ---
-
+          ! Access phase data 'p' using the global i,j,k indices
           if ( p(i,j,k,comp_phase) .ne. phase ) then
 
               ! Blocked cell (not the specified conductive phase)
@@ -111,13 +120,13 @@ contains
               a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
               ! Set only the center coefficient (index istn_c = 0) to 1.0
               a(stencil_idx_start + istn_c) = 1.0_amrex_real
-              rhs(m_idx) = 0.0_amrex_real
+              rhs(m_idx) = 0.0_amrex_real ! Set RHS for this point
 
           else
 
               ! Fluid cell (conductive phase)
               ! Start with default stencil for -Laplacian(phi) = 0
-              ! Use 0-based istn_* parameters
+              ! Use 0-based istn_* parameters for indexing into the 'a' array
               a(stencil_idx_start + istn_c)  =  coeff_c
               a(stencil_idx_start + istn_mx) = -coeff_x
               a(stencil_idx_start + istn_px) = -coeff_x
@@ -125,9 +134,10 @@ contains
               a(stencil_idx_start + istn_py) = -coeff_y
               a(stencil_idx_start + istn_mz) = -coeff_z
               a(stencil_idx_start + istn_pz) = -coeff_z
-              rhs(m_idx) = 0.0_amrex_real
+              rhs(m_idx) = 0.0_amrex_real ! Set RHS for this point
 
               ! --- Modify stencil for internal phase boundaries (Zero Neumann) ---
+              ! Check neighbors using global i,j,k indices in the phase array 'p'
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Center term absorbs flux
@@ -162,6 +172,7 @@ contains
           end if ! End of fluid/blocked check
 
           ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
+          ! Check using global i,j,k indices against domain bounds domlo/domhi
           ! X-Direction Flow
           if ( dir == direction_x ) then
               if ( i == domlo(1) ) then
@@ -231,7 +242,7 @@ contains
       end do ! j
     end do ! k
 
-    ! --- DEBUG PRINT: Indicate successful completion ---
+    ! --- DEBUG PRINT: Indicate successful completion (Optional: Uncomment if needed) ---
     ! write(*,*) "[Fortran] tortuosity_fillmtx finished."
     ! --- END DEBUG PRINT ---
 
