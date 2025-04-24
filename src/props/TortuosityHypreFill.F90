@@ -37,12 +37,13 @@ contains
                                 bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir) bind(c)
 
     ! Argument declarations (remain the same)
-    integer,          intent(in)  :: nval
-    real(amrex_real), intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval) !<-- Adjusted 'a' bounds for clarity
-    integer,          intent(in)  :: p_lo(3), p_hi(3), bxlo(3), bxhi(3), domlo(3), domhi(3)
-    integer,          intent(in)  :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), *)
+    integer,            intent(in)  :: nval
+    ! Fortran declaration uses 0-based indexing matching C++ std::vector
+    real(amrex_real), intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval)
+    integer,            intent(in)  :: p_lo(3), p_hi(3), bxlo(3), bxhi(3), domlo(3), domhi(3)
+    integer,            intent(in)  :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), *)
     real(amrex_real), intent(in)  :: dxinv(3) ! [1/dx^2, 1/dy^2, 1/dz^2]
-    integer,          intent(in)  :: phase, dir
+    integer,            intent(in)  :: phase, dir
     real(amrex_real), intent(in)  :: vlo, vhi
 
     ! Local variables
@@ -50,6 +51,7 @@ contains
     integer :: len_x, len_y, len_z, expected_nval
     real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
+    logical :: print_debug_info
 
     ! Calculate box dimensions
     len_x = bxhi(1) - bxlo(1) + 1
@@ -69,6 +71,13 @@ contains
     end if
     if (nval <= 0) return ! Nothing to do for empty box
 
+    ! --- DEBUG PRINT: Print initial info once per call ---
+    ! write(*,*) "[Fortran] tortuosity_fillmtx called. nval=", nval, " nstencil=", nstencil
+    ! write(*,*) "[Fortran] Box Lo/Hi:", bxlo, bxhi
+    ! write(*,*) "[Fortran] Phase Box Lo/Hi:", p_lo, p_hi
+    ! write(*,*) "[Fortran] Domain Lo/Hi:", domlo, domhi
+    ! --- END DEBUG PRINT ---
+
     ! Use standard nested DO loops
     do k = bxlo(3), bxhi(3)
       do j = bxlo(2), bxhi(2)
@@ -79,6 +88,18 @@ contains
 
           ! Calculate the starting 0-based index in the flat 'a' array for this point
           stencil_idx_start = nstencil * (m_idx - 1)
+
+          ! --- DEBUG PRINT: Check indices for first and last point in box ---
+          print_debug_info = .false.
+          if (m_idx == 1 .or. m_idx == nval) then
+              print_debug_info = .true.
+              write(*,'(A,I9,A,I9,A,I9,A,I9,A,I9)') "[Fortran] Point (i,j,k,m_idx):", &
+                   i, ",", j, ",", k, " -> m_idx=", m_idx, &
+                   ", stencil_start_idx=", stencil_idx_start
+              write(*,'(A,I9,A,I9)') "         Bounds: rhs/xinit(1:", nval, "), a(0:", nval*nstencil-1, ")"
+          end if
+          ! --- END DEBUG PRINT ---
+
 
           ! --- Determine stencil based on phase ---
 
@@ -110,7 +131,7 @@ contains
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Center term absorbs flux
-                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                       ! No connection to neighbor
+                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                      ! No connection to neighbor
               end if
               ! +X face
               if ( p(i+1,j,k,comp_phase) .ne. phase ) then
@@ -209,6 +230,10 @@ contains
         end do ! i
       end do ! j
     end do ! k
+
+    ! --- DEBUG PRINT: Indicate successful completion ---
+    ! write(*,*) "[Fortran] tortuosity_fillmtx finished."
+    ! --- END DEBUG PRINT ---
 
   end subroutine tortuosity_fillmtx
 
