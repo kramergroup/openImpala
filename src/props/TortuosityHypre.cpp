@@ -13,20 +13,20 @@
 #include <iostream> // For std::cout, std::flush
 
 #include <AMReX_MultiFab.H>
-#include <AMReX_MultiFabUtil.H>       // For amrex::average_down (potentially needed elsewhere, good include)
+#include <AMReX_MultiFabUtil.H>      // For amrex::average_down (potentially needed elsewhere, good include)
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
-#include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory
-#include <AMReX_BLassert.H>         // Corrected include path
-#include <AMReX_ParmParse.H>        // Added for ParmParse
-#include <AMReX_Vector.H>           // Added for amrex::Vector (needed for plotfile fix)
-#include <AMReX_Array.H>            // Added for amrex::Array (for dxinv_sq fix & loV/hiV return)
+#include <AMReX_Utility.H>       // For amrex::UtilCreateDirectory
+#include <AMReX_BLassert.H>      // Corrected include path
+#include <AMReX_ParmParse.H>     // Added for ParmParse
+#include <AMReX_Vector.H>        // Added for amrex::Vector (needed for plotfile fix)
+#include <AMReX_Array.H>         // Added for amrex::Array (for dxinv_sq fix & loV/hiV return)
 
 // HYPRE includes (already in TortuosityHypre.H but good practice here too)
 #include <HYPRE.h>
 #include <HYPRE_struct_ls.h>
-#include <HYPRE_struct_mv.h> // Needed for HYPRE_StructMatrixPrint
+#include <HYPRE_struct_mv.h> // Needed for HYPRE_StructMatrixPrint, HYPRE_StructGrid, HYPRE_StructStencil
 
 // Define HYPRE error checking macro for convenience
 #define HYPRE_CHECK(ierr) do { \
@@ -85,7 +85,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              const std::string& resultspath,
                                              const amrex::Real vlo, // Default args from H
                                              const amrex::Real vhi, // Default args from H
-                                             int verbose,           // Default args from H
+                                             int verbose,          // Default args from H
                                              bool write_plotfile)
     : m_geom(geom), m_ba(ba), m_dm(dm),
       m_mf_phase(mf_phase_input, amrex::make_alias, 0, mf_phase_input.nComp()), // Create owned copy/alias
@@ -141,7 +141,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
 
      if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
          amrex::Print() << "TortuosityHypre: Initialization complete." << std::endl;
-    }
+     }
 }
 
 /**
@@ -182,18 +182,47 @@ void OpenImpala::TortuosityHypre::setupGrids()
         auto lo = OpenImpala::TortuosityHypre::loV(bx); // Returns amrex::Array<HYPRE_Int,...>
         auto hi = OpenImpala::TortuosityHypre::hiV(bx); // Returns amrex::Array<HYPRE_Int,...>
 
+        // --- DEBUG LOGGING ---
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "  DEBUG [setupGrids]: Setting extents for Box " << bx
+                           << " with lo = [" << lo[0] << "," << lo[1] << "," << lo[2] << "]"
+                           << " hi = [" << hi[0] << "," << hi[1] << "," << hi[2] << "]" << std::endl;
+        }
+        // --- END DEBUG LOGGING ---
+
         // Pass pointer from amrex::Array using .data()
         ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data());
+        // --- ADDED CHECK ---
+        // Check result immediately after setting extents for this box
         HYPRE_CHECK(ierr);
+        // --- END ADDED CHECK ---
     }
 
     // Finalize grid assembly
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupGrids]: Calling HYPRE_StructGridAssemble..." << std::endl;
+    }
     ierr = HYPRE_StructGridAssemble(m_grid);
     HYPRE_CHECK(ierr);
 
     // Check added previously
     if (!m_grid) {
         amrex::Abort("FATAL: m_grid handle is NULL after HYPRE_StructGridAssemble!");
+    }
+
+    // --- ADDED CHECK: Query assembled grid ---
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupGrids]: Verifying assembled grid properties..." << std::endl;
+        HYPRE_Int grid_dim;
+        ierr = HYPRE_StructGridGetDim(m_grid, &grid_dim);
+        HYPRE_CHECK(ierr); // Check the query call itself
+        amrex::Print() << "    DEBUG: Verified Grid Dimension from HYPRE: " << grid_dim << std::endl;
+        // Potentially add HYPRE_StructGridGetNumBoxes if needed
+    }
+    // --- END ADDED CHECK ---
+
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupGrids]: Grid setup complete." << std::endl;
     }
 }
 
@@ -216,8 +245,28 @@ void OpenImpala::TortuosityHypre::setupStencil()
 
     for (int i = 0; i < stencil_size; i++)
     {
+        // --- DEBUG LOGGING ---
+         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+             amrex::Print() << "  DEBUG [setupStencil]: Setting element " << i
+                            << " with offset = [" << offsets[i][0] << "," << offsets[i][1] << "," << offsets[i][2] << "]" << std::endl;
+         }
+        // --- END DEBUG LOGGING ---
         ierr = HYPRE_StructStencilSetElement(m_stencil, i, offsets[i]);
         HYPRE_CHECK(ierr);
+    }
+
+    // --- ADDED CHECK: Query stencil ---
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupStencil]: Verifying created stencil properties..." << std::endl;
+        HYPRE_Int stencil_size_check;
+        ierr = HYPRE_StructStencilGetSize(m_stencil, &stencil_size_check);
+        HYPRE_CHECK(ierr); // Check the query call itself
+        amrex::Print() << "    DEBUG: Verified Stencil Size from HYPRE: " << stencil_size_check << std::endl;
+    }
+    // --- END ADDED CHECK ---
+
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupStencil]: Stencil setup complete." << std::endl;
     }
 }
 
@@ -247,14 +296,14 @@ void OpenImpala::TortuosityHypre::preconditionPhaseFab()
 
         // --- Call Fortran routine tortuosity_remspot ---
         int ncomp = fab.nComp();
-        tortuosity_remspot(fab.dataPtr(),         // q
-                           fab.loVect(),          // q_lo
-                           fab.hiVect(),          // q_hi
-                           &ncomp,                // ncomp
-                           tile_box.loVect(),     // bxlo
-                           tile_box.hiVect(),     // bxhi
-                           domain_box.loVect(),   // domlo
-                           domain_box.hiVect());  // domhi
+        tortuosity_remspot(fab.dataPtr(),      // q
+                           fab.loVect(),       // q_lo
+                           fab.hiVect(),       // q_hi
+                           &ncomp,             // ncomp
+                           tile_box.loVect(),  // bxlo
+                           tile_box.hiVect(),  // bxhi
+                           domain_box.loVect(),  // domlo
+                           domain_box.hiVect()); // domhi
     }
 
     // Need to refill ghost cells after modification if subsequent steps rely on them
@@ -269,26 +318,62 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 {
     HYPRE_Int ierr = 0;
 
-    // Create and initialize matrix A
+    // --- ADDED PRE-CHECKS for grid and stencil validity ---
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupMatrixEquation]: Final pre-check of grid and stencil before MatrixCreate..." << std::endl;
+
+        if (!m_grid) {
+            amrex::Abort("FATAL: m_grid handle is NULL before HYPRE_StructMatrixCreate!");
+        }
+        if (!m_stencil) {
+            amrex::Abort("FATAL: m_stencil handle is NULL before HYPRE_StructMatrixCreate!");
+        }
+
+        HYPRE_Int grid_dim_check;
+        ierr = HYPRE_StructGridGetDim(m_grid, &grid_dim_check);
+        HYPRE_CHECK(ierr);
+        amrex::Print() << "    DEBUG: Pre-check Grid Dimension: " << grid_dim_check << std::endl;
+
+        HYPRE_Int stencil_size_check;
+        ierr = HYPRE_StructStencilGetSize(m_stencil, &stencil_size_check);
+        HYPRE_CHECK(ierr);
+        amrex::Print() << "    DEBUG: Pre-check Stencil Size: " << stencil_size_check << std::endl;
+    }
+    // --- END ADDED PRE-CHECKS ---
+
+    // Create and initialize matrix A (THIS IS WHERE THE ORIGINAL ERROR OCCURRED)
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupMatrixEquation]: Calling HYPRE_StructMatrixCreate..." << std::endl;
+    }
     ierr = HYPRE_StructMatrixCreate(MPI_COMM_WORLD, m_grid, m_stencil, &m_A);
-    HYPRE_CHECK(ierr);
+    HYPRE_CHECK(ierr); // Line 274 (original failure point)
+
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupMatrixEquation]: HYPRE_StructMatrixCreate successful." << std::endl;
+        amrex::Print() << "  DEBUG [setupMatrixEquation]: Calling HYPRE_StructMatrixInitialize..." << std::endl;
+    }
     ierr = HYPRE_StructMatrixInitialize(m_A);
     HYPRE_CHECK(ierr);
 
     // Create and initialize RHS vector b
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupMatrixEquation]: Calling HYPRE_StructVectorCreate (b)..." << std::endl;
+    }
     ierr = HYPRE_StructVectorCreate(MPI_COMM_WORLD, m_grid, &m_b);
     HYPRE_CHECK(ierr);
-    ierr = HYPRE_StructVectorInitialize(m_b);
-    HYPRE_CHECK(ierr);
-    // Check added previously
     if (!m_b) {
         amrex::Abort("FATAL: m_b handle is NULL after HYPRE_StructVectorInitialize!");
     }
+    ierr = HYPRE_StructVectorInitialize(m_b);
+    HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorSetConstantValues(m_b, 0.0); // Initialize RHS to zero
     HYPRE_CHECK(ierr);
 
 
     // Create and initialize solution vector x (initial guess)
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  DEBUG [setupMatrixEquation]: Calling HYPRE_StructVectorCreate (x)..." << std::endl;
+    }
     ierr = HYPRE_StructVectorCreate(MPI_COMM_WORLD, m_grid, &m_x);
     HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorInitialize(m_x);
@@ -352,26 +437,38 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
                            &m_phase,                  // phase (int*)
                            &dir_int);                 // dir (int*)
 
-        // +++ START DEBUG CHECK (for NaN/Inf) +++
-        bool rhs_ok = true;
+        // +++ START DEBUG CHECK (for NaN/Inf in MATRIX and RHS) +++
+        bool data_ok = true;
         // Use int for index to avoid sign compare warning (npts is int)
         for(int idx = 0; idx < npts; ++idx) {
             if (std::isnan(rhs_values[idx]) || std::isinf(rhs_values[idx])) {
-                // Print only once per rank to avoid flooding logs
                 if (amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
                     amrex::Print() << "!!! Invalid value detected in rhs_values[" << idx << "] = " << rhs_values[idx]
                                    << " within box " << bx << " (Rank " << amrex::ParallelDescriptor::MyProc() << ")" << std::endl;
                 }
-                rhs_ok = false;
+                data_ok = false;
                 // break; // Optional: stop checking after first error found
             }
+            // Check matrix values (all 7 stencil entries for this point)
+            for (int s_idx=0; s_idx < 7; ++s_idx) {
+                 size_t matrix_idx = static_cast<size_t>(idx) * 7 + s_idx; // Correct flat index
+                 if (std::isnan(matrix_values[matrix_idx]) || std::isinf(matrix_values[matrix_idx])) {
+                    if (amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
+                        amrex::Print() << "!!! Invalid value detected in matrix_values[" << idx << "][stencil " << s_idx << "] = " << matrix_values[matrix_idx]
+                                   << " within box " << bx << " (Rank " << amrex::ParallelDescriptor::MyProc() << ")" << std::endl;
+                    }
+                    data_ok = false;
+                    // Consider breaking inner stencil loop if desired
+                 }
+            }
+            // if (!data_ok) break; // Optional: stop checking this box after first error
         }
         // Ensure all ranks know if an error occurred
-        int global_rhs_ok = rhs_ok; // Initialize with local status
-        amrex::ParallelDescriptor::ReduceIntMin(global_rhs_ok); // Find if *any* rank failed (0=FAIL, 1=OK)
+        int global_data_ok = data_ok; // Initialize with local status
+        amrex::ParallelDescriptor::ReduceIntMin(global_data_ok); // Find if *any* rank failed (0=FAIL, 1=OK)
 
-        if (global_rhs_ok == 0) { // If any rank found bad data
-             amrex::Abort("NaN/Inf found in rhs_values after tortuosity_fillmtx Fortran call!");
+        if (global_data_ok == 0) { // If any rank found bad data
+             amrex::Abort("NaN/Inf found in matrix_values or rhs_values after tortuosity_fillmtx Fortran call!");
         }
         // +++ END DEBUG CHECK (for NaN/Inf) +++
 
@@ -383,30 +480,16 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         // Pass pointers from amrex::Array using .data()
         ierr = HYPRE_StructMatrixSetBoxValues(m_A, hypre_lo.data(), hypre_hi.data(), 7, stencil_indices, matrix_values.data());
         HYPRE_CHECK(ierr); // Check Matrix A set
-        // +++ Explicit check of preceding call +++
-        if (ierr != 0) {
-             amrex::Abort("HYPRE_StructMatrixSetBoxValues FAILED explicitly with code: " + std::to_string(ierr));
-        }
-        // +++ End explicit check +++
 
+        // --- RE-ENABLED VECTOR SET CALLS ---
+        // Set RHS values
+        ierr = HYPRE_StructVectorSetBoxValues(m_b, hypre_lo.data(), hypre_hi.data(), rhs_values.data());
+        HYPRE_CHECK(ierr); // Check RHS vector set
 
-        // +++ Previous std::cout print (now removed/commented as it didn't appear) +++
-        // if (amrex::ParallelDescriptor::IOProcessor()) {
-        //      std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc() << "] Processing box " << bx
-        //                << " before HYPRE_StructVectorSetBoxValues(m_b)" << std::endl << std::flush;
-        // }
-        // amrex::ParallelDescriptor::Barrier();
-        // +++ End previous print +++
-
-
-        // Vector SetBoxValues calls previously failed, now commented out for testing assembly
-         // Failing call:
-         // ierr = HYPRE_StructVectorSetBoxValues(m_b, hypre_lo.data(), hypre_hi.data(), rhs_values.data());
-         // HYPRE_CHECK(ierr); // This triggered the abort
-
-         // Also comment out the next one for vector x
-         // ierr = HYPRE_StructVectorSetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), initial_guess.data());
-         // HYPRE_CHECK(ierr);
+        // Set Initial Guess values
+        ierr = HYPRE_StructVectorSetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), initial_guess.data());
+        HYPRE_CHECK(ierr); // Check Initial Guess vector set
+        // --- END RE-ENABLED VECTOR SET CALLS ---
 
     } // End MFIter loop
 
@@ -416,24 +499,26 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
     }
 
     // +++ Attempt to print HYPRE matrix before assembly +++
+    // --- MODIFIED to use a capturable filename ---
+    std::string matrix_debug_filename = "debug_matrix_state.log";
     if (amrex::ParallelDescriptor::IOProcessor()) {
          // Use std::cout and std::flush for more direct output for this critical debug step
          std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc()
-                   << "] Attempting HYPRE_StructMatrixPrint to debug_matrix_before_assemble.log..." << std::endl << std::flush;
-         HYPRE_Int print_ierr = HYPRE_StructMatrixPrint("debug_matrix_before_assemble.log", m_A, 0);
+                   << "] Attempting HYPRE_StructMatrixPrint to " << matrix_debug_filename << "..." << std::endl << std::flush;
+         HYPRE_Int print_ierr = HYPRE_StructMatrixPrint(matrix_debug_filename.c_str(), m_A, 0); // Use c_str()
          // Check if the print call itself failed
          if (print_ierr != 0) {
-              char print_err_msg[256];
-              HYPRE_DescribeError(print_ierr, print_err_msg);
-              // Use amrex::Warning, don't abort here, let assembly potentially fail later
-              amrex::Warning("HYPRE_StructMatrixPrint FAILED with code: " + std::to_string(print_ierr) +
-                             " - " + std::string(print_err_msg));
-              std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc()
-                        << "] HYPRE_StructMatrixPrint call FAILED." << std::endl << std::flush;
+             char print_err_msg[256];
+             HYPRE_DescribeError(print_ierr, print_err_msg);
+             // Use amrex::Warning, don't abort here, let assembly potentially fail later
+             amrex::Warning("HYPRE_StructMatrixPrint FAILED with code: " + std::to_string(print_ierr) +
+                            " - " + std::string(print_err_msg));
+             std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc()
+                       << "] HYPRE_StructMatrixPrint call FAILED." << std::endl << std::flush;
          } else {
-              std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc()
-                        << "] HYPRE_StructMatrixPrint call completed (check artifact: debug_matrix_before_assemble.log)."
-                        << std::endl << std::flush;
+             std::cout << "[Rank " << amrex::ParallelDescriptor::MyProc()
+                       << "] HYPRE_StructMatrixPrint call completed (check artifact: " << matrix_debug_filename << ")."
+                       << std::endl << std::flush;
          }
     }
     // Barrier ensures rank 0 finishes printing attempt before others proceed (or fail)
@@ -441,16 +526,16 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
     // +++ End matrix print attempt +++
 
 
-    // Finalize matrix assembly (Suspected actual failure point)
+    // Finalize matrix assembly
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
          amrex::Print() << "TortuosityHypre: Calling HYPRE_StructMatrixAssemble..." << std::endl;
     }
-    ierr = HYPRE_StructMatrixAssemble(m_A); // This call likely returns 1
-    HYPRE_CHECK(ierr); // This check likely detects the error from Assemble
+    ierr = HYPRE_StructMatrixAssemble(m_A); // This call previously failed when MatrixCreate passed
+    HYPRE_CHECK(ierr);
 
      if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
          amrex::Print() << "TortuosityHypre: Matrix assembled." << std::endl;
-    }
+     }
 } // End setupMatrixEquation
 
 /**
@@ -475,15 +560,16 @@ bool OpenImpala::TortuosityHypre::solve()
     HYPRE_Int num_iterations = 0;
     HYPRE_Real final_res_norm = -1.0;
 
-    // Check if matrix A is valid before attempting solve
+    // Check if matrix A and vectors b, x are valid before attempting solve
     if (!m_A) {
         amrex::Abort("TortuosityHypre::solve() called but matrix m_A is NULL!");
     }
-     // Check if vectors b and x are valid if they are needed (they might be if SetBoxValues was commented out)
-     // For now, assume they might be NULL if the previous step was commented out. Add checks if needed.
-     // if (!m_b || !m_x) {
-     //      amrex::Warning("TortuosityHypre::solve() called but m_b or m_x might be NULL due to commented out SetBoxValues.");
-     // }
+    if (!m_b) {
+        amrex::Abort("TortuosityHypre::solve() called but vector m_b is NULL!");
+    }
+    if (!m_x) {
+        amrex::Abort("TortuosityHypre::solve() called but vector m_x is NULL!");
+    }
 
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
@@ -498,15 +584,12 @@ bool OpenImpala::TortuosityHypre::solve()
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Using PFMG Preconditioner (1 cycle)" << std::endl;
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond); HYPRE_CHECK(ierr);
         ierr = HYPRE_StructPFMGSetMaxIter(precond, 1); HYPRE_CHECK(ierr); // Use as preconditioner (1 cycle)
-        ierr = HYPRE_StructPFMGSetTol(precond, 0.0); HYPRE_CHECK(ierr);    // Tolerance doesn't matter for precond
+        ierr = HYPRE_StructPFMGSetTol(precond, 0.0); HYPRE_CHECK(ierr);   // Tolerance doesn't matter for precond
         ierr = HYPRE_StructPFMGSetRelChange(precond, 0); HYPRE_CHECK(ierr); // Don't check relative change
         // Add other PFMG settings if needed (e.g., relax type)
     }
 
     // --- Select and Run the HYPRE solver ---
-    // NOTE: This section will likely fail if m_b and m_x were not populated
-    // because the SetBoxValues calls were commented out. This is expected if
-    // the MatrixAssemble step now passes.
     switch (m_solvertype)
     {
         case OpenImpala::TortuosityHypre::SolverType::Jacobi:
@@ -561,7 +644,7 @@ bool OpenImpala::TortuosityHypre::solve()
 
              if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructPCGSetup..." << std::endl;
             ierr = HYPRE_StructPCGSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-              if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructPCGSolve..." << std::endl;
+             if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructPCGSolve..." << std::endl;
             ierr = HYPRE_StructPCGSolve(solver, m_A, m_b, m_x); // Check ierr below
 
              if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  HYPRE_StructPCGSolve finished (ierr=" << ierr << ")" << std::endl;
@@ -580,11 +663,11 @@ bool OpenImpala::TortuosityHypre::solve()
                  if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting Preconditioner..." << std::endl;
                 ierr = HYPRE_StructGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); HYPRE_CHECK(ierr);
             }
-              if (m_verbose > 1) { HYPRE_StructGMRESSetLogging(solver, 1); }
+             if (m_verbose > 1) { HYPRE_StructGMRESSetLogging(solver, 1); }
 
              if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructGMRESSetup..." << std::endl;
             ierr = HYPRE_StructGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-              if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructGMRESSolve..." << std::endl;
+             if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling HYPRE_StructGMRESSolve..." << std::endl;
             ierr = HYPRE_StructGMRESSolve(solver, m_A, m_b, m_x); // Check ierr below
 
              if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  HYPRE_StructGMRESSolve finished (ierr=" << ierr << ")" << std::endl;
@@ -614,11 +697,11 @@ bool OpenImpala::TortuosityHypre::solve()
         if (amrex::ParallelDescriptor::IOProcessor()) { // Print only once
             amrex::Print() << "ERROR: HYPRE solver returned error code: " << ierr << std::endl;
             if (HYPRE_CheckError(ierr, HYPRE_ERROR_CONV)) {
-                amrex::Print() << "       (Solver did not converge within max iterations or tolerance)" << std::endl;
+                amrex::Print() << "        (Solver did not converge within max iterations or tolerance)" << std::endl;
             } else if (HYPRE_CheckError(ierr, HYPRE_ERROR_MEMORY)) {
-                amrex::Print() << "       (Solver memory allocation error)" << std::endl;
+                amrex::Print() << "        (Solver memory allocation error)" << std::endl;
             } else if (HYPRE_CheckError(ierr, HYPRE_ERROR_ARG)) {
-                amrex::Print() << "       (Solver argument error)" << std::endl;
+                amrex::Print() << "        (Solver argument error)" << std::endl;
             }
             // Add more HYPRE_ERROR checks if needed
         }
@@ -636,7 +719,6 @@ bool OpenImpala::TortuosityHypre::solve()
     }
 
     // --- Copy solution and potentially write plotfile ---
-    // Note: getSolution will likely fail if m_x was not populated
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Copying solution to MultiFab..." << std::endl;
     getSolution(m_mf_phi, SolnComp); // Pass component explicitly
 
@@ -676,8 +758,8 @@ bool OpenImpala::TortuosityHypre::solve()
 amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 {
       if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-          amrex::Print() << "TortuosityHypre::value() called (refresh=" << refresh << ", first_call=" << m_first_call << ")" << std::endl;
-    }
+           amrex::Print() << "TortuosityHypre::value() called (refresh=" << refresh << ", first_call=" << m_first_call << ")" << std::endl;
+      }
 
     // Solve the system if needed
     if (refresh || m_first_call)
@@ -700,8 +782,6 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
     }
 
     // --- Calculate Fluxes ---
-    // Note: This will likely produce incorrect results if the solve() step
-    // failed or used uninitialized vectors due to commented out SetBoxValues.
       if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Calling global_fluxes()..." << std::endl;
     amrex::Real fluxin = 0.0, fluxout = 0.0;
     global_fluxes(fluxin, fluxout); // Call the private helper method
@@ -723,9 +803,9 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
     }
 
       if (cross_sectional_area <= tiny_flux_threshold) {
-          amrex::Warning("TortuosityHypre::value: Domain cross-sectional area is near zero. Cannot calculate tortuosity.");
-          m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
-          return m_value;
+           amrex::Warning("TortuosityHypre::value: Domain cross-sectional area is near zero. Cannot calculate tortuosity.");
+           m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+           return m_value;
       }
 
     // Effective Diffusivity Calculation (assuming D_bulk = 1)
@@ -734,13 +814,13 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
     amrex::Real avg_flux = (fluxin + fluxout) / 2.0; // Should be equal if converged
 
     if (std::abs(delta_V) > tiny_flux_threshold && length_dir > tiny_flux_threshold) {
-          // Ensure non-zero area before dividing
-          if (std::abs(cross_sectional_area) > tiny_flux_threshold) {
-              rel_diffusivity = - avg_flux * length_dir / (cross_sectional_area * delta_V);
-          } else {
-              amrex::Warning("TortuosityHypre::value: Cross sectional area is zero.");
-              // rel_diffusivity remains 0.0
-          }
+         // Ensure non-zero area before dividing
+         if (std::abs(cross_sectional_area) > tiny_flux_threshold) {
+             rel_diffusivity = - avg_flux * length_dir / (cross_sectional_area * delta_V);
+         } else {
+             amrex::Warning("TortuosityHypre::value: Cross sectional area is zero.");
+             // rel_diffusivity remains 0.0
+         }
     } else {
         amrex::Warning("TortuosityHypre::value: Cannot calculate relative diffusivity due to zero length or zero potential difference.");
         // rel_diffusivity remains 0.0
@@ -748,23 +828,23 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 
     // Tortuosity Calculation: tau = VF / D_rel
     if (std::abs(rel_diffusivity) > tiny_flux_threshold) {
-          m_value = m_vf / rel_diffusivity;
-          // Check for physically unreasonable values
-          if (m_value < 0.0 && m_vf > tiny_flux_threshold) {
-              amrex::Warning("Calculated negative tortuosity, check flux direction, BCs, or definition.");
-          } else if (m_value < m_vf && m_vf > tiny_flux_threshold) {
-              // Tortuosity should generally be >= 1. If VF < 1, then tau should be > VF.
-              // This check might be too strict depending on definition, but useful warning.
-              amrex::Warning("Calculated tortuosity is less than volume fraction. Check definition/calculation.");
-          }
+         m_value = m_vf / rel_diffusivity;
+         // Check for physically unreasonable values
+         if (m_value < 0.0 && m_vf > tiny_flux_threshold) {
+             amrex::Warning("Calculated negative tortuosity, check flux direction, BCs, or definition.");
+         } else if (m_value < m_vf && m_vf > tiny_flux_threshold) {
+             // Tortuosity should generally be >= 1. If VF < 1, then tau should be > VF.
+             // This check might be too strict depending on definition, but useful warning.
+             amrex::Warning("Calculated tortuosity is less than volume fraction. Check definition/calculation.");
+         }
     } else {
-          if (m_vf > tiny_flux_threshold) {
-               if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: Relative diffusivity is near zero for non-zero VF. Tortuosity is effectively infinite." << std::endl;
-               m_value = std::numeric_limits<amrex::Real>::infinity();
-          } else {
-                if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Note: Volume Fraction is near zero. Setting tortuosity to 0.0." << std::endl;
-               m_value = 0.0; // Tortuosity is 0 or undefined if VF is 0
-          }
+         if (m_vf > tiny_flux_threshold) {
+             if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: Relative diffusivity is near zero for non-zero VF. Tortuosity is effectively infinite." << std::endl;
+             m_value = std::numeric_limits<amrex::Real>::infinity();
+         } else {
+              if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Note: Volume Fraction is near zero. Setting tortuosity to 0.0." << std::endl;
+              m_value = 0.0; // Tortuosity is 0 or undefined if VF is 0
+         }
     }
 
     // Print final diagnostics (only on IOProcessor to avoid redundant output)
@@ -772,14 +852,14 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
         amrex::Print() << "------------------------------------------" << std::endl;
         amrex::Print() << " Tortuosity Calculation Results (Dir=" << static_cast<int>(m_dir) << ")" << std::endl;
         amrex::Print() << std::fixed << std::setprecision(6); // Set precision for output
-        amrex::Print() << "   Volume Fraction (VF)                 : " << m_vf << std::endl;
-        amrex::Print() << "   Relative Effective Diffusivity       : " << rel_diffusivity << std::endl;
-        amrex::Print() << "   Tortuosity (tau = VF / D_rel)        : " << m_value << std::endl;
+        amrex::Print() << "   Volume Fraction (VF)                  : " << m_vf << std::endl;
+        amrex::Print() << "   Relative Effective Diffusivity      : " << rel_diffusivity << std::endl;
+        amrex::Print() << "   Tortuosity (tau = VF / D_rel)       : " << m_value << std::endl;
         amrex::Print() << "   --- Intermediate Values ---" << std::endl;
-        amrex::Print() << "   Flux Low Face                        : " << fluxin << std::endl;
-        amrex::Print() << "   Flux High Face                       : " << fluxout << std::endl;
-        amrex::Print() << "   Flux Average                         : " << avg_flux << std::endl;
-        amrex::Print() << "   Flux Conservation Check |In + Out|   : " << std::abs(fluxin + fluxout) << std::endl; // Should be near zero
+        amrex::Print() << "   Flux Low Face                       : " << fluxin << std::endl;
+        amrex::Print() << "   Flux High Face                      : " << fluxout << std::endl;
+        amrex::Print() << "   Flux Average                        : " << avg_flux << std::endl;
+        amrex::Print() << "   Flux Conservation Check |In + Out|  : " << std::abs(fluxin + fluxout) << std::endl; // Should be near zero
         amrex::Print() << "------------------------------------------" << std::endl;
     }
 
@@ -799,7 +879,7 @@ void OpenImpala::TortuosityHypre::getSolution (amrex::MultiFab& soln, int ncomp)
     AMREX_ASSERT(ncomp >= 0 && ncomp < soln.nComp());
     AMREX_ASSERT(soln.nGrowVect().min() >= 0);
 
-    // Add check if m_x is valid, especially if SetBoxValues was commented out
+    // Add check if m_x is valid
     if (!m_x) {
          amrex::Warning("TortuosityHypre::getSolution called but m_x is NULL. Returning without copying.");
          return;
@@ -866,23 +946,18 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, const int n
         // Need to pass pointer to the specific component 'ncomp' of the target FAB
         amrex::Real* q_comp_ptr = fab_target.dataPtr(ncomp);
 
-        // Get Fortran function signature from Tortuosity_filcc_F.H
-        // void tortuosity_filct(amrex_real* q, const int* q_lo, const int* q_hi, const int* q_ncomp,
-        //                       const int* p, const int* p_lo, const int* p_hi, const int* p_ncomp,
-        //                       const int* domlo, const int* domhi, const int* phase);
-
         // Pass raw pointers from loVect/hiVect
-        tortuosity_filct(q_comp_ptr,              // q (pointer to component ncomp)
-                         fab_target.loVect(),     // q_lo (Fortran bounds of fab_target, incl. ghost)
-                         fab_target.hiVect(),     // q_hi (Fortran bounds of fab_target, incl. ghost)
-                         &q_ncomp,                // q_ncomp
-                         fab_phase_src.dataPtr(), // p (pointer to integer phase data)
-                         fab_phase_src.loVect(),  // p_lo (Fortran bounds of fab_phase_src, incl. ghost)
-                         fab_phase_src.hiVect(),  // p_hi (Fortran bounds of fab_phase_src, incl. ghost)
-                         &p_ncomp,                // p_ncomp
-                         domain_box.loVect(),     // domlo
-                         domain_box.hiVect(),     // domhi
-                         &m_phase);               // phase
+        tortuosity_filct(q_comp_ptr,             // q (pointer to component ncomp)
+                         fab_target.loVect(),    // q_lo (Fortran bounds of fab_target, incl. ghost)
+                         fab_target.hiVect(),    // q_hi (Fortran bounds of fab_target, incl. ghost)
+                         &q_ncomp,               // q_ncomp
+                         fab_phase_src.dataPtr(),// p (pointer to integer phase data)
+                         fab_phase_src.loVect(), // p_lo (Fortran bounds of fab_phase_src, incl. ghost)
+                         fab_phase_src.hiVect(), // p_hi (Fortran bounds of fab_phase_src, incl. ghost)
+                         &p_ncomp,               // p_ncomp
+                         domain_box.loVect(),    // domlo
+                         domain_box.hiVect(),    // domhi
+                         &m_phase);              // phase
     }
 }
 
@@ -907,9 +982,9 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
                                                 (1.0 / m_geom.CellSize(2));
     // Calculate face area based on cell dimensions
     amrex::Real face_area = 1.0;
-     if (idir == 0) { face_area = m_geom.CellSize(1) * m_geom.CellSize(2); }
-     else if (idir == 1) { face_area = m_geom.CellSize(0) * m_geom.CellSize(2); }
-     else { face_area = m_geom.CellSize(0) * m_geom.CellSize(1); }
+      if (idir == 0) { face_area = m_geom.CellSize(1) * m_geom.CellSize(2); }
+      else if (idir == 1) { face_area = m_geom.CellSize(0) * m_geom.CellSize(2); }
+      else { face_area = m_geom.CellSize(0) * m_geom.CellSize(1); }
 
 
     const amrex::Box& domain = m_geom.Domain();
@@ -917,8 +992,6 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     const int domhi_dir = domain.bigEnd(idir);
 
     // Ensure solution ghost cells are up-to-date (needed for finite difference)
-    // Create a temporary copy or alias to fill boundaries without modifying original m_mf_phi[SolnComp] state if needed elsewhere
-    // Check if m_mf_phi is valid before creating alias, especially if solve failed
     if (!m_mf_phi.is_nodal() && m_mf_phi.nComp() <= SolnComp) { // Basic check
         amrex::Warning("TortuosityHypre::global_fluxes: Solution MultiFab m_mf_phi seems invalid. Skipping flux calculation.");
         fxin = std::numeric_limits<amrex::Real>::quiet_NaN();
@@ -936,7 +1009,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     for (amrex::MFIter mfi(phi_soln_local); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
         // Need const access to potential (SolnComp) and phase (from m_mf_phase)
-        const auto& phi    = phi_soln_local.const_array(mfi); // Use local copy with filled ghosts
+        const auto& phi     = phi_soln_local.const_array(mfi); // Use local copy with filled ghosts
         // Use the cell type component that was filled by getCellTypes
         if (m_mf_phi.nComp() <= PhaseComp) { // Check if PhaseComp exists
              amrex::Abort("Phase component not found in m_mf_phi for flux calculation!");
