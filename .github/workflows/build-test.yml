@@ -157,33 +157,40 @@ jobs:
           # The executable 'hypre_test' will be created in /src (which is $PWD on the host)
           ls -l ./hypre_test # Verify executable exists
 
-      # Step 6.3: Run Standalone HYPRE Test inside Container
-      - name: Run Standalone HYPRE Test
+            # Step 6.3: Run Standalone HYPRE Test inside Container (Robust Logging)
+      - name: Run Standalone HYPRE Test (Robust Logging)
         id: run_hypre_test
         # Run only if compilation succeeded
         if: steps.compile_hypre_test.outcome == 'success'
+        # Use 'continue-on-error: true' to ensure log is printed even if mpirun fails
+        continue-on-error: true
         run: |
           echo "Running hypre_test inside container..."
-          # Execute run command inside the container
-          # The executable path is relative to the /src mount point
+          # Execute run command inside the container, redirect output
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && \
                      cd /src && \
-                     echo "Running: mpirun -np 1 --allow-run-as-root ./hypre_test" && \
+                     echo "Executing: mpirun -np 1 --allow-run-as-root ./hypre_test" && \
                      mpirun -np 1 --allow-run-as-root ./hypre_test' > run_hypre_test.log 2>&1
           RUN_EXIT_CODE=$?
-          cat run_hypre_test.log # Print runtime output
-          if [ $RUN_EXIT_CODE -ne 0 ]; then
-            echo "::error::Standalone HYPRE test execution failed! Exit code: $RUN_EXIT_CODE"
-            # Decide if this failure should stop the whole workflow
-            # exit $RUN_EXIT_CODE
-            echo "::warning::Standalone HYPRE test failed, but continuing workflow..." # Example: Warn but continue
-          fi
-          echo "Standalone HYPRE test execution finished."
-          # Optional: Upload logs as artifacts if needed
-          # actions/upload-artifact@v4 ... with path: compile_hypre_test.log, run_hypre_test.log
+          echo "--- Content of run_hypre_test.log ---"
+          cat run_hypre_test.log || echo "Warning: Could not cat run_hypre_test.log"
+          echo "--- End of run_hypre_test.log ---"
+          echo "Standalone HYPRE test execution finished with exit code: $RUN_EXIT_CODE"
+          # Exit the step with the original code so subsequent steps can check outcome
+          exit $RUN_EXIT_CODE
+
+      # Step 6.4: Check Standalone Test Outcome (NEW STEP)
+      # This step explicitly checks the outcome of the previous step
+      - name: Check Standalone Test Outcome
+        if: steps.run_hypre_test.outcome == 'failure'
+        run: |
+          echo "::error::Standalone HYPRE test execution failed (Exit Code: ${{ steps.run_hypre_test.outputs.exit_code }}). See log above."
+          # Decide if this failure should stop the whole workflow
+          # exit 1
+          echo "::warning::Standalone HYPRE test failed, but continuing workflow..." # Example: Warn but continue
 
 
       # Step 7: Build OpenImpala using Dependency SIF
