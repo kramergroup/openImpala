@@ -1,4 +1,6 @@
-# .github/workflows/build-test.yml
+# Singularity Definition File for OpenImpala Dependencies
+# Based on Rocky Linux 8, GCC 11, OpenMPI 4.1.6, AMReX 25.03, Hypre 2.32.0, HDF5 1.12.3, LibTIFF 4.6.0
+
 Bootstrap: docker
 From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
@@ -9,16 +11,16 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     Installs OpenMPI, libtiff, AMReX, HYPRE from source using GCC 11.
 
 %labels
-    Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.37-deps-amrex2503-hypre2320-testfix # <-- UPDATED Version Label
+    Maintainer "James Le Houx <jrl0@soton.ac.uk>" # <-- EXAMPLE, PLEASE UPDATE
+    Version 2.37-deps-amrex2503-hypre2320-ompfix # <-- UPDATED Version Label
 
 %post
     set -e # Ensure commands exit on error early
 
     # Define versions
     export OPENMPI_VERSION=4.1.6
-    export AMREX_VERSION=25.03      # AMReX version
-    export HYPRE_VERSION=v2.32.0    # HYPRE version
+    export AMREX_VERSION=25.03     # AMReX version
+    export HYPRE_VERSION=v2.32.0   # HYPRE version
     export HDF5_VERSION=1.12.3
     export LIBTIFF_VERSION=4.6.0
     export ZLIB_VERSION=system
@@ -186,17 +188,17 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     cd hypre/src # Configure needs to be run from src directory
     ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
+        --with-openmp \ # <-- **** ADDED OpenMP SUPPORT ****
         --enable-shared \
         CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
 
     echo "--- Making HYPRE library ---"
     make -j$(nproc)
 
-    # *** MODIFIED: Run 'make test' from top-level hypre directory using subshell ***
-    echo "--- Running HYPRE internal tests (make test) ---"
-    (cd .. && make test > /hypre_make_test.log 2>&1 || true)
-    echo "--- Finished running HYPRE internal tests (Log at /hypre_make_test.log) ---"
-    # *** END MODIFIED STEP ***
+    # *** Run 'make check' from the src directory ***
+    echo "--- Running HYPRE internal tests (make check) ---"
+    make check > /hypre_make_check.log 2>&1 || echo "WARNING: hypre 'make check' failed. Log at /hypre_make_check.log. Continuing install..."
+    echo "--- Finished running HYPRE internal tests (Log at /hypre_make_check.log) ---"
 
     echo "--- Installing HYPRE ---"
     # *** Run make install from the src directory ***
@@ -205,8 +207,8 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     # *** Go back to /tmp/build_src directory from hypre/src ***
     cd ../..
 
-    # Log file should be at /hypre_make_test.log, no copy needed here
-    rm -rf hypre # Clean up source
+    # Clean up source
+    rm -rf hypre
 
     ldconfig # Ensure new HYPRE libs are found by linker
 
@@ -256,7 +258,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     export LIBTIFF_VERSION=4.6.0
     export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
     # Explicitly set TIFF_HOME for the %test section as well
-    export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX} 
+    export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX}
     echo "--- Verifying Tool Versions ---";
     echo "Checking mpicc..."; which mpicc; mpicc --version
     echo "Checking mpic++..."; which mpic++; mpic++ --version
@@ -272,7 +274,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     fi
     echo "--- Verifying Library Linking ---"
     # Use the correct TIFF_HOME variable here
-    LIBTIFF_LIB="${TIFF_HOME}/lib/libtiff.so" 
+    LIBTIFF_LIB="${TIFF_HOME}/lib/libtiff.so"
     if [ ! -f "$LIBTIFF_LIB" ]; then echo "*** ERROR: Custom libtiff library not found at $LIBTIFF_LIB!"; exit 1; fi
     echo "Checking libtiff lib ($LIBTIFF_LIB)..."; ldd "$LIBTIFF_LIB"
     HDF5_LIB="${HDF5_HOME}/lib/libhdf5.so"
@@ -291,6 +293,6 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
 %runscript
     echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
-    echo "Using AMReX ${AMREX_VERSION}, HYPRE ${HYPRE_VERSION}."
+    echo "Using AMReX ${AMREX_VERSION}, HYPRE ${HYPRE_VERSION} (with OpenMP)." # Updated runscript message
     echo "Includes custom build of libtiff ${LIBTIFF_VERSION}."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
