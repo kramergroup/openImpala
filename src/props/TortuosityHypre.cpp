@@ -210,16 +210,16 @@ void OpenImpala::TortuosityHypre::setupGrids()
         amrex::Abort("FATAL: m_grid handle is NULL after HYPRE_StructGridAssemble!");
     }
 
-    // --- ADDED CHECK: Query assembled grid ---
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  DEBUG [setupGrids]: Verifying assembled grid properties..." << std::endl;
-        HYPRE_Int grid_dim;
-        ierr = HYPRE_StructGridGetDim(m_grid, &grid_dim);
-        HYPRE_CHECK(ierr); // Check the query call itself
-        amrex::Print() << "    DEBUG: Verified Grid Dimension from HYPRE: " << grid_dim << std::endl;
-        // Potentially add HYPRE_StructGridGetNumBoxes if needed
-    }
-    // --- END ADDED CHECK ---
+    // --- COMMENTED OUT CHECK: Query assembled grid ---
+    // if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+    //     amrex::Print() << "  DEBUG [setupGrids]: Verifying assembled grid properties..." << std::endl;
+    //     HYPRE_Int grid_dim;
+    //     // The line below caused a compilation error: 'HYPRE_StructGridGetDim' was not declared in this scope
+    //     // ierr = HYPRE_StructGridGetDim(m_grid, &grid_dim);
+    //     // HYPRE_CHECK(ierr); // Check the query call itself
+    //     // amrex::Print() << "    DEBUG: Verified Grid Dimension from HYPRE: " << grid_dim << std::endl;
+    // }
+    // --- END COMMENTED OUT CHECK ---
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  DEBUG [setupGrids]: Grid setup complete." << std::endl;
@@ -255,15 +255,16 @@ void OpenImpala::TortuosityHypre::setupStencil()
         HYPRE_CHECK(ierr);
     }
 
-    // --- ADDED CHECK: Query stencil ---
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  DEBUG [setupStencil]: Verifying created stencil properties..." << std::endl;
-        HYPRE_Int stencil_size_check;
-        ierr = HYPRE_StructStencilGetSize(m_stencil, &stencil_size_check);
-        HYPRE_CHECK(ierr); // Check the query call itself
-        amrex::Print() << "    DEBUG: Verified Stencil Size from HYPRE: " << stencil_size_check << std::endl;
-    }
-    // --- END ADDED CHECK ---
+    // --- COMMENTED OUT CHECK: Query stencil ---
+    // if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+    //     amrex::Print() << "  DEBUG [setupStencil]: Verifying created stencil properties..." << std::endl;
+    //     HYPRE_Int stencil_size_check;
+    //     // The line below caused a compilation error: 'HYPRE_StructStencilGetSize' was not declared in this scope
+    //     // ierr = HYPRE_StructStencilGetSize(m_stencil, &stencil_size_check);
+    //     // HYPRE_CHECK(ierr); // Check the query call itself
+    //     // amrex::Print() << "    DEBUG: Verified Stencil Size from HYPRE: " << stencil_size_check << std::endl;
+    // }
+    // --- END COMMENTED OUT CHECK ---
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  DEBUG [setupStencil]: Stencil setup complete." << std::endl;
@@ -318,28 +319,30 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 {
     HYPRE_Int ierr = 0;
 
-    // --- ADDED PRE-CHECKS for grid and stencil validity ---
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  DEBUG [setupMatrixEquation]: Final pre-check of grid and stencil before MatrixCreate..." << std::endl;
+    // --- COMMENTED OUT PRE-CHECKS for grid and stencil validity ---
+    // if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+    //     amrex::Print() << "  DEBUG [setupMatrixEquation]: Final pre-check of grid and stencil before MatrixCreate..." << std::endl;
 
-        if (!m_grid) {
-            amrex::Abort("FATAL: m_grid handle is NULL before HYPRE_StructMatrixCreate!");
-        }
-        if (!m_stencil) {
-            amrex::Abort("FATAL: m_stencil handle is NULL before HYPRE_StructMatrixCreate!");
-        }
+    //     if (!m_grid) {
+    //         amrex::Abort("FATAL: m_grid handle is NULL before HYPRE_StructMatrixCreate!");
+    //     }
+    //     if (!m_stencil) {
+    //         amrex::Abort("FATAL: m_stencil handle is NULL before HYPRE_StructMatrixCreate!");
+    //     }
 
-        HYPRE_Int grid_dim_check;
-        ierr = HYPRE_StructGridGetDim(m_grid, &grid_dim_check);
-        HYPRE_CHECK(ierr);
-        amrex::Print() << "    DEBUG: Pre-check Grid Dimension: " << grid_dim_check << std::endl;
+    //     HYPRE_Int grid_dim_check;
+    //     // The line below caused compilation error
+    //     // ierr = HYPRE_StructGridGetDim(m_grid, &grid_dim_check);
+    //     // HYPRE_CHECK(ierr);
+    //     // amrex::Print() << "    DEBUG: Pre-check Grid Dimension: " << grid_dim_check << std::endl;
 
-        HYPRE_Int stencil_size_check;
-        ierr = HYPRE_StructStencilGetSize(m_stencil, &stencil_size_check);
-        HYPRE_CHECK(ierr);
-        amrex::Print() << "    DEBUG: Pre-check Stencil Size: " << stencil_size_check << std::endl;
-    }
-    // --- END ADDED PRE-CHECKS ---
+    //     HYPRE_Int stencil_size_check;
+    //     // The line below caused compilation error
+    //     // ierr = HYPRE_StructStencilGetSize(m_stencil, &stencil_size_check);
+    //     // HYPRE_CHECK(ierr);
+    //     // amrex::Print() << "    DEBUG: Pre-check Stencil Size: " << stencil_size_check << std::endl;
+    // }
+    // --- END COMMENTED OUT PRE-CHECKS ---
 
     // Create and initialize matrix A (THIS IS WHERE THE ORIGINAL ERROR OCCURRED)
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
