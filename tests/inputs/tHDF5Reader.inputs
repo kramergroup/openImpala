@@ -1,2 +1,2 @@
-filename = data/SampleData_2Phase.h5
+filename = data/SampleData_2Phase_3d.hdf5
 hdf5_dataset = /t$F/channel$C

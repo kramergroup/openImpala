@@ -28,11 +28,11 @@
 
 // Default relative path to the sample TIFF file
 // *** Make sure this points to a valid TIFF file (Striped or Tiled) ***
-const std::string default_tiff_filename = "data/SampleData_2Phase.tif";
+const std::string default_tiff_filename = "data/SampleData_2Phase_stack_3d_1bit.tif";
 // Output directory relative to executable location
 const std::string test_output_dir = "tTiffReader_output";
 // Default threshold value (adjust based on sample data)
-const double default_threshold_value = 1.0;
+const double default_threshold_value = 0.5;
 // Define Box size for breaking down domain
 const int BOX_SIZE = 32;
 
@@ -95,10 +95,10 @@ int main (int argc, char* argv[])
         // Expected properties for default SampleData_2Phase.tif
         // ** VERIFY THESE AGAINST YOUR ACTUAL SAMPLE FILE **
         // ** Also update if testing tiled or sequence files **
-        int expected_width = 50;
-        int expected_height = 50;
-        int expected_depth = 50;
-        int expected_bps = 8;       // e.g., 8-bit
+        int expected_width = 100;
+        int expected_height = 100;
+        int expected_depth = 100;
+        int expected_bps = 1;       // e.g., 8-bit
         int expected_format = 1;    // e.g., SAMPLEFORMAT_UINT from tiff.h
         int expected_spp = 1;       // e.g., grayscale
 
