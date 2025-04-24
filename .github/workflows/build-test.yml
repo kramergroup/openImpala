@@ -82,29 +82,29 @@ jobs:
           fi
 
       # *** CORRECTED: Step 5.5: Copy HYPRE Test Log from Container ***
-      - name: Copy HYPRE Test Log from Container
+      - name: Copy HYPRE Check Log from Container
         # Run this step always *after* Step 5, assuming Step 5 passes or the job would have failed.
         # The internal 'if' handles the case where the log file might not exist.
         if: always() && steps.verify_sif.outcome == 'success' # Ensure Step 5 succeeded
         run: |
           # Check if the log file exists inside the container at the expected path
-          if sudo apptainer exec ./dependency_image.sif test -f /hypre_make_test.log; then
-            echo "Copying /hypre_make_test.log..."
+          if sudo apptainer exec ./dependency_image.sif test -f /hypre_make_check.log; then
+            echo "Copying /hypre_make_check.log..."
             # Execute 'cat' inside the container and redirect output to a file on the host
-            sudo apptainer exec ./dependency_image.sif cat /hypre_make_test.log > ./hypre_make_test.log
-            ls -l ./hypre_make_test.log # Verify the file was created on the host
+            sudo apptainer exec ./dependency_image.sif cat /hypre_make_check.log > ./hypre_make_check.log
+            ls -l ./hypre_make_check.log # Verify the file was created on the host
           else
-            echo "HYPRE test log /hypre_make_test.log not found in container."
+            echo "HYPRE check log /hypre_make_check.log not found in container."
           fi
         continue-on-error: true # Don't fail workflow if log copy fails
 
       # Step 5.6: Upload HYPRE Test Log Artifact
-      - name: Upload HYPRE Test Log Artifact
+      - name: Upload HYPRE Check Log Artifact
         if: always() # Upload even if copy step had issues, might be empty or non-existent
         uses: actions/upload-artifact@v4
         with:
-          name: hypre-make-test-log-${{ github.run_id }}
-          path: hypre_make_test.log # Path on the host runner
+          name: hypre-make-check-log-${{ github.run_id }}
+          path: hypre_make_check.log # Path on the host runner
           retention-days: 5
           if-no-files-found: warn # Use 'warn' if the file might not exist
 
