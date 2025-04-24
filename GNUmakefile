@@ -19,7 +19,7 @@ CXX           := mpic++
 F90           := mpif90
 
 CXXFLAGS      := -Wextra -O3 -fopenmp -DOMPI_SKIP_MPICXX -g -std=c++17 -MMD -MP
-F90FLAGS      := -g -O3
+F90FLAGS      := -g -O3 -fbounds-check
 
 # Include project source dir and dependency includes
 INCLUDE       := -Isrc \
