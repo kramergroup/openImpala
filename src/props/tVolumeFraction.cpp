@@ -50,7 +50,7 @@ constexpr int default_width = 100;
 constexpr int default_height = 100;
 constexpr int default_depth = 100;
 // Default threshold value (e.g., halfway for UINT8 [0-255])
-constexpr double default_threshold_value = 127.5;
+constexpr double default_threshold_value = 0.5;
 constexpr int default_phase0_id = 0; // ID assigned to values <= threshold
 constexpr int default_phase1_id = 1; // ID assigned to values > threshold
 constexpr int default_comp = 0;      // Component index in iMultiFab for phase data
