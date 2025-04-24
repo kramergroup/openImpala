@@ -9,10 +9,11 @@
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_Geometry.H> // Include Geometry explicitly
-#include <AMReX_Array.H>    // <<< ADDED: Needed for return type of loV/hiV >>>
+#include <AMReX_Array.H>    // Needed for return type of loV/hiV
 
 #include <HYPRE.h>
 #include <HYPRE_struct_ls.h>
+#include <HYPRE_int.h> // <<< ADDED: Include for HYPRE_Int type >>>
 
 #include "Tortuosity.H" // Assumed to define OpenImpala::Tortuosity and OpenImpala::Direction
 
@@ -50,10 +51,10 @@ public:
 
     /** @brief Specifies the HYPRE structured solver algorithm to use. */
     enum class SolverType {
-        Jacobi,      /**< HYPRE_StructJacobi */
-        GMRES,       /**< HYPRE_StructGMRES */
-        FlexGMRES,   /**< HYPRE_StructFlexGMRES */
-        PCG          /**< HYPRE_StructPCG (Added as a common alternative) */
+        Jacobi,     /**< HYPRE_StructJacobi */
+        GMRES,      /**< HYPRE_StructGMRES */
+        FlexGMRES,  /**< HYPRE_StructFlexGMRES */
+        PCG         /**< HYPRE_StructPCG (Added as a common alternative) */
         // Add others like BiCGSTAB if needed
     };
 
@@ -75,7 +76,7 @@ public:
      * @param vlo The potential value applied at the low boundary in the specified direction.
      * @param vhi The potential value applied at the high boundary in the specified direction.
      * @param verbose Verbosity level (0 = minimal, higher values for more output).
-     * @param write_plotfile If true, write a plotfile of the solution. (<<< ADDED PARAMETER)
+     * @param write_plotfile If true, write a plotfile of the solution.
      */
     TortuosityHypre(const amrex::Geometry& geom,
                     const amrex::BoxArray& ba,
@@ -89,7 +90,7 @@ public:
                     const amrex::Real vlo = 0.0, // Default BC values if often used
                     const amrex::Real vhi = 1.0,
                     int verbose = 0,
-                    bool write_plotfile = false); // <<< ADDED PARAMETER with default
+                    bool write_plotfile = false);
 
     /** Destructor. Cleans up allocated HYPRE resources. */
     virtual ~TortuosityHypre() override;
@@ -214,7 +215,7 @@ private:
     int m_maxiter = 50000;              /**< Solver maximum iterations. */
     int m_verbose = 0;                  /**< Verbosity level. */
     amrex::Real m_vf;                   /**< Volume Fraction (stored by value). */
-    bool m_write_plotfile;              /**< Flag to control plotfile writing (<<< ADDED MEMBER) */
+    bool m_write_plotfile;              /**< Flag to control plotfile writing */
 
     // AMReX Geometry & Data (references + owned copies/results)
     const amrex::Geometry& m_geom;      /**< Domain geometry (reference, lifetime managed externally). */
@@ -226,6 +227,10 @@ private:
     // State Variables
     amrex::Real m_value = std::numeric_limits<amrex::Real>::quiet_NaN(); /**< Cached tortuosity value. */
     bool m_first_call = true;           /**< Flag to trigger solve() on first call to value(). */
+
+    // Solver Statistics (<<< ADDED MEMBERS >>>)
+    HYPRE_Int m_num_iterations = -1;    /**< Number of solver iterations from last solve(). */
+    amrex::Real m_final_res_norm = -1.0;/**< Final relative residual norm from last solve(). */
 
     // HYPRE Data Structures (managed internally)
     HYPRE_StructGrid m_grid = NULL;     /**< HYPRE grid object. */
