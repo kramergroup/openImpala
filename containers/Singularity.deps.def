@@ -188,7 +188,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     cd hypre/src # Configure needs to be run from src directory
     ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
-        --with-openmp \ # <-- **** ADDED OpenMP SUPPORT ****
+        --with-openmp \
         --enable-shared \
         CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
 
