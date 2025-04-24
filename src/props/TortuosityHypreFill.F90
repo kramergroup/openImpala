@@ -31,6 +31,7 @@ contains
 
   ! ::: -----------------------------------------------------------
   ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
+  ! ::: Uses penalty method for blocked cells to improve conditioning.
   ! ::: Includes debug prints to check array indices and diagonal entries.
   ! ::: -----------------------------------------------------------
   subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
@@ -58,6 +59,8 @@ contains
     real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
     logical :: print_debug_info
+    ! Penalty factor for blocked cells
+    real(amrex_real), parameter :: penalty_factor = 1.0e20_amrex_real
 
     ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
@@ -77,71 +80,36 @@ contains
     end if
     if (nval <= 0) return ! Nothing to do for empty box
 
-    ! --- DEBUG PRINT: Print initial info once per call (Optional: Uncomment if needed) ---
-    ! write(*,*) "[Fortran] tortuosity_fillmtx called. nval=", nval, " nstencil=", nstencil
-    ! write(*,*) "[Fortran] Box Lo/Hi:", bxlo, bxhi
-    ! write(*,*) "[Fortran] Phase Box Lo/Hi:", p_lo, p_hi
-    ! write(*,*) "[Fortran] Domain Lo/Hi:", domlo, domhi
-    ! --- END DEBUG PRINT ---
-
     ! Loop over the valid box defined by bxlo/bxhi
     do k = bxlo(3), bxhi(3)
       do j = bxlo(2), bxhi(2)
         do i = bxlo(1), bxhi(1)
 
-          ! Calculate the 1D index 'm_idx' (1-based Fortran index within the current box)
-          ! This represents the point number (1 to nval) within this box's data vectors
+          ! Calculate indices
           m_idx = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
-
-          ! Calculate the starting 0-based index in the flat 'a' array for this point
-          ! This corresponds to the C++ index for the first stencil entry (center) for point m_idx
           stencil_idx_start = nstencil * (m_idx - 1)
 
-          ! --- DEBUG PRINT: Check indices for first and last point in box ---
-          print_debug_info = .false.
-          if (m_idx == 1 .or. m_idx == nval) then
-              print_debug_info = .true.
-              write(*,'(A,I9,A,I9,A,I9,A,I9,A,I9)') "[Fortran] Point (i,j,k,m_idx):", &
-                     i, ",", j, ",", k, " -> m_idx=", m_idx, &
-                     ", stencil_start_idx=", stencil_idx_start
-              ! Note: Fortran rhs/xinit are 1-based, C++ a is 0-based
-              write(*,'(A,I9,A,I9)') "          Bounds: rhs/xinit(1:", nval, "), a(0:", nval*nstencil-1, ")"
-          end if
-          ! --- END DEBUG PRINT ---
+          ! --- DEBUG PRINT: Check indices --- (Optional)
+          ! if (m_idx == 1 .or. m_idx == nval) then ... end if
 
+          ! --- Set Base Stencil (Laplacian) for ALL points initially ---
+          a(stencil_idx_start + istn_c)  =  coeff_c
+          a(stencil_idx_start + istn_mx) = -coeff_x
+          a(stencil_idx_start + istn_px) = -coeff_x
+          a(stencil_idx_start + istn_my) = -coeff_y
+          a(stencil_idx_start + istn_py) = -coeff_y
+          a(stencil_idx_start + istn_mz) = -coeff_z
+          a(stencil_idx_start + istn_pz) = -coeff_z
+          rhs(m_idx) = 0.0_amrex_real ! Default RHS
 
-          ! --- Determine stencil based on phase ---
-          ! Access phase data 'p' using the global i,j,k indices
-          if ( p(i,j,k,comp_phase) .ne. phase ) then
+          ! --- Apply Modifications Based on Phase ---
+          if ( p(i,j,k,comp_phase) == phase ) then
+              ! Fluid cell (conductive phase) - Apply Neumann at phase boundaries
 
-              ! Blocked cell (not the specified conductive phase)
-              ! Force solution to zero: phi = 0  =>  1*phi = 0
-              ! Set all stencil entries to 0 first
-              a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
-              ! Set only the center coefficient (index istn_c = 0) to 1.0
-              a(stencil_idx_start + istn_c) = 1.0_amrex_real
-              rhs(m_idx) = 0.0_amrex_real ! Set RHS for this point
-
-          else
-
-              ! Fluid cell (conductive phase)
-              ! Start with default stencil for -Laplacian(phi) = 0
-              ! Use 0-based istn_* parameters for indexing into the 'a' array
-              a(stencil_idx_start + istn_c)  =  coeff_c
-              a(stencil_idx_start + istn_mx) = -coeff_x
-              a(stencil_idx_start + istn_px) = -coeff_x
-              a(stencil_idx_start + istn_my) = -coeff_y
-              a(stencil_idx_start + istn_py) = -coeff_y
-              a(stencil_idx_start + istn_mz) = -coeff_z
-              a(stencil_idx_start + istn_pz) = -coeff_z
-              rhs(m_idx) = 0.0_amrex_real ! Set RHS for this point
-
-              ! --- Modify stencil for internal phase boundaries (Zero Neumann) ---
-              ! Check neighbors using global i,j,k indices in the phase array 'p'
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Center term absorbs flux
-                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                        ! No connection to neighbor
+                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Absorb flux
+                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                        ! Zero connection
               end if
               ! +X face
               if ( p(i+1,j,k,comp_phase) .ne. phase ) then
@@ -168,12 +136,22 @@ contains
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_z
                   a(stencil_idx_start + istn_pz) = 0.0_amrex_real
               end if
+              ! RHS remains 0.0 for internal fluid cells
+
+          else
+              ! Blocked cell (not the specified conductive phase)
+              ! --- Apply Penalty Method ---
+              ! Keep the base Laplacian stencil (already set)
+              ! Add large penalty factor to the diagonal coefficient
+              a(stencil_idx_start + istn_c) = a(stencil_idx_start + istn_c) + penalty_factor
+              ! RHS becomes penalty * desired_value (which is 0 here)
+              rhs(m_idx) = penalty_factor * 0.0_amrex_real ! Still zero
 
           end if ! End of fluid/blocked check
 
+
           ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
-          ! Check using global i,j,k indices against domain bounds domlo/domhi
-          ! This check happens *after* the fluid/blocked check and Neumann modifications
+          ! This applies to BOTH fluid and blocked cells if they fall on the boundary.
           ! X-Direction Flow
           if ( dir == direction_x ) then
               if ( i == domlo(1) ) then
@@ -210,7 +188,7 @@ contains
           end if ! End of Dirichlet BC overwrite
 
           ! --- Calculate Initial Guess ---
-          ! Linear ramp between vlo and vhi along the flow direction
+          ! (This logic remains the same)
           if ( dir == direction_x ) then
               domain_extent = domhi(1) - domlo(1)
               if (abs(domain_extent) < 1.0e-12_amrex_real) then
@@ -239,26 +217,19 @@ contains
               xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
           end if
 
-          ! <<< --- ADDED DEBUG CHECK for near-zero diagonals (Corrected) --- >>>
-          ! Check the diagonal coefficient AFTER all modifications (Neumann, Dirichlet)
-          ! Only check for cells belonging to the phase being simulated.
+          ! --- Debug check for near-zero diagonals ---
+          ! (Still useful to keep)
           if ( p(i,j,k,comp_phase) == phase ) then
              if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
-                 ! Break the write statement into multiple lines using '&'
                  write(*,'(A,3I5,A,ES10.3)') &
                       "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, &
                       " value=", a(stencil_idx_start + istn_c)
              end if
           end if
-          ! <<< --- END ADDED DEBUG CHECK --- >>>
 
         end do ! i
       end do ! j
     end do ! k
-
-    ! --- DEBUG PRINT: Indicate successful completion (Optional: Uncomment if needed) ---
-    ! write(*,*) "[Fortran] tortuosity_fillmtx finished."
-    ! --- END DEBUG PRINT ---
 
   end subroutine tortuosity_fillmtx
 
