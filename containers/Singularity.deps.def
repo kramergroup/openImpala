@@ -187,10 +187,14 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     cd /tmp/build_src # Make sure we are in the right place
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
-    ./configure --prefix=${HYPRE_INSTALL_PREFIX} --with-MPI --enable-shared \
+    # *** MODIFIED LINE: Added --enable-struct ***
+    ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
+        --with-MPI \
+        --enable-shared \
+        --enable-struct \
         CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
 
-    # +++ ADDED: Check HYPRE configure results +++
+    # Check HYPRE configure results
     echo "--- Checking HYPRE Configuration ---"
     if [ -f "config.log" ]; then
         echo "Features enabled (from config.log grep):"
@@ -201,12 +205,10 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         grep -i "checking for.*sstruct.*yes" config.log || echo "  SStruct check not found or failed."
         echo "IJ:"
         grep -i "checking for.*ij.*yes" config.log || echo "  IJ check not found or failed."
-        # Optionally, add more specific greps if you know the exact configure check text
     else
         echo "WARNING: config.log not found after HYPRE configure."
     fi
     echo "----------------------------------"
-    # +++ END ADDED CHECK +++
 
     make -j$(nproc) && make install # Serial install
     cd ../.. && rm -rf hypre
