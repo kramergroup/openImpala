@@ -9,7 +9,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
 %labels
     Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 2.37-deps-amrex2503-hypre2320-test # <-- UPDATED Version Label
+    Version 2.37-deps-amrex2503-hypre2320-testfix # <-- UPDATED Version Label
 
 %post
     set -e # Ensure commands exit on error early
@@ -180,8 +180,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Building HYPRE ${HYPRE_VERSION} ---"
     cd /tmp/build_src
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
-    cd hypre/src
-    # Configure using default flags (Struct should be enabled by default)
+    cd hypre/src # Configure needs to be run from src directory
     ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --enable-shared \
@@ -190,31 +189,19 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     echo "--- Making HYPRE library ---"
     make -j$(nproc)
 
-    # *** ADDED: Run HYPRE's internal tests ***
+    # *** MODIFIED: Run 'make test' from top-level hypre directory ***
     echo "--- Running HYPRE internal tests (make test) ---"
-    # Run tests before install to use build dir paths. Capture output.
-    # Allow errors for now, just capture output. Add '|| true' if failure should not stop SIF build.
-    make test > /tmp/hypre_make_test.log 2>&1 || echo "WARNING: 'make test' in HYPRE failed. See hypre_make_test.log."
-    echo "--- Finished running HYPRE internal tests ---"
-    # *** END ADDED STEP ***
+    cd .. # Go up from src to the top-level hypre directory
+    # Redirect directly to the final location. Use '|| true' to prevent SIF build failure if tests fail.
+    make test > /hypre_make_test.log 2>&1 || true
+    echo "--- Finished running HYPRE internal tests (Log at /hypre_make_test.log) ---"
+    # *** END MODIFIED STEP ***
 
     echo "--- Installing HYPRE ---"
-    make install # Serial install
+    make install # Install usually run from top-level or src, check hypre docs if needed
 
-    cd ../.. # Go back to /tmp/build_src
-    # Copy the test log out before removing the source dir
-    if [ -f "hypre/src/hypre_make_test.log" ]; then
-        cp hypre/src/hypre_make_test.log /hypre_make_test.log
-        echo "Copied hypre_make_test.log to /"
-    else
-        # If make test failed very early, the log might be in the top hypre dir
-         if [ -f "hypre/hypre_make_test.log" ]; then
-             cp hypre/hypre_make_test.log /hypre_make_test.log
-             echo "Copied hypre_make_test.log from hypre/ to /"
-         else
-             echo "WARNING: Could not find hypre_make_test.log in hypre/src/ or hypre/"
-         fi
-    fi
+    cd .. # Go back to /tmp/build_src
+    # Log file should be at /hypre_make_test.log, no copy needed here
     rm -rf hypre # Clean up source
 
     ldconfig # Ensure new HYPRE libs are found by linker
@@ -228,60 +215,42 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
 
     echo "--- %post section completed successfully ---"
 
+# --- %environment, %test, %runscript sections remain the same ---
 %environment
-    # Define environment referencing the FINAL locations
     source /opt/rh/gcc-toolset-11/enable
     export LC_ALL=C; export LANG=C
-
-    # Define versions (match versions used in %post)
     export OPENMPI_VERSION=4.1.6
-    export AMREX_VERSION=25.03     # AMReX version
-    export HYPRE_VERSION=v2.32.0   # HYPRE version
+    export AMREX_VERSION=25.03
+    export HYPRE_VERSION=v2.32.0
     export HDF5_VERSION=1.12.3
     export LIBTIFF_VERSION=4.6.0
-
-    # Define Install Prefixes
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     export OPENMPI_INSTALL_PREFIX=/usr/local
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
     export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
-
-    # Define HOME vars
     export AMREX_HOME=${AMREX_INSTALL_PREFIX}
     export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
     export HDF5_HOME=${HDF5_INSTALL_PREFIX}
     export H5CPP_HOME=${HDF5_HOME}
     export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX}
-
-    # PATH: Prepend installed bins
     export PATH=${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${LIBTIFF_INSTALL_PREFIX}/bin:${HDF5_HOME}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
-
-    # LD_LIBRARY_PATH: Prepend installed libs
     export LD_LIBRARY_PATH=${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${LIBTIFF_INSTALL_PREFIX}/lib:${HDF5_HOME}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
-
-    # CMAKE_PREFIX_PATH
     export CMAKE_PREFIX_PATH=${AMREX_HOME}:${HYPRE_HOME}:${LIBTIFF_INSTALL_PREFIX}:${HDF5_HOME}:${OPENMPI_INSTALL_PREFIX}:${CMAKE_PREFIX_PATH}
-
     export OMPI_MCA_btl_vader_single_copy_mechanism=none; export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %test
-    # Test section remains mostly the same, but will use updated libraries
     set -e
     source /opt/rh/gcc-toolset-11/enable
-    # Source the runtime environment defined in %environment for tests
-
-    # Define prefixes needed for tests (Match %environment)
     export HDF5_VERSION=1.12.3
     export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
-    export AMREX_VERSION=25.03     # Updated for verification
+    export AMREX_VERSION=25.03
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
-    export HYPRE_VERSION=v2.32.0   # Updated for verification
+    export HYPRE_VERSION=v2.32.0
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     export OPENMPI_INSTALL_PREFIX=/usr/local
     export LIBTIFF_VERSION=4.6.0
     export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
-
     echo "--- Verifying Tool Versions ---";
     echo "Checking mpicc..."; which mpicc; mpicc --version
     echo "Checking mpic++..."; which mpic++; mpic++ --version
@@ -295,35 +264,27 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
         echo "*** ERROR: Could not confirm tiffinfo version ${LIBTIFF_VERSION} in output!"
         exit 1
     fi
-
     echo "--- Verifying Library Linking ---"
-    # These paths should now point to the new versions via environment vars
     LIBTIFF_LIB="${TIFF_HOME}/lib/libtiff.so"
     if [ ! -f "$LIBTIFF_LIB" ]; then echo "*** ERROR: Custom libtiff library not found at $LIBTIFF_LIB!"; exit 1; fi
     echo "Checking libtiff lib ($LIBTIFF_LIB)..."; ldd "$LIBTIFF_LIB"
-
     HDF5_LIB="${HDF5_HOME}/lib/libhdf5.so"
     if [ ! -f "$HDF5_LIB" ]; then echo "*** ERROR: HDF5 library not found at $HDF5_LIB!"; exit 1; fi
     echo "Checking HDF5 lib ($HDF5_LIB)..."; ldd "$HDF5_LIB"
-
     AMREX_LIB="${AMREX_HOME}/lib/libamrex.so"
     if [ ! -f "$AMREX_LIB" ]; then echo "*** ERROR: AMReX library not found at $AMREX_LIB!"; exit 1; fi
     echo "Checking AMReX lib ($AMREX_LIB)..."; ldd "$AMREX_LIB"
-
     HYPRE_LIB="${HYPRE_HOME}/lib/libHYPRE.so"
     if [ ! -f "$HYPRE_LIB" ]; then echo "*** ERROR: HYPRE library not found at $HYPRE_LIB!"; exit 1; fi
     echo "Checking HYPRE lib ($HYPRE_LIB)..."; ldd "$HYPRE_LIB"
-
     MPI_LIB="${OPENMPI_INSTALL_PREFIX}/lib/libmpi.so"
     if [ ! -f "$MPI_LIB" ]; then echo "*** ERROR: OpenMPI library not found at $MPI_LIB!"; exit 1; fi
     echo "Checking OpenMPI lib ($MPI_LIB)..."; ldd "$MPI_LIB"
-
-
     echo "--- Basic dependency container tests passed. ---"
 
 %runscript
     echo "Container with build environment (GCC 11) and runtime dependencies for OpenImpala."
-    echo "Using AMReX ${AMREX_VERSION}, HYPRE ${HYPRE_VERSION}." # Updated info
+    echo "Using AMReX ${AMREX_VERSION}, HYPRE ${HYPRE_VERSION}."
     echo "Includes custom build of libtiff ${LIBTIFF_VERSION}."
     echo "Does not contain OpenImpala itself. Intended for use with CI caching."
 
