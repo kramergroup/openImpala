@@ -185,26 +185,20 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     cd /tmp/build_src # Make sure we are in the right place
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src
+
+    # +++ ADDED: Display configure help +++
+    echo "--- HYPRE Configure Help Output ---"
+    ./configure --help || echo "Configure help failed, continuing..." # Allow build to continue even if help fails
+    echo "-----------------------------------"
+    # +++ END ADDED HELP CHECK +++
+
     # Configure line *without* --enable-struct
     ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --enable-shared \
         CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
 
-    # +++ MODIFIED: Broad Search in HYPRE config.log +++
-    echo "--- Dumping HYPRE config.log relevant sections (Broad Search) ---"
-    if [ -f "config.log" ]; then
-        echo "Context for 'Struct' (case-insensitive):"
-        # Print context around 'Struct' checks (-A after, -B before)
-        grep -A 3 -B 3 -i 'Struct' config.log || echo "  'Struct' lines not found."
-        echo "---"
-        echo "Context for 'structured' (case-insensitive):"
-        grep -A 3 -B 3 -i 'structured' config.log || echo "  'structured' lines not found."
-    else
-        echo "WARNING: config.log not found after HYPRE configure."
-    fi
-    echo "----------------------------------"
-    # +++ END MODIFIED CHECK +++
+    # Removed config.log checks as they were uninformative
 
     make -j$(nproc) && make install # Serial install
     cd ../.. && rm -rf hypre
