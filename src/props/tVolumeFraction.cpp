@@ -40,7 +40,7 @@
 
 // Default relative path to the sample TIFF file
 // IMPORTANT: Assumes this file exists relative to execution path
-const std::string default_tiff_filename = "data/SampleData_2Phase.tif";
+const std::string default_tiff_filename = "data/SampleData_2Phase_stack_3d_1bit.tif";
 // Output directory relative to executable location
 const std::string test_output_dir = "tVolumeFraction_output"; // Renamed output dir
 
