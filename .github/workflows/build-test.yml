@@ -134,12 +134,12 @@ jobs:
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c "cd /src && \
-                     echo '--- Running ls -l:' && \
-                     ls -l \"${TARGET_FILE}\" && \
-                     echo '--- Running file command:' && \
-                     file \"${TARGET_FILE}\" && \
-                     echo '--- Running tiffinfo:' && \
-                     tiffinfo \"${TARGET_FILE}\"" || echo "::warning::Checking test file failed, proceeding anyway..."
+                      echo '--- Running ls -l:' && \
+                      ls -l \"${TARGET_FILE}\" && \
+                      echo '--- Running file command:' && \
+                      file \"${TARGET_FILE}\" && \
+                      echo '--- Running tiffinfo:' && \
+                      tiffinfo \"${TARGET_FILE}\"" || echo "::warning::Checking test file failed, proceeding anyway..."
           echo "Finished checking test file status."
 
       # Step 10: Run Tests and Copy Backtrace <<< RENUMBERED (was Step 9)
@@ -159,9 +159,9 @@ jobs:
           TEST_EXIT_CODE=$?
           # Check if timeout occurred (exit code 124 for GNU timeout)
           if [ $TEST_EXIT_CODE -eq 124 ]; then
-             echo "::error::Test step timed out after 20 minutes!"
-             # The job will fail later based on steps.make_test.outcome == 'failure' anyway,
-             # but this provides an explicit error message in the logs.
+              echo "::error::Test step timed out after 20 minutes!"
+              # The job will fail later based on steps.make_test.outcome == 'failure' anyway,
+              # but this provides an explicit error message in the logs.
           fi
           echo "Make test exit code: $TEST_EXIT_CODE"
 
@@ -182,7 +182,7 @@ jobs:
           exit $TEST_EXIT_CODE
 
       # Step 11: Upload Test Log and Backtrace <<< RENUMBERED (was Step 10)
-      - name: Upload Test Log and Backtrace
+      - name: Upload Test Log and Backtrace Artifacts # <<< RENAMED STEP SLIGHTLY
         # This step runs even if make_test failed (due to continue-on-error), but only if build succeeded
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -191,8 +191,9 @@ jobs:
           path: |
             make_test_output.log
             Backtrace.*
+            debug_matrix_BEFORE_loop.log   # <<< ADDED THIS LINE
           retention-days: 5
-          if-no-files-found: warn # Use warn instead of error if no backtrace files found
+          if-no-files-found: warn # Use warn instead of error if no backtrace/debug files found
 
       # Step 12: Explicitly fail the JOB if the make test step failed <<< RENUMBERED (was Step 11)
       - name: Check test outcome
