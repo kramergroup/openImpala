@@ -22,7 +22,8 @@
 #include <AMReX_ParmParse.H>
 #include <AMReX_Vector.H>
 #include <AMReX_Array.H>
-// #include <AMReX_ParallelFor.H> // <<< REMOVED THIS INCLUDE >>>
+#include <AMReX_GpuQualifiers.H> // Needed for AMREX_HOST_DEVICE_FOR_BOX if used
+#include <AMReX_Box.H>           // Needed for Box operations
 
 // HYPRE includes
 #include <HYPRE.h>
@@ -416,9 +417,10 @@ bool OpenImpala::TortuosityHypre::solve() {
             auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
             HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
             if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed in solve() for plotfile!"); }
-            // *** FIX: Use AMREX_HOST_DEVICE_FOR_BOX for copy ***
+
+            // *** Reverted to AMREX_HOST_DEVICE_FOR_BOX for copy ***
             amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
-            AMREX_HOST_DEVICE_FOR_BOX(bx, i, j, k) { // Use the macro here
+            AMREX_HOST_DEVICE_FOR_BOX(bx, i, j, k) {
                 amrex::IntVect iv(i,j,k);
                 long long linear_offset = bx.index(iv);
                 if (linear_offset >= 0 && linear_offset < npts) {
@@ -533,9 +535,9 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
         if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed in global_fluxes!"); }
 
-        // *** FIX: Use AMREX_HOST_DEVICE_FOR_BOX for copy ***
+        // *** Reverted to AMREX_HOST_DEVICE_FOR_BOX for copy ***
         amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
-        AMREX_HOST_DEVICE_FOR_BOX(bx, i, j, k) { // Use the macro here
+        AMREX_HOST_DEVICE_FOR_BOX(bx, i, j, k) {
              amrex::IntVect iv(i,j,k);
              long long linear_offset = bx.index(iv);
              if (linear_offset >= 0 && linear_offset < npts) {
@@ -567,8 +569,8 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         amrex::Real grad, flux;
         amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
 
-        // *** FIX: Use AMREX_HOST_DEVICE_FOR_BOX for flux calculation loops ***
-        AMREX_HOST_DEVICE_FOR_BOX(lobox, i, j, k) { // Use the macro here
+        // *** Reverted to AMREX_HOST_DEVICE_FOR_BOX for flux calculation loops ***
+        AMREX_HOST_DEVICE_FOR_BOX(lobox, i, j, k) {
              if (phase(i,j,k) == m_phase) {
                  grad = (soln(i,j,k) - soln(i-shift[0], j-shift[1], k-shift[2])) / dx[idir];
                  flux = -grad;
@@ -576,7 +578,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
              }
         }
 
-        AMREX_HOST_DEVICE_FOR_BOX(hibox, i, j, k) { // Use the macro here
+        AMREX_HOST_DEVICE_FOR_BOX(hibox, i, j, k) {
              if (phase(i,j,k) == m_phase) {
                  grad = (soln(i+shift[0], j+shift[1], k+shift[2]) - soln(i,j,k)) / dx[idir];
                  flux = -grad;
