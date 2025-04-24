@@ -28,7 +28,7 @@
 
 // Default relative path to the sample TIFF file
 // *** Make sure this points to a valid TIFF file (Striped or Tiled) ***
-const std::string default_tiff_filename = "data/SampleData_2Phase.tif";
+const std::string default_tiff_filename = "data/SampleData_2Phase_stack_3d_1bit.tif";
 // Output directory relative to executable location
 const std::string test_output_dir = "tTiffReader_output";
 // Default threshold value (adjust based on sample data)
