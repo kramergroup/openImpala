@@ -21,6 +21,11 @@
 #include <limits>    // For numeric_limits
 #include <memory>    // For std::unique_ptr
 #include <iomanip>   // For std::setprecision
+#include <stdio.h>   // For fprintf in HYPRE_Init check
+
+#include <HYPRE.h>   // <<< ADDED: Include main HYPRE header >>>
+#include <mpi.h>     // <<< ADDED: Include MPI header for MPI_Finalize >>>
+
 
 // Helper function to convert string to Direction enum
 // (Assumes Direction enum exists in OpenImpala namespace)
@@ -59,8 +64,27 @@ OpenImpala::TortuosityHypre::SolverType stringToSolverType(const std::string& so
 
 int main (int argc, char* argv[])
 {
+    // --- Try Initializing HYPRE First ---
+    // Note: AMReX_Initialize will handle MPI_Init if not already called,
+    // but HYPRE_Init might need MPI to be initialized first depending on its build.
+    // It's generally safer to let AMReX handle MPI_Init first.
+    // However, for debugging this specific issue, we try HYPRE_Init first.
+    // If this causes MPI issues, revert this change.
+    int hypre_ierr = HYPRE_Init();
+    if (hypre_ierr != 0) {
+         // Basic error print if HYPRE_Init fails
+         // Note: Cannot use amrex::Print before amrex::Initialize
+         fprintf(stderr, "FATAL ERROR: HYPRE_Init() failed with code %d\n", hypre_ierr);
+         // Attempt to finalize MPI if it might have been implicitly initialized by HYPRE
+         // This is speculative and might not be necessary or correct.
+         // MPI_Finalize();
+         return 1;
+    }
+    // --- End HYPRE Init ---
+
+
     amrex::Initialize(argc, argv);
-    {
+    { // Start AMReX scope
         amrex::Real strt_time = amrex::second();
 
         // --- Configuration via ParmParse ---
@@ -81,10 +105,8 @@ int main (int argc, char* argv[])
 
         {
             amrex::ParmParse pp; // Default scope
-            // Use get! Abort if tifffile is not provided in the inputs file.
             pp.get("tifffile", tifffile);
 
-            // Results directory: Try ParmParse first, then default
             if (!pp.query("resultsdir", resultsdir)) {
                 const char* homeDir_cstr = getenv("HOME");
                 if (!homeDir_cstr) {
@@ -92,31 +114,29 @@ int main (int argc, char* argv[])
                     resultsdir = "./tortuosity_results";
                 } else {
                     std::string homeDir = homeDir_cstr;
-                    resultsdir = homeDir + "/openimpalaresults"; // Assumes Unix '/' separator
+                    resultsdir = homeDir + "/openimpalaresults";
                 }
-                 if(amrex::ParallelDescriptor::IOProcessor()) // Print only once
+                 if(amrex::ParallelDescriptor::IOProcessor())
                     amrex::Print() << " Parameter 'resultsdir' not specified, using default: " << resultsdir << "\n";
             }
 
-            pp.query("phase_id", phase_id); // Which phase ID to analyze (e.g., 1 after thresholding)
+            pp.query("phase_id", phase_id);
             pp.query("direction", direction_str);
             pp.query("solver", solver_str);
             pp.query("box_size", box_size);
             pp.query("verbose", verbose);
-            pp.query("write_plotfile", write_plotfile); // Control plotfile generation
+            pp.query("write_plotfile", write_plotfile);
             pp.query("expected_vf", expected_vf);
             pp.query("expected_tau", expected_tau);
             pp.query("tolerance", tolerance);
-            pp.query("threshold_val", threshold_val); // Allow overriding threshold value
-            pp.query("v_lo", v_lo); // Allow overriding BC potential
-            pp.query("v_hi", v_hi); // Allow overriding BC potential
+            pp.query("threshold_val", threshold_val);
+            pp.query("v_lo", v_lo);
+            pp.query("v_hi", v_hi);
         }
 
-        // Convert string parameters to enums
         OpenImpala::Direction direction = stringToDirection(direction_str);
         OpenImpala::TortuosityHypre::SolverType solver_type = stringToSolverType(solver_str);
 
-        // Print configuration (only Rank 0)
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Tortuosity Test Configuration ---\n";
             amrex::Print() << " TIF File:               " << tifffile << "\n";
@@ -127,7 +147,7 @@ int main (int argc, char* argv[])
             amrex::Print() << " Solver:                 " << solver_str << "\n";
             amrex::Print() << " Box Size:               " << box_size << "\n";
             amrex::Print() << " Verbose:                " << verbose << "\n";
-            amrex::Print() << " Write Plotfile:         " << write_plotfile << "\n"; // Print the int value read
+            amrex::Print() << " Write Plotfile:         " << write_plotfile << "\n";
             amrex::Print() << " Comparison Tolerance:   " << tolerance << "\n";
             amrex::Print() << " Boundary Potential Lo:  " << v_lo << "\n";
             amrex::Print() << " Boundary Potential Hi:  " << v_hi << "\n";
@@ -136,18 +156,14 @@ int main (int argc, char* argv[])
             amrex::Print() << "------------------------------------\n\n";
         }
 
-        // Define AMReX objects
         amrex::Geometry geom;
-        amrex::BoxArray ba_original; // Keep original name for clarity
-        amrex::DistributionMapping dm_original; // Keep original name
-        // Declare the final iMultiFab (with ghost cells) needed by TortuosityHypre
+        amrex::BoxArray ba_original;
+        amrex::DistributionMapping dm_original;
         amrex::iMultiFab mf_phase_with_ghost;
 
-        // --- Read TIFF Metadata and Setup Grids/Geometry ---
         try {
-            // Read metadata only first
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Reading metadata from " << tifffile << "...\n";
-            OpenImpala::TiffReader reader(tifffile); // Reads metadata in constructor
+            OpenImpala::TiffReader reader(tifffile);
             if (!reader.isRead()) {
                 throw std::runtime_error("Reader failed to read metadata (isRead() is false).");
             }
@@ -157,47 +173,39 @@ int main (int argc, char* argv[])
                 throw std::runtime_error("Reader returned an empty domain box after metadata read.");
             }
 
-            // Define physical domain size and geometry
             amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)},
                               {AMREX_D_DECL(amrex::Real(domain_box.length(0)),
                                             amrex::Real(domain_box.length(1)),
                                             amrex::Real(domain_box.length(2)))});
-            amrex::Array<int,AMREX_SPACEDIM> is_periodic{AMREX_D_DECL(0, 0, 0)}; // Non-periodic
+            amrex::Array<int,AMREX_SPACEDIM> is_periodic{AMREX_D_DECL(0, 0, 0)};
             geom.define(domain_box, &rb, 0, is_periodic.data());
 
-            // *** Build ORIGINAL BoxArray and DistributionMapping based on box_size ***
             ba_original.define(domain_box);
             ba_original.maxSize(box_size);
             dm_original.define(ba_original);
 
-            // *** Step 1: Create temporary iMultiFab with 0 ghost cells using ORIGINAL BA/DM ***
-            amrex::iMultiFab mf_phase_no_ghost(ba_original, dm_original, 1, 0); // Nghost=0
-            mf_phase_no_ghost.setVal(-1); // Initialize (optional)
+            amrex::iMultiFab mf_phase_no_ghost(ba_original, dm_original, 1, 0);
+            mf_phase_no_ghost.setVal(-1);
 
-            // *** Step 2: Call reader threshold into the 0-ghost cell MultiFab ***
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << " Thresholding data (Phase=1 if > " << threshold_val << ", else 0) into temporary MF...\n";
             }
-            reader.threshold(threshold_val, 1, 0, mf_phase_no_ghost); // Output 1 if > thresh, else 0
+            reader.threshold(threshold_val, 1, 0, mf_phase_no_ghost);
 
-            // *** Verification Step (Optional but Recommended) ***
             int min_phase_tmp = mf_phase_no_ghost.min(0);
             int max_phase_tmp = mf_phase_no_ghost.max(0);
              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
                   amrex::Print() << "    Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n";
              }
-             if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) { // Check numPts > 0
+             if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) {
                   amrex::Abort("FAIL: Phase field is uniform after thresholding! Check threshold/data.");
              }
 
-            // *** Step 3: Define the final phase MultiFab with 1 ghost cell using ORIGINAL BA/DM ***
             const int required_ghost_cells = 1;
             mf_phase_with_ghost.define(ba_original, dm_original, 1, required_ghost_cells);
 
-            // *** Step 4: Copy data from 0-ghost MF to ghosted MF (valid regions) ***
-            amrex::Copy(mf_phase_with_ghost, mf_phase_no_ghost, 0, 0, 1, 0); // Comp 0 to Comp 0, 1 component, 0 src ghost
+            amrex::Copy(mf_phase_with_ghost, mf_phase_no_ghost, 0, 0, 1, 0);
 
-            // *** Step 5: Fill ghost cells of the final MultiFab ***
             mf_phase_with_ghost.FillBoundary(geom.periodicity());
 
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Grid and phase data setup complete.\n";
@@ -206,10 +214,9 @@ int main (int argc, char* argv[])
             amrex::Abort("Error during TiffReader processing or grid setup: " + std::string(e.what()));
         }
 
-        // --- Calculate and Verify Volume Fraction ---
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Volume Fraction for phase " << phase_id << "...\n";
         OpenImpala::VolumeFraction vf(mf_phase_with_ghost, phase_id);
-        amrex::Real actual_vf = vf.value(false); // Get global value
+        amrex::Real actual_vf = vf.value(false);
 
          if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Volume Fraction: " << actual_vf << "\n";
         if (expected_vf >= 0.0) {
@@ -225,38 +232,31 @@ int main (int argc, char* argv[])
               if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
          }
 
-
-        // --- Calculate and Verify Tortuosity ---
-
-        // Ensure results directory exists (only IOProcessor needs to create)
         if (!resultsdir.empty() && amrex::ParallelDescriptor::IOProcessor()) {
             if (!amrex::UtilCreateDirectory(resultsdir, 0755)) {
                 amrex::Warning("Could not create results directory: " + resultsdir);
             }
         }
-        amrex::ParallelDescriptor::Barrier(); // Ensure directory exists before others proceed
+        amrex::ParallelDescriptor::Barrier();
 
         amrex::Real actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN();
-        if (actual_vf > 0.0) // Only calculate if volume fraction is non-zero
+        if (actual_vf > 0.0)
         {
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Tortuosity for phase " << phase_id << " in direction " << direction_str << " using " << solver_str << "...\n";
 
-            // <<< --- REMOVED THE DEBUGGING STEP THAT CREATED simplified_ba/dm --- >>>
-
-            // *** Pass the GHOSTED MultiFab and ORIGINAL BA/DM to TortuosityHypre constructor ***
             OpenImpala::TortuosityHypre tortuosity(
                 geom,
-                ba_original,         // <--- Use original BoxArray
-                dm_original,         // <--- Use original DistributionMapping
-                mf_phase_with_ghost, // Use the original ghosted phase data
+                ba_original,
+                dm_original,
+                mf_phase_with_ghost,
                 actual_vf, phase_id, direction,
                 solver_type, resultsdir,
-                v_lo, v_hi, // Use potentials read from ParmParse or defaults
+                v_lo, v_hi,
                 verbose,
-                (write_plotfile != 0) // Pass boolean plotfile flag
+                (write_plotfile != 0)
             );
 
-            actual_tau = tortuosity.value(); // Calculate tortuosity (will likely fail inside if setup fails)
+            actual_tau = tortuosity.value();
         } else {
              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Skipping Tortuosity calculation because Volume Fraction is zero.\n";
         }
@@ -278,14 +278,24 @@ int main (int argc, char* argv[])
              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
         }
 
-        // --- Success & Timing ---
          if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
 
         amrex::Real stop_time = amrex::second() - strt_time;
         amrex::ParallelDescriptor::ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber());
          if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Run time = " << stop_time << " sec\n";
 
-    } // End of scope for AMReX objects
+    } // End of AMReX scope
     amrex::Finalize();
+
+    // --- Finalize HYPRE Last ---
+    hypre_ierr = HYPRE_Finalize();
+     if (hypre_ierr != 0) {
+         // Use fprintf as amrex::Print might not be available after amrex::Finalize
+         fprintf(stderr, "ERROR: HYPRE_Finalize() failed with code %d\n", hypre_ierr);
+         // Return non-zero to indicate potential issue during cleanup
+         return 1;
+     }
+    // --- End HYPRE Finalize ---
+
     return 0; // Indicate success
 }
