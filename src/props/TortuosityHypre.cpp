@@ -402,11 +402,11 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
         // Failing call:
-        ierr = HYPRE_StructVectorSetBoxValues(m_b, hypre_lo.data(), hypre_hi.data(), rhs_values.data());
-        HYPRE_CHECK(ierr); // This triggers the abort
+        //ierr = HYPRE_StructVectorSetBoxValues(m_b, hypre_lo.data(), hypre_hi.data(), rhs_values.data());
+        //HYPRE_CHECK(ierr); // This triggers the abort
 
-        ierr = HYPRE_StructVectorSetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), initial_guess.data());
-        HYPRE_CHECK(ierr);
+        //ierr = HYPRE_StructVectorSetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), initial_guess.data());
+       // HYPRE_CHECK(ierr);
     } // End MFIter loop
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
