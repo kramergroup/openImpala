@@ -12,12 +12,14 @@
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Print.H>
 #include <AMReX_PlotFileUtil.H>    // Include for plotfile writing if enabled
+#include <AMReX_MultiFabUtil.H>    // For amrex::Copy
 
 #include <cstdlib>   // For getenv
 #include <string>    // For std::string
 #include <stdexcept> // For std::runtime_error (optional error handling)
 #include <cmath>     // For std::abs
 #include <limits>    // For numeric_limits
+#include <memory>    // For std::unique_ptr
 
 // Helper function to convert string to Direction enum
 // (Assumes Direction enum exists in OpenImpala namespace)
@@ -79,7 +81,7 @@ int main (int argc, char* argv[])
             // Use get! Abort if tifffile is not provided in the inputs file.
             pp.get("tifffile", tifffile);
 
-            // Results directory: Try ParmParse first, then default to $HOME/openimpalaresults
+            // Results directory: Try ParmParse first, then default
             if (!pp.query("resultsdir", resultsdir)) {
                 const char* homeDir_cstr = getenv("HOME");
                 if (!homeDir_cstr) {
@@ -131,16 +133,16 @@ int main (int argc, char* argv[])
         amrex::Geometry geom;
         amrex::BoxArray ba;
         amrex::DistributionMapping dm;
-        amrex::iMultiFab mf_phase; // Phase data MultiFab
+        // Declare the final iMultiFab (with ghost cells) needed by TortuosityHypre
+        amrex::iMultiFab mf_phase_with_ghost;
 
         // --- Read TIFF Metadata and Setup Grids/Geometry ---
         try {
             // Read metadata only first
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Reading metadata from " << tifffile << "...\n";
-            // TiffReader constructor reads metadata via Rank 0 + Bcast
-            OpenImpala::TiffReader reader(tifffile);
+            OpenImpala::TiffReader reader(tifffile); // Reads metadata in constructor
             if (!reader.isRead()) {
-                 throw std::runtime_error("Reader failed to read metadata (isRead() is false).");
+                throw std::runtime_error("Reader failed to read metadata (isRead() is false).");
             }
 
             const amrex::Box domain_box = reader.box();
@@ -148,7 +150,7 @@ int main (int argc, char* argv[])
                 throw std::runtime_error("Reader returned an empty domain box after metadata read.");
             }
 
-            // Define physical domain size
+            // Define physical domain size and geometry
             amrex::RealBox rb({AMREX_D_DECL(0.0, 0.0, 0.0)},
                               {AMREX_D_DECL(amrex::Real(domain_box.length(0)),
                                             amrex::Real(domain_box.length(1)),
@@ -161,41 +163,37 @@ int main (int argc, char* argv[])
             ba.maxSize(box_size);
             dm.define(ba);
 
-            // Define the phase MultiFab with 1 component and 1 ghost cell layer
-            mf_phase.define(ba, dm, 1, 1);
-            mf_phase.setVal(-1); // Initialize with sentinel value
+            // *** Step 1: Create temporary iMultiFab with 0 ghost cells for reader ***
+            amrex::iMultiFab mf_phase_no_ghost(ba, dm, 1, 0); // Nghost=0
+            mf_phase_no_ghost.setVal(-1); // Initialize (optional)
 
-            // *** Corrected Thresholding Call ***
-            // Use the threshold value to segment the data into phases 0 and 1.
-            // Assumes phase '1' is the target phase if pixel > threshold_val.
+            // *** Step 2: Call reader threshold into the 0-ghost cell MultiFab ***
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << " Thresholding data (Phase=1 if > " << threshold_val << ", else 0)...\n";
+                 amrex::Print() << " Thresholding data (Phase=1 if > " << threshold_val << ", else 0) into temporary MF...\n";
             }
-            reader.threshold(threshold_val, 1, 0, mf_phase); // Output 1 if > thresh, else 0
+            reader.threshold(threshold_val, 1, 0, mf_phase_no_ghost); // Output 1 if > thresh, else 0
 
-            // *** Verification Step for Phase Field ***
-            int min_phase = mf_phase.min(0); // Component 0
-            int max_phase = mf_phase.max(0);
+            // *** Verification Step (Optional but Recommended) ***
+            int min_phase_tmp = mf_phase_no_ghost.min(0);
+            int max_phase_tmp = mf_phase_no_ghost.max(0);
              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "  Phase field min/max after thresholding: " << min_phase << " / " << max_phase << "\n";
+                 amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n";
              }
-            // If min == max, the thresholding likely failed to segment the phases,
-            // which will cause problems for the tortuosity calculation.
-            if (min_phase == max_phase) {
-                amrex::Abort("FAIL: Phase field (mf_phase) is uniform after thresholding! Check threshold value ("
-                             + std::to_string(threshold_val) + ") and input TIFF data range.");
-            }
-            // Check if the target phase_id actually exists in the thresholded data
-            bool target_phase_present = (phase_id == min_phase || phase_id == max_phase);
-            if (!target_phase_present && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Warning("Target phase_id " + std::to_string(phase_id) + " not found in thresholded data range ["
-                                + std::to_string(min_phase) + ", " + std::to_string(max_phase) + "]. Tortuosity might be ill-defined.");
-                 // Don't necessarily abort, maybe VF calculation handles this, but warn.
-            }
+             if (min_phase_tmp == max_phase_tmp) {
+                 amrex::Abort("FAIL: Phase field is uniform after thresholding! Check threshold/data.");
+             }
 
+            // *** Step 3: Define the final phase MultiFab with 1 ghost cell ***
+            // TortuosityHypre constructor requires >= 1 ghost cell
+            const int required_ghost_cells = 1;
+            mf_phase_with_ghost.define(ba, dm, 1, required_ghost_cells);
 
-            // Fill ghost cells based on neighboring valid data
-            mf_phase.FillBoundary(geom.periodicity());
+            // *** Step 4: Copy data from 0-ghost MF to ghosted MF (valid regions) ***
+            amrex::Copy(mf_phase_with_ghost, mf_phase_no_ghost, 0, 0, 1, 0); // Comp 0 to Comp 0, 1 component, 0 src ghost
+
+            // *** Step 5: Fill ghost cells of the final MultiFab ***
+            // This is crucial for TortuosityHypre's preconditioner/solver steps
+            mf_phase_with_ghost.FillBoundary(geom.periodicity());
 
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Grid and phase data setup complete.\n";
 
@@ -204,13 +202,13 @@ int main (int argc, char* argv[])
         }
 
         // --- Calculate and Verify Volume Fraction ---
+        // Use the final ghosted MultiFab for consistency, although VF only needs valid region
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Volume Fraction for phase " << phase_id << "...\n";
-        // VolumeFraction constructor likely takes the iMultiFab and the target phase ID
-        OpenImpala::VolumeFraction vf(mf_phase, phase_id);
+        OpenImpala::VolumeFraction vf(mf_phase_with_ghost, phase_id);
         amrex::Real actual_vf = vf.value(false); // Get global value
 
         if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Volume Fraction: " << actual_vf << "\n";
-        if (expected_vf >= 0.0) { // Check only if an expected value was provided
+        if (expected_vf >= 0.0) {
              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Expected Volume Fraction:   " << expected_vf << "\n";
             if (std::abs(actual_vf - expected_vf) > tolerance) {
                 amrex::Abort("FAIL: Volume Fraction mismatch. Diff: " + std::to_string(std::abs(actual_vf - expected_vf)));
@@ -220,8 +218,7 @@ int main (int argc, char* argv[])
              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
         }
          if (actual_vf <= 0.0) {
-              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
-              // Depending on expected behavior, could abort or just expect NaN/Inf tortuosity
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Warning: Volume fraction for target phase " << phase_id << " is zero or negative. Tortuosity is ill-defined." << std::endl;
          }
 
 
@@ -231,7 +228,6 @@ int main (int argc, char* argv[])
         if (!resultsdir.empty() && amrex::ParallelDescriptor::IOProcessor()) {
             if (!amrex::UtilCreateDirectory(resultsdir, 0755)) {
                 amrex::Warning("Could not create results directory: " + resultsdir);
-                // Proceed, but plotfile writing in TortuosityHypre might fail
             }
         }
         amrex::ParallelDescriptor::Barrier(); // Ensure directory exists before others proceed
@@ -241,22 +237,18 @@ int main (int argc, char* argv[])
         {
             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Tortuosity for phase " << phase_id << " in direction " << direction_str << " using " << solver_str << "...\n";
 
-            // Create Tortuosity object
-            // Adjust parameters based on the actual TortuosityHypre constructor signature.
-            // Pass the verbose level from this test down to the class.
-            OpenImpala::TortuosityHypre tortuosity(geom, ba, dm, mf_phase, actual_vf, phase_id, direction, solver_type, resultsdir, 1.0, 0.0, verbose); // Default Vhi=1, Vlo=0
+            // *** Step 6: Pass the ghosted MultiFab to TortuosityHypre constructor ***
+            OpenImpala::TortuosityHypre tortuosity(geom, ba, dm, mf_phase_with_ghost, actual_vf, phase_id, direction, solver_type, resultsdir, 1.0, 0.0, verbose); // Default Vhi=1, Vlo=0
 
             actual_tau = tortuosity.value(); // Calculate tortuosity
         } else {
              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Skipping Tortuosity calculation because Volume Fraction is zero.\n";
-             // Leave actual_tau as NaN or set to a specific value like 0 or Inf? Depends on definition.
         }
 
 
         if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Tortuosity:    " << actual_tau << "\n";
-        if (expected_tau >= 0.0) { // Check only if an expected value was provided
+        if (expected_tau >= 0.0) {
              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Expected Tortuosity:    " << expected_tau << "\n";
-            // Check for valid number before comparison
             bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
             bool expected_is_invalid = std::isnan(expected_tau) || std::isinf(expected_tau);
 
