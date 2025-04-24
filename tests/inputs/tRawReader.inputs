@@ -1,6 +1,6 @@
 # tests/inputs/tRawReader.inputs
 
-rawfile = data/SampleData_2Phase.raw
+rawfile = data/SampleData_2Phase_stack_3d_uint8.raw
 width   = 100  # Replace with actual width if different
 height  = 100  # Replace with actual height if different
 depth   = 100  # Replace with actual depth if different
