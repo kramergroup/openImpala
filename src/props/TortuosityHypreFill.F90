@@ -31,7 +31,7 @@ contains
 
   ! ::: -----------------------------------------------------------
   ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
-  ! ::: Includes debug prints to check array indices.
+  ! ::: Includes debug prints to check array indices and diagonal entries.
   ! ::: -----------------------------------------------------------
   subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
                                 bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir) bind(c)
@@ -102,10 +102,10 @@ contains
           if (m_idx == 1 .or. m_idx == nval) then
               print_debug_info = .true.
               write(*,'(A,I9,A,I9,A,I9,A,I9,A,I9)') "[Fortran] Point (i,j,k,m_idx):", &
-                   i, ",", j, ",", k, " -> m_idx=", m_idx, &
-                   ", stencil_start_idx=", stencil_idx_start
+                     i, ",", j, ",", k, " -> m_idx=", m_idx, &
+                     ", stencil_start_idx=", stencil_idx_start
               ! Note: Fortran rhs/xinit are 1-based, C++ a is 0-based
-              write(*,'(A,I9,A,I9)') "         Bounds: rhs/xinit(1:", nval, "), a(0:", nval*nstencil-1, ")"
+              write(*,'(A,I9,A,I9)') "          Bounds: rhs/xinit(1:", nval, "), a(0:", nval*nstencil-1, ")"
           end if
           ! --- END DEBUG PRINT ---
 
@@ -141,7 +141,7 @@ contains
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Center term absorbs flux
-                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                      ! No connection to neighbor
+                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                        ! No connection to neighbor
               end if
               ! +X face
               if ( p(i+1,j,k,comp_phase) .ne. phase ) then
@@ -173,6 +173,7 @@ contains
 
           ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
           ! Check using global i,j,k indices against domain bounds domlo/domhi
+          ! This check happens *after* the fluid/blocked check and Neumann modifications
           ! X-Direction Flow
           if ( dir == direction_x ) then
               if ( i == domlo(1) ) then
@@ -237,6 +238,16 @@ contains
           else ! Should not happen if dir is 0, 1, or 2
               xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
           end if
+
+          ! <<< --- ADDED DEBUG CHECK for near-zero diagonals --- >>>
+          ! Check the diagonal coefficient AFTER all modifications (Neumann, Dirichlet)
+          ! Only check for cells belonging to the phase being simulated.
+          if ( p(i,j,k,comp_phase) == phase ) then
+             if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
+                write(*,'(A,3I5,A,ES10.3)') "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, " value=", a(stencil_idx_start + istn_c)
+             end if
+          end if
+          ! <<< --- END ADDED DEBUG CHECK --- >>>
 
         end do ! i
       end do ! j
