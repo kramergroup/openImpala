@@ -28,7 +28,7 @@ jobs:
       - name: Set up Apptainer
         uses: eWaterCycle/setup-apptainer@v2
         with:
-          apptainer-version: 1.2.5
+          apptainer-version: 1.2.5 # Or your desired version
 
       # Step 3: Restore Dependency SIF Cache
       - name: Restore Dependency SIF Cache
@@ -36,6 +36,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: dependency_image.sif
+          # Key includes hash of the definition file
           key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
           restore-keys: |
             ${{ runner.os }}-apptainer-sif-
@@ -57,6 +58,7 @@ jobs:
           fi
           echo "Cache miss or invalid. Building dependencies SIF image '$TARGET_SIF' from $RECIPE_FILE..."
           echo "Executing: sudo apptainer build --force \"$TARGET_SIF\" \"$RECIPE_FILE\""
+          # Build the SIF image using Apptainer
           sudo apptainer build --force "$TARGET_SIF" "$RECIPE_FILE"
           BUILD_EXIT_CODE=$?
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
@@ -77,7 +79,33 @@ jobs:
             ls -lh ./dependency_image.sif
           fi
 
-      # Step 6: Save the SIF image to the cache <<< MOVED & RENUMBERED (was Step 12)
+      # *** ADDED: Step 5.5: Copy HYPRE Test Log from Container ***
+      - name: Copy HYPRE Test Log from Container
+        # Run only if SIF exists (built or restored)
+        if: steps.cache-restore-sif.outputs.cache-hit == 'true' || -f './dependency_image.sif'
+        run: |
+          # Check if the log file exists inside the container at the expected path
+          if sudo apptainer exec ./dependency_image.sif test -f /hypre_make_test.log; then
+            echo "Copying /hypre_make_test.log..."
+            # Execute 'cat' inside the container and redirect output to a file on the host
+            sudo apptainer exec ./dependency_image.sif cat /hypre_make_test.log > ./hypre_make_test.log
+            ls -l ./hypre_make_test.log # Verify the file was created on the host
+          else
+            echo "HYPRE test log /hypre_make_test.log not found in container."
+          fi
+        continue-on-error: true # Don't fail workflow if log copy fails (e.g., test didn't run)
+
+      # *** ADDED: Step 5.6: Upload HYPRE Test Log Artifact ***
+      - name: Upload HYPRE Test Log Artifact
+        if: always() # Upload even if copy step had issues, might be empty or non-existent
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypre-make-test-log-${{ github.run_id }}
+          path: hypre_make_test.log # Path on the host runner
+          retention-days: 5
+          if-no-files-found: warn # Use 'warn' if the file might not exist
+
+      # Step 6: Save the SIF image to the cache (only if built)
       - name: Save Dependency SIF Image Cache
         # Condition: Only run if Step 3 missed cache (meaning Step 4 ran and *succeeded*)
         if: steps.cache-restore-sif.outputs.cache-hit != 'true'
@@ -86,29 +114,32 @@ jobs:
           path: dependency_image.sif
           key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
 
-      # Step 7: Build OpenImpala using Dependency SIF <<< RENUMBERED (was Step 6)
+      # Step 7: Build OpenImpala using Dependency SIF
       - name: Build OpenImpala using Dependency SIF
         id: make_build
         continue-on-error: true # Allow logs to upload even if build fails
         run: |
           echo "Running make clean..."
+          # Execute make clean inside the container
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make clean'
 
           echo "Running make all..."
+          # Execute make all inside the container, redirect output to log file
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)' > make_build_output.log 2>&1
           MAKE_EXIT_CODE=$?
           echo "Make build exit code: $MAKE_EXIT_CODE"
+          # Exit the step with the make exit code
           exit $MAKE_EXIT_CODE
 
-      # Step 8: Upload Build Log <<< RENUMBERED (was Step 7)
+      # Step 8: Upload Build Log
       - name: Upload Build Log
-        if: always()
+        if: always() # Always run to upload log even if build failed
         uses: actions/upload-artifact@v4
         with:
           name: make-build-log-${{ github.run_id }}
@@ -116,38 +147,40 @@ jobs:
           retention-days: 5
           if-no-files-found: warn
 
-      # Step 9: Explicitly fail the JOB if the make build step failed <<< RENUMBERED (was Step 8)
+      # Step 9: Explicitly fail the JOB if the make build step failed
       - name: Check build outcome
         if: steps.make_build.outcome == 'failure'
         run: |
           echo "Make build command failed. See uploaded 'make-build-log' artifact for details."
           exit 1 # Job stops here if make build failed
 
-      # Step 9.5: Check Test TIFF File Before Running Tests
+      # Step 9.5: Check Test TIFF File Before Running Tests (Optional debug)
       - name: Check Test TIFF File Status Inside Container
         # Run only if build succeeded, before running tests
         if: steps.make_build.outcome == 'success'
         run: |
           echo "Checking status of data/SampleData_2Phase.tif inside container..."
-          TARGET_FILE="data/SampleData_2Phase.tif"
+          TARGET_FILE="data/SampleData_2Phase.tif" # Adjust filename if needed
+          # Execute commands inside container to check the file
           sudo apptainer exec \
             --bind $PWD:/src \
             ./dependency_image.sif \
             bash -c "cd /src && \
-                      echo '--- Running ls -l:' && \
-                      ls -l \"${TARGET_FILE}\" && \
-                      echo '--- Running file command:' && \
-                      file \"${TARGET_FILE}\" && \
-                      echo '--- Running tiffinfo:' && \
-                      tiffinfo \"${TARGET_FILE}\"" || echo "::warning::Checking test file failed, proceeding anyway..."
+                     echo '--- Running ls -l:' && \
+                     ls -l \"${TARGET_FILE}\" && \
+                     echo '--- Running file command:' && \
+                     file \"${TARGET_FILE}\" && \
+                     echo '--- Running tiffinfo:' && \
+                     tiffinfo \"${TARGET_FILE}\"" || echo "::warning::Checking test file failed, proceeding anyway..."
           echo "Finished checking test file status."
+        continue-on-error: true # Don't fail workflow if this check fails
 
-      # Step 10: Run Tests and Copy Backtrace <<< RENUMBERED (was Step 9)
+      # Step 10: Run Tests and Copy Backtrace
       - name: Run Tests and Copy Backtrace
         id: make_test
         # This step is only reached if the build (Step 7/9) succeeded
         if: steps.make_build.outcome == 'success'
-        continue-on-error: true # Keep this true
+        continue-on-error: true # Keep this true to allow log/artifact upload on test failure
         run: |
           echo "Running make test..."
           # Add timeout (e.g., 1200 seconds = 20 minutes). Adjust time as needed.
@@ -181,8 +214,8 @@ jobs:
           echo "Exiting step with original test code: $TEST_EXIT_CODE"
           exit $TEST_EXIT_CODE
 
-      # Step 11: Upload Test Log and Backtrace <<< RENUMBERED (was Step 10)
-      - name: Upload Test Log and Backtrace Artifacts # <<< RENAMED STEP SLIGHTLY
+      # Step 11: Upload Test Log and Backtrace
+      - name: Upload Test Log and Backtrace Artifacts
         # This step runs even if make_test failed (due to continue-on-error), but only if build succeeded
         if: always() && steps.make_build.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -191,14 +224,15 @@ jobs:
           path: |
             make_test_output.log
             Backtrace.*
-            debug_matrix_BEFORE_loop.log   # <<< ADDED THIS LINE
+            debug_matrix_state.log # Keep this if you added matrix printing
           retention-days: 5
           if-no-files-found: warn # Use warn instead of error if no backtrace/debug files found
 
-      # Step 12: Explicitly fail the JOB if the make test step failed <<< RENUMBERED (was Step 11)
+      # Step 12: Explicitly fail the JOB if the make test step failed
       - name: Check test outcome
         # This step is only reached if the build (Step 7/9) succeeded
         if: steps.make_build.outcome == 'success' && steps.make_test.outcome == 'failure'
         run: |
           echo "Make test command failed. See uploaded 'make-test-output' artifact for details."
           exit 1 # Job stops here if make test failed
+
