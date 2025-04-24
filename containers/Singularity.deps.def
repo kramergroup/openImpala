@@ -186,7 +186,7 @@ From: quay.io/rockylinux/rockylinux:8 # Using Quay.io
     cd /tmp/build_src
     git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
     cd hypre/src # Configure needs to be run from src directory
-    ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
+    LDFLAGS="-fopenmp" ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
         --with-MPI \
         --with-openmp \
         --enable-shared \
