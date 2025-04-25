@@ -11,7 +11,7 @@
 #include <AMReX_Geometry.H> // Include Geometry explicitly
 #include <AMReX_Array.H>    // Needed for return type of loV/hiV
 
-#include <HYPRE.h>           // Main HYPRE header
+#include <HYPRE.h>          // Main HYPRE header
 #include <HYPRE_struct_ls.h> // Struct interface header (should provide HYPRE_Int)
 
 #include "Tortuosity.H" // Assumed to define OpenImpala::Tortuosity and OpenImpala::Direction
@@ -36,7 +36,8 @@ public:
         Jacobi,     /**< HYPRE_StructJacobi */
         GMRES,      /**< HYPRE_StructGMRES */
         FlexGMRES,  /**< HYPRE_StructFlexGMRES */
-        PCG         /**< HYPRE_StructPCG */
+        PCG,        /**< HYPRE_StructPCG */
+        BiCGSTAB    /**< HYPRE_StructBiCGSTAB */  // <<< ADDED
     };
 
     /** Construct new Tortuosity solver using HYPRE.
