@@ -514,7 +514,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     // --- FlexGMRES Solver ---
     else if (m_solvertype == SolverType::FlexGMRES) {
         // NOTE: Using DEFAULT PFMG settings here
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with Default PFMG Preconditioner..." << std::endl;
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with Tuned PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
         HYPRE_StructFlexGMRESSetTol(solver, m_eps);
@@ -522,15 +522,15 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructFlexGMRESSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
         // HYPRE_StructFlexGMRESSetKDim(solver, k_dim);
 
-        // --- Setup Default PFMG Preconditioner ---
+        // --- Setup Tuned PFMG Preconditioner ---
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
         HYPRE_CHECK(ierr);
         HYPRE_StructPFMGSetTol(precond, 0.0);
         HYPRE_StructPFMGSetMaxIter(precond, 1);
-        HYPRE_StructPFMGSetRelaxType(precond, 1); // Default: Weighted Jacobi
-        HYPRE_StructPFMGSetNumPreRelax(precond, 1); // Default: 1 sweep
-        HYPRE_StructPFMGSetNumPostRelax(precond, 1);// Default: 1 sweep
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (default settings)." << std::endl;
+        HYPRE_StructPFMGSetRelaxType(precond, 6);   // Tuned: Red-Black G-S
+        HYPRE_StructPFMGSetNumPreRelax(precond, 2); // Tuned: 2 sweeps
+        HYPRE_StructPFMGSetNumPostRelax(precond, 2);// Tuned: 2 sweeps
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (TUNED settings)." << std::endl;
         // --- End PFMG Setup ---
 
         // Set PFMG as the preconditioner for FlexGMRES
