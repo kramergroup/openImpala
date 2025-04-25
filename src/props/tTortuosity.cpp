@@ -21,6 +21,7 @@
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
+#include <AMReX_Exception.H>
 
 #include <sstream>
 
