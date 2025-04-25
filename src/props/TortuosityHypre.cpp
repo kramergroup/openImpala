@@ -28,7 +28,7 @@
 
 // HYPRE includes
 #include <HYPRE.h>
-#include <HYPRE_struct_ls.h> // Includes headers for SMG, PFMG, Jacobi, PCG, GMRES etc.
+#include <HYPRE_struct_ls.h> // Includes headers for SMG, PFMG, Jacobi, PCG, GMRES, BiCGSTAB, FlexGMRES etc.
 #include <HYPRE_struct_mv.h>
 
 // Define HYPRE error checking macro
@@ -406,7 +406,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// <<< MODIFIED: Reverted PFMG settings for GMRES to default for testing >>>
+// <<< MODIFIED: Added BiCGSTAB and FlexGMRES options with default PFMG >>>
 bool OpenImpala::TortuosityHypre::solve() {
     HYPRE_Int ierr = 0;
     HYPRE_StructSolver solver;
@@ -417,7 +417,7 @@ bool OpenImpala::TortuosityHypre::solve() {
 
     // --- PCG Solver ---
     if (m_solvertype == SolverType::PCG) {
-        // NOTE: Using TUNED PFMG settings here, as PCG had input errors before.
+        // NOTE: Using TUNED PFMG settings here based on previous attempt
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE PCG Solver with Tuned PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
@@ -466,7 +466,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     }
     // --- GMRES Solver ---
     else if (m_solvertype == SolverType::GMRES) {
-        // NOTE: Using DEFAULT PFMG settings here for debugging memory error
+        // NOTE: Using DEFAULT PFMG settings here based on previous debugging step
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE GMRES Solver with Default PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
@@ -479,7 +479,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         // --- Setup Default PFMG Preconditioner ---
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
         HYPRE_CHECK(ierr);
-        // Set standard PFMG parameters for use as a preconditioner (Reverted for debugging)
+        // Set standard PFMG parameters for use as a preconditioner
         HYPRE_StructPFMGSetTol(precond, 0.0);
         HYPRE_StructPFMGSetMaxIter(precond, 1);
         HYPRE_StructPFMGSetRelaxType(precond, 1); // Default: Weighted Jacobi
@@ -514,10 +514,101 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructGMRESDestroy(solver);
         if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
     }
-    // --- FlexGMRES Solver ---
+    // --- FlexGMRES Solver ---  <<< NEWLY IMPLEMENTED >>>
     else if (m_solvertype == SolverType::FlexGMRES) {
-         amrex::Abort("FlexGMRES not fully implemented yet in TortuosityHypre::solve");
-         // If implemented, would likely use PFMG preconditioning similarly to GMRES
+        // NOTE: Using DEFAULT PFMG settings here for initial testing
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with Default PFMG Preconditioner..." << std::endl;
+        ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver);
+        HYPRE_CHECK(ierr);
+        HYPRE_StructFlexGMRESSetTol(solver, m_eps);
+        HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter);
+        HYPRE_StructFlexGMRESSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
+        // Optionally set Krylov dimension
+        // HYPRE_StructFlexGMRESSetKDim(solver, k_dim);
+
+        // --- Setup Default PFMG Preconditioner ---
+        ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
+        HYPRE_CHECK(ierr);
+        HYPRE_StructPFMGSetTol(precond, 0.0);
+        HYPRE_StructPFMGSetMaxIter(precond, 1);
+        HYPRE_StructPFMGSetRelaxType(precond, 1); // Default: Weighted Jacobi
+        HYPRE_StructPFMGSetNumPreRelax(precond, 1); // Default: 1 sweep
+        HYPRE_StructPFMGSetNumPostRelax(precond, 1);// Default: 1 sweep
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (default settings)." << std::endl;
+        // --- End PFMG Setup ---
+
+        // Set PFMG as the preconditioner for FlexGMRES
+        HYPRE_StructFlexGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
+         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG set as preconditioner for FlexGMRES." << std::endl;
+
+        // Setup and Solve
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructFlexGMRESSetup..." << std::endl;
+        ierr = HYPRE_StructFlexGMRESSetup(solver, m_A, m_b, m_x);
+        HYPRE_CHECK(ierr);
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructFlexGMRESSolve..." << std::endl;
+        ierr = HYPRE_StructFlexGMRESSolve(solver, m_A, m_b, m_x);
+         // Check for convergence issues
+        if (ierr == HYPRE_ERROR_CONV) {
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE FlexGMRES solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+        } else if (ierr != 0) {
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE FlexGMRES solve returned error code " << ierr << ". Possible divergence or other issue.\n";
+             // HYPRE_CHECK(ierr); // Optionally abort on any error
+        }
+
+        // Get stats
+        HYPRE_StructFlexGMRESGetNumIterations(solver, &m_num_iterations);
+        HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
+
+        // Clean up
+        HYPRE_StructFlexGMRESDestroy(solver);
+        if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
+    }
+    // --- BiCGSTAB Solver --- <<< NEWLY IMPLEMENTED >>>
+    else if (m_solvertype == SolverType::BiCGSTAB) {
+        // NOTE: Using DEFAULT PFMG settings here for initial testing
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver with Default PFMG Preconditioner..." << std::endl;
+        ierr = HYPRE_StructBiCGSTABCreate(MPI_COMM_WORLD, &solver);
+        HYPRE_CHECK(ierr);
+        HYPRE_StructBiCGSTABSetTol(solver, m_eps);
+        HYPRE_StructBiCGSTABSetMaxIter(solver, m_maxiter);
+        HYPRE_StructBiCGSTABSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
+
+        // --- Setup Default PFMG Preconditioner ---
+        ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
+        HYPRE_CHECK(ierr);
+        HYPRE_StructPFMGSetTol(precond, 0.0);
+        HYPRE_StructPFMGSetMaxIter(precond, 1);
+        HYPRE_StructPFMGSetRelaxType(precond, 1); // Default: Weighted Jacobi
+        HYPRE_StructPFMGSetNumPreRelax(precond, 1); // Default: 1 sweep
+        HYPRE_StructPFMGSetNumPostRelax(precond, 1);// Default: 1 sweep
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (default settings)." << std::endl;
+        // --- End PFMG Setup ---
+
+        // Set PFMG as preconditioner for BiCGSTAB
+        HYPRE_StructBiCGSTABSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG set as preconditioner for BiCGSTAB." << std::endl;
+
+        // Setup and Solve
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructBiCGSTABSetup..." << std::endl;
+        ierr = HYPRE_StructBiCGSTABSetup(solver, m_A, m_b, m_x);
+        HYPRE_CHECK(ierr);
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructBiCGSTABSolve..." << std::endl;
+        ierr = HYPRE_StructBiCGSTABSolve(solver, m_A, m_b, m_x);
+        // Check for convergence issues
+        if (ierr == HYPRE_ERROR_CONV) {
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+        } else if (ierr != 0) {
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solve returned error code " << ierr << ". Possible divergence or other issue.\n";
+             // HYPRE_CHECK(ierr); // Optionally abort on any error
+        }
+
+        // Get stats
+        HYPRE_StructBiCGSTABGetNumIterations(solver, &m_num_iterations);
+        HYPRE_StructBiCGSTABGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
+
+        // Clean up
+        HYPRE_StructBiCGSTABDestroy(solver);
+        if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
     }
     // --- Jacobi Solver ---
     else if (m_solvertype == SolverType::Jacobi) {
@@ -538,12 +629,8 @@ bool OpenImpala::TortuosityHypre::solve() {
          HYPRE_StructJacobiGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
          HYPRE_StructJacobiDestroy(solver);
     }
-    // --- BiCGSTAB Solver (Optional Addition Placeholder) ---
-    // else if (m_solvertype == SolverType::BiCGSTAB) { // Need to add BiCGSTAB to SolverType enum
-    //    // ... Implementation would go here, using tuned or default PFMG ...
-    // }
     else {
-        amrex::Abort("Unsupported solver type requested in TortuosityHypre::solve");
+        amrex::Abort("Unsupported solver type requested in TortuosityHypre::solve: " + std::to_string(static_cast<int>(m_solvertype)));
     }
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
