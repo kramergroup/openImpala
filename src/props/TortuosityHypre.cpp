@@ -456,22 +456,26 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         amrex::Box outlet_intersect = validBox & domain_hi_face;
          if (!outlet_intersect.isEmpty()) {
             // <<< FIX: Correct lambda signature >>>
-            amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // <<< ADDED int k
+            amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // <<< CORRECTED: Added int k
                  // Use PhaseComp consistently
-                 if (phase_arr(i, j, k, PhaseComp) == phaseID) { // <<< USE k
+                 if (phase_arr(i, j, k, PhaseComp) == phaseID) { // <<< CORRECTED: Use k
                     local_outlet_seeds.push_back(amrex::IntVect(i,j,k));
                 }
             });
         }
     } // End MFIter for seeds
 
-    // Gather all seeds to all processes
-    amrex::Vector<amrex::IntVect> inlet_seeds;
-    amrex::Vector<amrex::IntVect> outlet_seeds;
-    // <<< FIX: Use Gatherv (lowercase v) >>>
-    amrex::ParallelDescriptor::Gatherv(local_inlet_seeds, inlet_seeds, -1); // Gather to all ranks (-1)
-    amrex::ParallelDescriptor::Gatherv(local_outlet_seeds, outlet_seeds, -1);
-    // Make seeds unique (optional but good practice)
+    // --- Gather all seeds using AllGather ---
+    amrex::Vector<amrex::IntVect> inlet_seeds;  // Will hold seeds from all ranks
+    amrex::Vector<amrex::IntVect> outlet_seeds; // Will hold seeds from all ranks
+
+    // <<< FIX: Use AllGather instead of Gatherv >>>
+    amrex::ParallelDescriptor::AllGather(local_inlet_seeds, inlet_seeds);
+    amrex::ParallelDescriptor::AllGather(local_outlet_seeds, outlet_seeds);
+    // --- End Seed Gathering ---
+
+
+    // Make seeds unique (now on the globally gathered vectors)
     std::sort(inlet_seeds.begin(), inlet_seeds.end());
     inlet_seeds.erase(std::unique(inlet_seeds.begin(), inlet_seeds.end()), inlet_seeds.end());
     std::sort(outlet_seeds.begin(), outlet_seeds.end());
@@ -487,6 +491,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         m_mf_active_mask.FillBoundary(m_geom.periodicity());
         return; // Exit early
     }
+
 
     // --- Perform flood fills ---
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Performing flood fill from inlet..." << std::endl;
@@ -539,19 +544,23 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
      if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
         // <<< FIX: Correct volume calculation >>>
         amrex::Long local_active_volume = 0; // <<< FIX: Use amrex::Long
-        // <<< FIX: Remove "for" from #pragma >>>
+        // <<< FIX: Remove "for" from #pragma, use correct MFIter ctor >>>
         #ifdef AMREX_USE_OMP
         #pragma omp parallel reduction(+:local_active_volume) if (amrex::Gpu::notInLaunchRegion())
         #endif
-        for (amrex::MFIter mfi(m_mf_active_mask, true); mfi.isValid(); ++mfi) { // Iterate with Tiling
+        // Iterate using TilingIfNotGPU for potential OMP efficiency inside loop
+        for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             const amrex::Box& tileBox = mfi.tilebox();
             const auto& mask_arr = m_mf_active_mask.const_array(mfi); // Use const_array
+            // Using local reduction variable within parallel loop for summing
+            amrex::Long loop_local_sum = 0;
             amrex::LoopOnCpu(tileBox, [&](int i, int j, int k) {
                 if (mask_arr(i, j, k, MaskComp) == cell_active) {
-                    local_active_volume += 1;
+                    loop_local_sum += 1;
                 }
             });
-        }
+            local_active_volume += loop_local_sum; // Add tile sum to thread-local sum
+        } // End MFIter
         amrex::Long global_active_volume = local_active_volume; // <<< FIX: Use amrex::Long
         // <<< FIX: Use ReduceLongSum >>>
         amrex::ParallelDescriptor::ReduceLongSum(global_active_volume);
@@ -939,13 +948,12 @@ bool OpenImpala::TortuosityHypre::solve() {
     }
 
     // --- Write plot file if requested ---
-    // <<< MODIFIED to include mask in plot file >>>
+    // (Plot file writing logic unchanged from previous version)
     if (m_write_plotfile) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
              amrex::Print() << "  Writing solution plotfile..." << std::endl;
         }
         // Create MultiFab for plotting (potential + phase + mask)
-        // Use numComponentsPhi which is now 3
         amrex::MultiFab mf_plot(m_ba, m_dm, numComponentsPhi, 0); // No ghost cells needed for plotfile
 
         // Create temporary MultiFab to copy solution from HYPRE vector
@@ -991,11 +999,11 @@ bool OpenImpala::TortuosityHypre::solve() {
 
         // Copy solution, phase, and mask data into the plot MultiFab
         amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0); // Temporary Real MF for mask
-        // <<< Use amrex::Copy >>>
         amrex::Copy(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0); // Copy active mask (comp 0) to temp MF (comp 0)
 
         amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);      // Solution to component 0
-        amrex::Copy(mf_plot, m_mf_phase, PhaseComp, 1, 1, 0); // <<< FIX: Copy correct PhaseComp from m_mf_phase
+        // <<< FIX: Copy correct PhaseComp from m_mf_phase >>>
+        amrex::Copy(mf_plot, m_mf_phase, PhaseComp, 1, 1, 0); // Phase ID (comp PhaseComp) to component 1
         amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);      // Active Mask to component 2
 
 
@@ -1133,7 +1141,7 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
 
 // --- Calculate Global Fluxes Across Domain Boundaries ---
 // <<< MODIFIED to use active_mask when calculating flux >>>
-// <<< FIX: Remove const qualifier >>>
+// <<< REMOVED const qualifier >>>
 void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) /* const removed */
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
@@ -1187,8 +1195,8 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     }
     // Fill ghost cells of the solution MultiFab
     mf_soln_temp.FillBoundary(m_geom.periodicity());
-    // <<< FIX: Call FillBoundary on non-const mask >>>
-    m_mf_active_mask.FillBoundary(m_geom.periodicity());
+    // Fill mask ghost cells as it's used below (needs to be non-const for this)
+    m_mf_active_mask.FillBoundary(m_geom.periodicity()); // <<< Call on non-const mask
 
     // --- Calculate flux using finite differences on mf_soln_temp ---
     amrex::Real local_fxin = 0.0;
