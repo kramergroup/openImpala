@@ -13,6 +13,7 @@
 #include <AMReX_Print.H>
 #include <AMReX_PlotFileUtil.H>     // Include for plotfile writing if enabled
 #include <AMReX_MultiFabUtil.H>     // For amrex::Copy
+#include <AMReX_Exception.H>
 
 #include <cstdlib>   // For getenv
 #include <string>    // For std::string
