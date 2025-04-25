@@ -1,31 +1,30 @@
-# Input file for tTortuosity test
+# Input file for tTortuosity test using PFMG preconditioner
 
 # Path to the input image file used to define the geometry/phases.
 tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
 
 # --- Tortuosity specific parameters ---
 
-# Set these explicitly based on your test case needs.
-# Examples:
-# phase_id = 1             # ID of the phase to calculate tortuosity for (MUST BE SET if not default in C++)
-# direction = 0            # 0=X, 1=Y, 2=Z (MUST BE SET if not default in C++)
-# solver_type = GMRES      # Solver type (e.g., GMRES, PCG, FlexGMRES, Jacobi)
+# Set explicitly which solver to test with the new PFMG preconditioner
+phase_id = 1          # ID of the phase to calculate tortuosity for
+direction = X         # X, Y, or Z
+solver = PCG          # Test PCG solver first with PFMG (GMRES is another option)
 
-# --- Solver Controls (Crucial for Debugging/Testing) ---
-# Reduce iterations and loosen tolerance to check for hangs/slowness quickly.
-# Increase maxiter and tighten eps for production runs or accuracy tests.
-hypre.maxiter = 50      # Max solver iterations (Reduced for faster testing/debugging hangs)
-hypre.eps = 1e-6        # Solver relative tolerance (Loosened for faster testing)
+# --- Solver Controls ---
+# Allow sufficient iterations for the potentially more effective PFMG preconditioner.
+# Tolerance remains reasonably loose for testing speed.
+hypre.maxiter = 200     # Max solver iterations (Increased to allow PFMG convergence)
+hypre.eps = 1e-6        # Solver relative tolerance
 
 # --- Test Verbosity ---
-# Increase verbosity for more detailed output during test run.
-# Assumes TortuosityHypre class checks this value.
+# High verbosity for detailed HYPRE/solver output during debugging.
 verbose = 2
 
 # Optional output file (usually not needed for automated tests)
 # output_file = tort.txt
 
-# Expected values for verification (Optional - set if known for the sample data)
-# expected_vf = 0.5
-# expected_tau = 2.0
-# tolerance = 1e-6      # Tolerance for comparing expected vs actual values
+# Expected values for verification (Optional - set if known for this specific test setup)
+# If uncommented, ensures the calculated value matches expectation.
+# expected_vf = 0.382848 # Value from previous log run
+# expected_tau = ???.??  # Replace ???.?? with the known correct value if available
+# tolerance = 1e-5       # Tolerance for comparing expected vs actual values (adjust as needed)
