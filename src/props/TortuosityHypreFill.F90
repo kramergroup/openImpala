@@ -31,18 +31,15 @@ contains
 
   ! ::: -----------------------------------------------------------
   ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
-  ! ::: Uses penalty method for blocked cells to improve conditioning.
-  ! ::: Includes debug prints to check array indices and diagonal entries.
+  ! ::: Uses explicit decoupling for blocked cells (Aii=1, Aij=0, bi=0).
   ! ::: -----------------------------------------------------------
   subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
                                 bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir) bind(c)
 
     ! Argument declarations
     integer,            intent(in)  :: nval
-    ! Fortran declaration uses 0-based indexing matching C++ std::vector
-    ! a: matrix coefficients (size nval * nstencil)
-    ! rhs: right-hand side vector (size nval)
-    ! xinit: initial guess vector (size nval)
+    ! Fortran declaration uses 0-based indexing matching C++ std::vector for 'a'
+    ! Fortran declaration uses 1-based indexing for 'rhs', 'xinit' matching loop calculation
     real(amrex_real), intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval)
     integer,            intent(in)  :: p_lo(3), p_hi(3) ! Bounds of the phase FAB (incl. ghost cells)
     integer,            intent(in)  :: bxlo(3), bxhi(3) ! Bounds of the current valid box (tilebox)
@@ -58,10 +55,7 @@ contains
     integer :: len_x, len_y, len_z, expected_nval
     real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
-    logical :: print_debug_info
-    ! Penalty factor for blocked cells
-    ! <<< MODIFIED: Reduced penalty factor significantly to avoid potential overflow >>>
-    real(amrex_real), parameter :: penalty_factor = 1.0e8_amrex_real
+    ! Removed penalty_factor parameter as it's no longer used
 
     ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
@@ -91,20 +85,20 @@ contains
           m_idx = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
           stencil_idx_start = nstencil * (m_idx - 1)
 
-          ! --- Set Base Stencil (Laplacian) for ALL points initially ---
-          a(stencil_idx_start + istn_c)  =  coeff_c
-          a(stencil_idx_start + istn_mx) = -coeff_x
-          a(stencil_idx_start + istn_px) = -coeff_x
-          a(stencil_idx_start + istn_my) = -coeff_y
-          a(stencil_idx_start + istn_py) = -coeff_y
-          a(stencil_idx_start + istn_mz) = -coeff_z
-          a(stencil_idx_start + istn_pz) = -coeff_z
-          rhs(m_idx) = 0.0_amrex_real ! Default RHS (Fortran uses 1-based index m_idx)
-
           ! --- Apply Modifications Based on Phase ---
           if ( p(i,j,k,comp_phase) == phase ) then
-              ! Fluid cell (conductive phase) - Apply Neumann at phase boundaries
+              ! Fluid cell (conductive phase)
+              ! --- Set Base Stencil (Laplacian) ---
+              a(stencil_idx_start + istn_c)  =  coeff_c
+              a(stencil_idx_start + istn_mx) = -coeff_x
+              a(stencil_idx_start + istn_px) = -coeff_x
+              a(stencil_idx_start + istn_my) = -coeff_y
+              a(stencil_idx_start + istn_py) = -coeff_y
+              a(stencil_idx_start + istn_mz) = -coeff_z
+              a(stencil_idx_start + istn_pz) = -coeff_z
+              rhs(m_idx) = 0.0_amrex_real ! Default RHS
 
+              ! --- Apply Neumann at phase boundaries ---
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Absorb flux
@@ -139,18 +133,17 @@ contains
 
           else
               ! Blocked cell (not the specified conductive phase)
-              ! --- Apply Penalty Method ---
-              ! Keep the base Laplacian stencil (already set)
-              ! Add penalty factor to the diagonal coefficient
-              a(stencil_idx_start + istn_c) = a(stencil_idx_start + istn_c) + penalty_factor
-              ! RHS becomes penalty * desired_value (which is 0 here)
-              rhs(m_idx) = penalty_factor * 0.0_amrex_real ! Still zero
+              ! --- Apply Explicit Decoupling (Aii=1, Aij=0, bi=0) ---
+              a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Zero out all stencil entries
+              a(stencil_idx_start + istn_c) = 1.0_amrex_real                           ! Set diagonal to 1
+              rhs(m_idx) = 0.0_amrex_real                                              ! Set RHS to 0
 
           end if ! End of fluid/blocked check
 
 
           ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
-          ! This applies to BOTH fluid and blocked cells if they fall on the boundary.
+          ! This applies AFTER the fluid/blocked logic, ensuring Dirichlet BCs take precedence
+          ! at the boundary, regardless of whether the boundary cell is fluid or blocked.
           ! X-Direction Flow
           if ( dir == direction_x ) then
               if ( i == domlo(1) ) then
@@ -187,40 +180,52 @@ contains
           end if ! End of Dirichlet BC overwrite
 
           ! --- Calculate Initial Guess ---
-          if ( dir == direction_x ) then
-              domain_extent = domhi(1) - domlo(1)
-              if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                  factor = 0.0_amrex_real
-              else
-                  factor = 1.0_amrex_real / domain_extent
-              end if
-              xinit(m_idx) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
-          else if ( dir == direction_y ) then
-              domain_extent = domhi(2) - domlo(2)
-              if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                  factor = 0.0_amrex_real
-              else
-                  factor = 1.0_amrex_real / domain_extent
-              end if
-              xinit(m_idx) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
-          else if ( dir == direction_z ) then
-              domain_extent = domhi(3) - domlo(3)
-              if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                  factor = 0.0_amrex_real
-              else
-                  factor = 1.0_amrex_real / domain_extent
-              end if
-              xinit(m_idx) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
-          else ! Should not happen if dir is 0, 1, or 2
-              xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
-          end if
-          ! Note: Fortran arrays rhs and xinit use 1-based index m_idx
-
-          ! --- Debug check for near-zero diagonals ---
+          ! Set initial guess to 0 for blocked cells, linear ramp for fluid cells
           if ( p(i,j,k,comp_phase) == phase ) then
-             if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
+              if ( dir == direction_x ) then
+                  domain_extent = domhi(1) - domlo(1)
+                  if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                      factor = 0.0_amrex_real
+                  else
+                      factor = 1.0_amrex_real / domain_extent
+                  end if
+                  xinit(m_idx) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
+              else if ( dir == direction_y ) then
+                  domain_extent = domhi(2) - domlo(2)
+                  if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                      factor = 0.0_amrex_real
+                  else
+                      factor = 1.0_amrex_real / domain_extent
+                  end if
+                  xinit(m_idx) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
+              else if ( dir == direction_z ) then
+                  domain_extent = domhi(3) - domlo(3)
+                  if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                      factor = 0.0_amrex_real
+                  else
+                      factor = 1.0_amrex_real / domain_extent
+                  end if
+                  xinit(m_idx) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
+              else ! Should not happen if dir is 0, 1, or 2
+                  xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
+              end if
+          else
+              ! Set initial guess in blocked cells explicitly to 0 (consistent with bi=0)
+              xinit(m_idx) = 0.0_amrex_real
+          end if
+          ! Note: Fortran array xinit uses 1-based index m_idx
+
+          ! --- Debug check for near-zero diagonals (Only for fluid cells now) ---
+          if ( p(i,j,k,comp_phase) == phase ) then
+             ! Check applies only if NOT on a Dirichlet boundary (where diagonal should be 1)
+             logical :: on_dirichlet_boundary = .false.
+             if (dir == direction_x .and. (i == domlo(1) .or. i == domhi(1))) on_dirichlet_boundary = .true.
+             if (dir == direction_y .and. (j == domlo(2) .or. j == domhi(2))) on_dirichlet_boundary = .true.
+             if (dir == direction_z .and. (k == domlo(3) .or. k == domhi(3))) on_dirichlet_boundary = .true.
+
+             if ( .not. on_dirichlet_boundary .and. abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
                  write(*,'(A,3I5,A,ES10.3)') &
-                       "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, &
+                       "WARNING: Near-zero diagonal at fluid cell (i,j,k)=", i,j,k, &
                        " value=", a(stencil_idx_start + istn_c)
              end if
           end if
