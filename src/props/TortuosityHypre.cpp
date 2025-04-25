@@ -406,7 +406,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// <<< MODIFIED to use PFMG instead of SMG >>>
+// <<< MODIFIED: Preconditioner TEMPORARILY disabled for GMRES debugging >>>
 bool OpenImpala::TortuosityHypre::solve() {
     HYPRE_Int ierr = 0;
     HYPRE_StructSolver solver;
@@ -417,6 +417,8 @@ bool OpenImpala::TortuosityHypre::solve() {
 
     // --- PCG Solver ---
     if (m_solvertype == SolverType::PCG) {
+        // NOTE: PCG still uses PFMG preconditioner here.
+        // To test unpreconditioned PCG, comment out precond setup below too.
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE PCG Solver with PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
@@ -435,7 +437,6 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructPFMGSetRelaxType(precond, 1); // Weighted Jacobi (often good for PFMG)
         HYPRE_StructPFMGSetNumPreRelax(precond, 1); // Number of pre-relaxation sweeps
         HYPRE_StructPFMGSetNumPostRelax(precond, 1);// Number of post-relaxation sweeps
-        // Add other PFMG options here if needed (e.g., HYPRE_StructPFMGSetRAPType, HYPRE_StructPFMGSetSkipRelax)
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured." << std::endl;
         // --- End PFMG Setup ---
 
@@ -453,10 +454,9 @@ bool OpenImpala::TortuosityHypre::solve() {
         if (ierr == HYPRE_ERROR_CONV) {
             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
         } else if (ierr != 0) {
-            // Check for other errors (like divergence -> NaN, indicated by HYPRE_ERROR_GENERIC)
+            // Check for other errors (like divergence -> NaN, indicated by HYPRE_ERROR_GENERIC or specific codes)
             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solve returned error code " << ierr << ". Possible divergence or other issue.\n";
-            // Optionally re-throw using HYPRE_CHECK(ierr); if any error should halt execution
-            // HYPRE_CHECK(ierr);
+            // HYPRE_CHECK(ierr); // Optionally abort on any error
         }
 
         // Get stats
@@ -469,7 +469,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     }
     // --- GMRES Solver ---
     else if (m_solvertype == SolverType::GMRES) {
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE GMRES Solver with PFMG Preconditioner..." << std::endl;
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE GMRES Solver (NO Preconditioner - DEBUG)..." << std::endl; // MODIFIED FOR DEBUG
         ierr = HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
         HYPRE_StructGMRESSetTol(solver, m_eps);
@@ -478,21 +478,25 @@ bool OpenImpala::TortuosityHypre::solve() {
         // Optionally set Krylov dimension (restart length) if default (30) is too small/large
         // HYPRE_StructGMRESSetKDim(solver, k_dim);
 
-        // --- Setup PFMG Preconditioner ---
-        ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
-        HYPRE_CHECK(ierr);
-        // Set standard PFMG parameters for use as a preconditioner
-        HYPRE_StructPFMGSetTol(precond, 0.0);
-        HYPRE_StructPFMGSetMaxIter(precond, 1);
-        HYPRE_StructPFMGSetRelaxType(precond, 1); // Weighted Jacobi
-        HYPRE_StructPFMGSetNumPreRelax(precond, 1);
-        HYPRE_StructPFMGSetNumPostRelax(precond, 1);
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured." << std::endl;
+        // --- Setup PFMG Preconditioner ---  <<< TEMPORARILY DISABLED FOR DEBUGGING >>>
+        // ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
+        // HYPRE_CHECK(ierr);
+        // // Set standard PFMG parameters for use as a preconditioner
+        // HYPRE_StructPFMGSetTol(precond, 0.0);
+        // HYPRE_StructPFMGSetMaxIter(precond, 1);
+        // HYPRE_StructPFMGSetRelaxType(precond, 1); // Weighted Jacobi
+        // HYPRE_StructPFMGSetNumPreRelax(precond, 1);
+        // HYPRE_StructPFMGSetNumPostRelax(precond, 1);
+        // if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (DISABLED FOR DEBUG)." << std::endl;
         // --- End PFMG Setup ---
 
-        // Set PFMG as the preconditioner for GMRES
-        HYPRE_StructGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG set as preconditioner for GMRES." << std::endl;
+        // --- Set PFMG as the preconditioner for GMRES --- <<< TEMPORARILY DISABLED FOR DEBUGGING >>>
+        // HYPRE_StructGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
+        // if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG set as preconditioner for GMRES (DISABLED FOR DEBUG)." << std::endl;
+        // --- Use NO Preconditioner ---
+         HYPRE_StructGMRESSetPrecond(solver, NULL, NULL, NULL); // Explicitly set no preconditioner
+         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running GMRES with NO preconditioner." << std::endl;
+
 
         // Setup and Solve
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructGMRESSetup..." << std::endl;
@@ -514,7 +518,7 @@ bool OpenImpala::TortuosityHypre::solve() {
 
         // Clean up
         HYPRE_StructGMRESDestroy(solver);
-        if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
+        // if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG <<< DISABLED FOR DEBUGGING >>>
     }
     // --- FlexGMRES Solver ---
     else if (m_solvertype == SolverType::FlexGMRES) {
