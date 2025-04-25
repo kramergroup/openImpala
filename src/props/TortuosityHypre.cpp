@@ -81,7 +81,7 @@ inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex:
 }
 
 // --- Constructor ---
-// (Unchanged from previous version)
+// (Unchanged)
 OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              const amrex::BoxArray& ba,
                                              const amrex::DistributionMapping& dm,
@@ -246,7 +246,7 @@ void OpenImpala::TortuosityHypre::setupStencil()
 }
 
 // --- Preprocess Phase Field (Example: Remove isolated spots iteratively) ---
-// (Unchanged, but could potentially be removed later if masking is sufficient)
+// (Unchanged)
 void OpenImpala::TortuosityHypre::preconditionPhaseFab()
 {
     BL_PROFILE("TortuosityHypre::preconditionPhaseFab"); // Add profile tag
@@ -291,8 +291,7 @@ void OpenImpala::TortuosityHypre::preconditionPhaseFab()
 
 
 // --- *** NEW METHOD: Parallel Flood Fill *** ---
-// Performs a parallel flood fill (iterative neighbor checking) on a mask
-// starting from seed points, constrained by the phase field.
+// (Unchanged)
 void OpenImpala::TortuosityHypre::parallelFloodFill(
     amrex::iMultiFab& reachabilityMask, // Mask to fill (1=reached, 0=not). Must have 1 ghost cell.
     const amrex::iMultiFab& phaseFab,   // Phase field (only fill within specified phase). Must have 1 ghost cell.
@@ -466,22 +465,57 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
     } // End MFIter for seeds
 
     // --- Gather all seeds using AllGather ---
-    // <<< FIX: Convert to std::vector for AllGather >>>
-    // 1. Convert local amrex::Vector to std::vector
-    std::vector<amrex::IntVect> std_local_inlet_seeds(local_inlet_seeds.begin(), local_inlet_seeds.end());
-    std::vector<amrex::IntVect> std_local_outlet_seeds(local_outlet_seeds.begin(), local_outlet_seeds.end());
+    // <<< FIX: Flatten IntVects to ints for AllGather >>>
 
-    // 2. Prepare std::vector to receive gathered data
-    std::vector<amrex::IntVect> std_inlet_seeds_gathered;
-    std::vector<amrex::IntVect> std_outlet_seeds_gathered;
+    // 1. Flatten local vectors of IntVects into vectors of ints
+    std::vector<int> flat_local_inlet_seeds;
+    flat_local_inlet_seeds.reserve(local_inlet_seeds.size() * AMREX_SPACEDIM);
+    for (const auto& iv : local_inlet_seeds) {
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+            flat_local_inlet_seeds.push_back(iv[d]);
+        }
+    }
 
-    // 3. Call AllGather with std::vectors
-    amrex::ParallelDescriptor::AllGather(std_local_inlet_seeds, std_inlet_seeds_gathered);
-    amrex::ParallelDescriptor::AllGather(std_local_outlet_seeds, std_outlet_seeds_gathered);
+    std::vector<int> flat_local_outlet_seeds;
+    flat_local_outlet_seeds.reserve(local_outlet_seeds.size() * AMREX_SPACEDIM);
+    for (const auto& iv : local_outlet_seeds) {
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+            flat_local_outlet_seeds.push_back(iv[d]);
+        }
+    }
 
-    // 4. Convert gathered std::vector back to amrex::Vector
-    amrex::Vector<amrex::IntVect> inlet_seeds(std_inlet_seeds_gathered.begin(), std_inlet_seeds_gathered.end());
-    amrex::Vector<amrex::IntVect> outlet_seeds(std_outlet_seeds_gathered.begin(), std_outlet_seeds_gathered.end());
+    // 2. Prepare vectors to receive gathered flattened data
+    std::vector<int> flat_inlet_seeds_gathered;
+    std::vector<int> flat_outlet_seeds_gathered;
+
+    // 3. Call AllGather with the flattened integer vectors
+    amrex::ParallelDescriptor::AllGather(flat_local_inlet_seeds, flat_inlet_seeds_gathered);
+    amrex::ParallelDescriptor::AllGather(flat_local_outlet_seeds, flat_outlet_seeds_gathered);
+
+    // 4. Unflatten the gathered integer vectors back into amrex::Vector<IntVect>
+    amrex::Vector<amrex::IntVect> inlet_seeds;
+    AMREX_ASSERT_WITH_MESSAGE(flat_inlet_seeds_gathered.size() % AMREX_SPACEDIM == 0,
+                              "Gathered inlet seed integer count not divisible by AMREX_SPACEDIM");
+    inlet_seeds.reserve(flat_inlet_seeds_gathered.size() / AMREX_SPACEDIM);
+    for (size_t i = 0; i < flat_inlet_seeds_gathered.size(); i += AMREX_SPACEDIM) {
+        amrex::IntVect iv;
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+            iv[d] = flat_inlet_seeds_gathered[i + d];
+        }
+        inlet_seeds.push_back(iv);
+    }
+
+    amrex::Vector<amrex::IntVect> outlet_seeds;
+    AMREX_ASSERT_WITH_MESSAGE(flat_outlet_seeds_gathered.size() % AMREX_SPACEDIM == 0,
+                              "Gathered outlet seed integer count not divisible by AMREX_SPACEDIM");
+    outlet_seeds.reserve(flat_outlet_seeds_gathered.size() / AMREX_SPACEDIM);
+    for (size_t i = 0; i < flat_outlet_seeds_gathered.size(); i += AMREX_SPACEDIM) {
+        amrex::IntVect iv;
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+            iv[d] = flat_outlet_seeds_gathered[i + d];
+        }
+        outlet_seeds.push_back(iv);
+    }
     // --- End Seed Gathering Fix ---
 
 
@@ -588,7 +622,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
 
 
 // --- Setup HYPRE Matrix and Vectors, Call Fortran Fill Routine ---
-// (Unchanged from previous version - already modified to pass mask)
+// (Unchanged)
 void OpenImpala::TortuosityHypre::setupMatrixEquation()
 {
     BL_PROFILE("TortuosityHypre::setupMatrixEquation"); // Add profile tag
@@ -729,7 +763,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// (Unchanged - Solver choice depends on input file)
+// (Unchanged)
 bool OpenImpala::TortuosityHypre::solve() {
     BL_PROFILE("TortuosityHypre::solve"); // Add profile tag
     HYPRE_Int ierr = 0;
@@ -960,7 +994,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     }
 
     // --- Write plot file if requested ---
-    // (Plot file writing logic unchanged from previous version)
+    // (Unchanged)
     if (m_write_plotfile) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
              amrex::Print() << "  Writing solution plotfile..." << std::endl;
@@ -1151,8 +1185,7 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
 
 
 // --- Calculate Global Fluxes Across Domain Boundaries ---
-// <<< MODIFIED to use active_mask when calculating flux >>>
-// <<< REMOVED const qualifier >>>
+// (Unchanged)
 void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) /* const removed */
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
