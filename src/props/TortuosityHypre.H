@@ -90,7 +90,7 @@ private:
     void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // <<< NEW
     void getSolution (amrex::MultiFab& soln, int ncomp=0);
     void getCellTypes(amrex::MultiFab& phi, int ncomp=1);
-    void global_fluxes(amrex::Real& fxin, amrex::Real& fxout) const;
+    void global_fluxes(amrex::Real& fxin, amrex::Real& fxout);
 
     // --- Member Variables ---
     // Configuration
