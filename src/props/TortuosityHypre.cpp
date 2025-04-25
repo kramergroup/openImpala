@@ -1,5 +1,5 @@
 #include "TortuosityHypre.H"
-#include "Tortuosity_filcc_F.H"     // For tortuosity_remspot, tortuosity_filct
+#include "Tortuosity_filcc_F.H"      // For tortuosity_remspot, tortuosity_filct
 #include "TortuosityHypreFill_F.H" // For tortuosity_fillmtx
 
 #include <cstdlib>
@@ -42,8 +42,8 @@
         char hypre_error_msg[256]; \
         HYPRE_DescribeError(ierr, hypre_error_msg); \
         amrex::Abort("HYPRE Error: " + std::string(hypre_error_msg) + \
-                     " - Error Code: " + std::to_string(ierr) + \
-                     " File: " + __FILE__ + " Line: " + std::to_string(__LINE__)); \
+                       " - Error Code: " + std::to_string(ierr) + \
+                       " File: " + __FILE__ + " Line: " + std::to_string(__LINE__)); \
     } \
 } while (0)
 
@@ -375,7 +375,7 @@ void OpenImpala::TortuosityHypre::parallelFloodFill(
                            if (mask_arr(neighbor_cell, MaskComp) == cell_active) {
                                 reached_by_neighbor = true;
                                 break; // Found a reached neighbor
-                            }
+                           }
                         }
                     }
 
@@ -457,8 +457,8 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         amrex::Box outlet_intersect = validBox & domain_hi_face;
          if (!outlet_intersect.isEmpty()) {
             amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // Correct signature
-                 // Use PhaseComp consistently
-                 if (phase_arr(i, j, k, PhaseComp) == phaseID) { // Use k
+                // Use PhaseComp consistently
+                if (phase_arr(i, j, k, PhaseComp) == phaseID) { // Use k
                     local_outlet_seeds.push_back(amrex::IntVect(i,j,k));
                 }
             });
@@ -466,14 +466,23 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
     } // End MFIter for seeds
 
     // --- Gather all seeds using AllGather ---
-    amrex::Vector<amrex::IntVect> inlet_seeds;  // Will hold seeds from all ranks
-    amrex::Vector<amrex::IntVect> outlet_seeds; // Will hold seeds from all ranks
+    // <<< FIX: Convert to std::vector for AllGather >>>
+    // 1. Convert local amrex::Vector to std::vector
+    std::vector<amrex::IntVect> std_local_inlet_seeds(local_inlet_seeds.begin(), local_inlet_seeds.end());
+    std::vector<amrex::IntVect> std_local_outlet_seeds(local_outlet_seeds.begin(), local_outlet_seeds.end());
 
-    // <<< FIX: Use AllGather correctly >>>
-    // This gathers the vector from each rank and concatenates them into the recv vector on all ranks
-    amrex::ParallelDescriptor::AllGather(local_inlet_seeds, inlet_seeds);
-    amrex::ParallelDescriptor::AllGather(local_outlet_seeds, outlet_seeds);
-    // --- End Seed Gathering ---
+    // 2. Prepare std::vector to receive gathered data
+    std::vector<amrex::IntVect> std_inlet_seeds_gathered;
+    std::vector<amrex::IntVect> std_outlet_seeds_gathered;
+
+    // 3. Call AllGather with std::vectors
+    amrex::ParallelDescriptor::AllGather(std_local_inlet_seeds, std_inlet_seeds_gathered);
+    amrex::ParallelDescriptor::AllGather(std_local_outlet_seeds, std_outlet_seeds_gathered);
+
+    // 4. Convert gathered std::vector back to amrex::Vector
+    amrex::Vector<amrex::IntVect> inlet_seeds(std_inlet_seeds_gathered.begin(), std_inlet_seeds_gathered.end());
+    amrex::Vector<amrex::IntVect> outlet_seeds(std_outlet_seeds_gathered.begin(), std_outlet_seeds_gathered.end());
+    // --- End Seed Gathering Fix ---
 
 
     // Make seeds unique (now on the globally gathered vectors)
@@ -664,7 +673,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         // Call the modified Fortran routine
         tortuosity_fillmtx(matrix_values.data(), rhs_values.data(), initial_guess.data(),
                            &npts,
-                           p_ptr, pbox.loVect(), pbox.hiVect(),             // Phase data
+                           p_ptr, pbox.loVect(), pbox.hiVect(),                 // Phase data
                            mask_ptr, mask_box.loVect(), mask_box.hiVect(), // Mask data <<< NEW
                            bx.loVect(), bx.hiVect(), domain.loVect(), domain.hiVect(),
                            dxinv_sq.data(), &m_vlo, &m_vhi, &m_phase, &dir_int); // Pass original phase ID too, though Fortran may ignore it
@@ -678,7 +687,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
             for (int s_idx = 0; s_idx < stencil_size; ++s_idx) {
                  if (std::isnan(matrix_values[static_cast<size_t>(idx)*stencil_size + s_idx]) ||
                      std::isinf(matrix_values[static_cast<size_t>(idx)*stencil_size + s_idx])) {
-                   data_ok = false; break;
+                  data_ok = false; break;
                  }
             }
             if (!data_ok) break;
@@ -701,16 +710,16 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         HYPRE_CHECK(ierr);
     }
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-         amrex::Print() << "TortuosityHypre: Finished MFIter loop setting values from Fortran." << std::endl;
+          amrex::Print() << "TortuosityHypre: Finished MFIter loop setting values from Fortran." << std::endl;
     }
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-         amrex::Print() << "TortuosityHypre: Calling HYPRE_StructMatrixAssemble..." << std::endl;
+          amrex::Print() << "TortuosityHypre: Calling HYPRE_StructMatrixAssemble..." << std::endl;
     }
     ierr = HYPRE_StructMatrixAssemble(m_A);
     HYPRE_CHECK(ierr);
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-         amrex::Print() << "TortuosityHypre: Matrix assembled." << std::endl;
+          amrex::Print() << "TortuosityHypre: Matrix assembled." << std::endl;
     }
 
     // Assemble vectors after setting values
@@ -989,7 +998,7 @@ bool OpenImpala::TortuosityHypre::solve() {
                  for (int jj = lo[1]; jj <= hi[1]; ++jj) {
                      for (int ii = lo[0]; ii <= hi[0]; ++ii) {
                           if (k_lin_idx < npts) {
-                               soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
+                                soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
                           }
                          k_lin_idx++;
                      }
@@ -1004,9 +1013,9 @@ bool OpenImpala::TortuosityHypre::solve() {
         amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0); // Temporary Real MF for mask
         amrex::Copy(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0); // Copy active mask (comp 0) to temp MF (comp 0)
 
-        amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);      // Solution to component 0
+        amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);       // Solution to component 0
         amrex::Copy(mf_plot, m_mf_phase, PhaseComp, 1, 1, 0); // Phase ID (comp PhaseComp) to component 1
-        amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);      // Active Mask to component 2
+        amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);       // Active Mask to component 2
 
 
         // Define plotfile name and variable names
@@ -1257,13 +1266,13 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
             for (int j = lo_flux_hi[1]; j <= hi_flux_hi[1]; ++j) {
                 iv[1]=j;
                 for (int i = lo_flux_hi[0]; i <= hi_flux_hi[0]; ++i) {
-                      iv[0]=i;
-                      if (mask(iv, MaskComp) == cell_active) { // Use MaskComp
-                          // Flux = - D * grad(phi) = -1 * (phi_{i+1} - phi_i)/dx (for X dir)
-                           grad = (soln(iv + shift) - soln(iv)) / dx[idir];
-                           flux = -grad; // Assumes D=1
-                           local_fxout += flux;
-                      }
+                     iv[0]=i;
+                     if (mask(iv, MaskComp) == cell_active) { // Use MaskComp
+                         // Flux = - D * grad(phi) = -1 * (phi_{i+1} - phi_i)/dx (for X dir)
+                          grad = (soln(iv + shift) - soln(iv)) / dx[idir];
+                          flux = -grad; // Assumes D=1
+                          local_fxout += flux;
+                     }
                 }
             }
         }
