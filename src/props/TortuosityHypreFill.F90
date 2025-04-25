@@ -14,10 +14,12 @@ module tortuosity_poisson_3d_module
   integer, parameter :: direction_z = 2
 
   ! Component index for phase data in MultiFab 'p' (Fortran 1-based)
+  ! NOTE: Phase array 'p' might become optional if mask fully determines activity
   integer, parameter :: comp_phase = 1
+  ! Component index for mask data (assuming 1 component in mask FAB)
+  integer, parameter :: comp_mask = 1
 
   ! Stencil indices (0-based, matching C++ HYPRE_StructStencilSetElement order)
-  ! Assuming C++ order: {Center, -x, +x, -y, +y, -z, +z} maps to indices 0..6
   integer, parameter :: istn_c  = 0 ! Center
   integer, parameter :: istn_mx = 1 ! -X (West)
   integer, parameter :: istn_px = 2 ! +X (East)
@@ -27,38 +29,51 @@ module tortuosity_poisson_3d_module
   integer, parameter :: istn_pz = 6 ! +Z (Top)
   integer, parameter :: nstencil = 7
 
+  ! Activity mask values (assuming C++ convention)
+  integer, parameter :: cell_inactive = 0
+  integer, parameter :: cell_active = 1
+
 contains
 
   ! ::: -----------------------------------------------------------
   ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
-  ! ::: Uses explicit decoupling for blocked cells (Aii=1, Aij=0, bi=0).
-  ! ::: Applies Neumann BCs at phase boundaries.
-  ! ::: Applies Dirichlet BCs at domain boundaries perp. to flow.
-  ! ::: FIX: Added decoupling for isolated conducting cells.
+  ! ::: Uses an activity_mask (1=active, 0=inactive) derived from
+  ! ::: geometric analysis (e.g., percolation check) to determine
+  ! ::: which cells participate in the solve.
+  ! ::: Inactive cells are decoupled (Aii=1, Aij=0, bi=0, xinit=0).
+  ! ::: Active cells have the Laplacian assembled only considering
+  ! ::: connections to other active cells (Neumann at boundary with inactive).
+  ! ::: Dirichlet BCs overwrite at domain boundaries perp. to flow.
   ! ::: -----------------------------------------------------------
-  subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
-                                bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir) bind(c)
+  subroutine tortuosity_fillmtx(a, rhs, xinit, nval, &
+                                p, p_lo, p_hi, &                 ! Phase (Optional if mask is sufficient)
+                                active_mask, mask_lo, mask_hi, & ! Activity Mask
+                                bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase_unused, dir) bind(c)
+                                ! Renamed 'phase' arg to 'phase_unused' as mask should control activity
 
     ! Argument declarations
     integer,            intent(in)  :: nval
-    ! Fortran declaration uses 0-based indexing matching C++ std::vector for 'a'
-    ! Fortran declaration uses 1-based indexing for 'rhs', 'xinit' matching loop calculation
     real(amrex_real), intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval)
-    integer,            intent(in)  :: p_lo(3), p_hi(3) ! Bounds of the phase FAB (incl. ghost cells)
-    integer,            intent(in)  :: bxlo(3), bxhi(3) ! Bounds of the current valid box (tilebox)
-    integer,            intent(in)  :: domlo(3), domhi(3) ! Bounds of the overall problem domain
-    ! p: phase data FAB (indexed using p_lo/p_hi)
+    integer,            intent(in)  :: p_lo(3), p_hi(3)
     integer,            intent(in)  :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), *)
+    integer,            intent(in)  :: mask_lo(3), mask_hi(3)            ! <<< NEW
+    integer,            intent(in)  :: active_mask(mask_lo(1):mask_hi(1), & ! <<< NEW
+                                                   mask_lo(2):mask_hi(2), &
+                                                   mask_lo(3):mask_hi(3)) !, *) ! Assume 1 component
+    integer,            intent(in)  :: bxlo(3), bxhi(3)
+    integer,            intent(in)  :: domlo(3), domhi(3)
     real(amrex_real), intent(in)  :: dxinv(3) ! [1/dx^2, 1/dy^2, 1/dz^2]
-    integer,            intent(in)  :: phase, dir ! Phase ID to treat as conductive, direction of flow
-    real(amrex_real), intent(in)  :: vlo, vhi ! Potential values at low/high boundaries
+    real(amrex_real), intent(in)  :: vlo, vhi
+    integer,            intent(in)  :: phase_unused, dir ! phase_id is no longer directly used for matrix construction
+                                                         ! Mask determines activity
 
     ! Local variables
     integer :: i, j, k, m_idx, stencil_idx_start
     integer :: len_x, len_y, len_z, expected_nval
-    real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
+    real(amrex_real) :: diag_val, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
-    logical :: on_dirichlet_boundary  ! Flag for cells on Dirichlet boundary
+    logical :: on_dirichlet_boundary
+    integer :: neighbor_mask_val ! To store neighbor mask value
 
     ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
@@ -66,11 +81,10 @@ contains
     len_z = bxhi(3) - bxlo(3) + 1
     expected_nval = len_x * len_y * len_z
 
-    ! Pre-calculate default stencil coefficients based on grid spacing
+    ! Pre-calculate stencil coefficients based on grid spacing
     coeff_x = dxinv(1)
     coeff_y = dxinv(2)
     coeff_z = dxinv(3)
-    coeff_c = 2.0_amrex_real * (coeff_x + coeff_y + coeff_z) ! Center coeff for -Laplacian
 
     ! Check consistency between expected nval and passed nval (only if box not empty)
     if (expected_nval > 0 .and. expected_nval /= nval) then
@@ -84,71 +98,85 @@ contains
         do i = bxlo(1), bxhi(1)
 
           ! Calculate indices
-          ! Use Fortran 1-based index for rhs and xinit, 0-based for 'a' start
           m_idx = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
           stencil_idx_start = nstencil * (m_idx - 1)
 
-          ! --- Apply Modifications Based on Phase ---
-          if ( p(i,j,k,comp_phase) == phase ) then
-              ! Fluid cell (conductive phase)
-              ! --- Set Base Stencil (Laplacian) ---
-              a(stencil_idx_start + istn_c)  =  coeff_c
-              a(stencil_idx_start + istn_mx) = -coeff_x
-              a(stencil_idx_start + istn_px) = -coeff_x
-              a(stencil_idx_start + istn_my) = -coeff_y
-              a(stencil_idx_start + istn_py) = -coeff_y
-              a(stencil_idx_start + istn_mz) = -coeff_z
-              a(stencil_idx_start + istn_pz) = -coeff_z
-              rhs(m_idx) = 0.0_amrex_real ! Default RHS
+          ! --- Check Activity Mask ---
+          if ( active_mask(i,j,k) == cell_inactive ) then
+             ! --- Apply Explicit Decoupling for INACTIVE cells ---
+             a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+             a(stencil_idx_start + istn_c) = 1.0_amrex_real
+             rhs(m_idx)   = 0.0_amrex_real
+             xinit(m_idx) = 0.0_amrex_real
+             cycle ! Skip to next (i,j,k)
+          end if
 
-              ! --- Apply Neumann at phase boundaries ---
-              ! -X face
-              if ( p(i-1,j,k,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Absorb flux
-                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                      ! Zero connection
-              end if
-              ! +X face
-              if ( p(i+1,j,k,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x
-                  a(stencil_idx_start + istn_px) = 0.0_amrex_real
-              end if
-              ! -Y face
-              if ( p(i,j-1,k,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_y
-                  a(stencil_idx_start + istn_my) = 0.0_amrex_real
-              end if
-              ! +Y face
-              if ( p(i,j+1,k,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_y
-                  a(stencil_idx_start + istn_py) = 0.0_amrex_real
-              end if
-              ! -Z face
-              if ( p(i,j,k-1,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_z
-                  a(stencil_idx_start + istn_mz) = 0.0_amrex_real
-              end if
-               ! +Z face
-              if ( p(i,j,k+1,comp_phase) .ne. phase ) then
-                  a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_z
-                  a(stencil_idx_start + istn_pz) = 0.0_amrex_real
-              end if
-              ! RHS remains 0.0 for internal fluid cells before BCs
+          ! --- If we reach here, cell (i,j,k) is ACTIVE ---
+          ! --- Assemble stencil based on ACTIVE neighbors ---
+          diag_val = 0.0_amrex_real
+          a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Initialize stencil row to zero
 
+          ! -X face
+          neighbor_mask_val = active_mask(i-1, j, k) ! Assumes mask has ghost cells filled
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_mx) = -coeff_x
+             diag_val = diag_val + coeff_x
+          end if
+          ! +X face
+          neighbor_mask_val = active_mask(i+1, j, k)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_px) = -coeff_x
+             diag_val = diag_val + coeff_x
+          end if
+          ! -Y face
+          neighbor_mask_val = active_mask(i, j-1, k)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_my) = -coeff_y
+             diag_val = diag_val + coeff_y
+          end if
+          ! +Y face
+          neighbor_mask_val = active_mask(i, j+1, k)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_py) = -coeff_y
+             diag_val = diag_val + coeff_y
+          end if
+          ! -Z face
+          neighbor_mask_val = active_mask(i, j, k-1)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_mz) = -coeff_z
+             diag_val = diag_val + coeff_z
+          end if
+           ! +Z face
+          neighbor_mask_val = active_mask(i, j, k+1)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_pz) = -coeff_z
+             diag_val = diag_val + coeff_z
+          end if
+
+          ! Set the diagonal entry
+          a(stencil_idx_start + istn_c) = diag_val
+
+          ! Check for zero diagonal in an active cell (should only happen if isolated, which mask should prevent)
+          if ( abs(diag_val) < 1.0e-15_amrex_real ) then
+              ! This case should ideally not be reached if the mask is correct,
+              ! but as a safety, decouple it.
+              write(*,'(A,3I5)') "WARNING: Zero diagonal in ACTIVE cell at (i,j,k)=", i,j,k
+              a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+              a(stencil_idx_start + istn_c) = 1.0_amrex_real
+              rhs(m_idx)   = 0.0_amrex_real
+              ! Keep xinit as calculated below or set to 0? Set to 0 for safety.
+              xinit(m_idx) = 0.0_amrex_real
+              cycle ! Skip Dirichlet overwrite if we decouple here
           else
-              ! Blocked cell (not the specified conductive phase)
-              ! --- Apply Explicit Decoupling (Aii=1, Aij=0, bi=0) ---
-              a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Zero out all stencil entries
-              a(stencil_idx_start + istn_c) = 1.0_amrex_real                      ! Set diagonal to 1
-              rhs(m_idx) = 0.0_amrex_real                                         ! Set RHS to 0
-
-          end if ! End of fluid/blocked check
+              ! Set default RHS for active interior cells
+              rhs(m_idx) = 0.0_amrex_real
+          endif
 
 
           ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
-          ! This applies AFTER the fluid/blocked logic, ensuring Dirichlet BCs take precedence
-          ! at the boundary, regardless of whether the boundary cell is fluid or blocked.
-          on_dirichlet_boundary = .false. ! Assume not on Dirichlet boundary initially
-          ! X-Direction Flow
+          ! This applies AFTER the active cell logic. If an active cell is on the
+          ! Dirichlet boundary, its equation becomes Aii=1, bi=V.
+          on_dirichlet_boundary = .false.
           if ( dir == direction_x ) then
               if ( i == domlo(1) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
@@ -161,7 +189,6 @@ contains
                   rhs(m_idx) = vhi
                   on_dirichlet_boundary = .true.
               end if
-          ! Y-Direction Flow
           else if ( dir == direction_y ) then
               if ( j == domlo(2) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
@@ -174,7 +201,6 @@ contains
                   rhs(m_idx) = vhi
                   on_dirichlet_boundary = .true.
               end if
-          ! Z-Direction Flow
           else if ( dir == direction_z ) then
               if ( k == domlo(3) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
@@ -187,61 +213,41 @@ contains
                   rhs(m_idx) = vhi
                   on_dirichlet_boundary = .true.
               end if
-          end if ! End of Dirichlet BC overwrite check
+          end if ! End of Dirichlet BC overwrite
 
-
-          ! --- *** FIX: Decouple isolated fluid cells *** ---
-          ! Check fluid cells that are NOT on a Dirichlet boundary AFTER Neumann adjustments.
-          ! If the diagonal is zero, the cell is effectively isolated. Decouple it.
-          if ( p(i,j,k,comp_phase) == phase .and. .not. on_dirichlet_boundary ) then
-             if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
-                 ! This fluid cell is effectively isolated, decouple it
-                 a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Zero out all stencil entries
-                 a(stencil_idx_start + istn_c) = 1.0_amrex_real                      ! Set diagonal to 1
-                 rhs(m_idx) = 0.0_amrex_real                                         ! Set RHS to 0
+          ! --- Calculate Initial Guess (Only for ACTIVE cells) ---
+          ! Note: Inactive cells had xinit set to 0 already
+          ! If an active cell was decoupled due to safety check, xinit was also set to 0
+          if ( abs(a(stencil_idx_start + istn_c) - 1.0_amrex_real) > 1.0e-15_amrex_real .or. on_dirichlet_boundary ) then
+             ! Calculate linear ramp only for active cells not safety-decoupled
+             if ( dir == direction_x ) then
+                 domain_extent = domhi(1) - domlo(1)
+                 if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                    factor = 0.0_amrex_real
+                 else
+                    factor = 1.0_amrex_real / domain_extent
+                 end if
+                 xinit(m_idx) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
+             else if ( dir == direction_y ) then
+                 domain_extent = domhi(2) - domlo(2)
+                 if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                    factor = 0.0_amrex_real
+                 else
+                    factor = 1.0_amrex_real / domain_extent
+                 end if
+                 xinit(m_idx) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
+             else if ( dir == direction_z ) then
+                 domain_extent = domhi(3) - domlo(3)
+                 if (abs(domain_extent) < 1.0e-12_amrex_real) then
+                    factor = 0.0_amrex_real
+                 else
+                    factor = 1.0_amrex_real / domain_extent
+                 end if
+                 xinit(m_idx) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
+             else ! Should not happen
+                 xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
              end if
-          end if
-          ! --- *** END FIX *** ---
-
-
-          ! --- Calculate Initial Guess ---
-          ! Set initial guess to 0 for blocked OR isolated fluid cells, linear ramp for connected fluid cells
-          ! We check the final state after potential decoupling fix
-          if ( p(i,j,k,comp_phase) == phase .and. &
-               ( on_dirichlet_boundary .or. abs(a(stencil_idx_start + istn_c) - 1.0_amrex_real) > 1.0e-15_amrex_real ) ) then
-              ! This is a connected fluid cell (diagonal is not 1 due to decoupling) OR a Dirichlet BC cell
-              if ( dir == direction_x ) then
-                  domain_extent = domhi(1) - domlo(1)
-                  if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                     factor = 0.0_amrex_real
-                  else
-                     factor = 1.0_amrex_real / domain_extent
-                  end if
-                  xinit(m_idx) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
-              else if ( dir == direction_y ) then
-                  domain_extent = domhi(2) - domlo(2)
-                  if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                     factor = 0.0_amrex_real
-                  else
-                     factor = 1.0_amrex_real / domain_extent
-                  end if
-                  xinit(m_idx) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
-              else if ( dir == direction_z ) then
-                  domain_extent = domhi(3) - domlo(3)
-                  if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                     factor = 0.0_amrex_real
-                  else
-                     factor = 1.0_amrex_real / domain_extent
-                  end if
-                  xinit(m_idx) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
-              else ! Should not happen if dir is 0, 1, or 2
-                  xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
-              end if
-          else
-              ! Set initial guess in blocked cells OR decoupled fluid cells explicitly to 0
-              xinit(m_idx) = 0.0_amrex_real
-          end if
-          ! Note: Fortran array xinit uses 1-based index m_idx
+          endif ! End check for calculating xinit ramp
 
         end do ! i
       end do ! j
