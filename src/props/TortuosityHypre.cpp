@@ -1,5 +1,7 @@
+// src/props/TortuosityHypre.cpp (with MPI_Allgatherv fix)
+
 #include "TortuosityHypre.H"
-#include "Tortuosity_filcc_F.H"      // For tortuosity_remspot, tortuosity_filct
+#include "Tortuosity_filcc_F.H"     // For tortuosity_remspot, tortuosity_filct
 #include "TortuosityHypreFill_F.H" // For tortuosity_fillmtx
 
 #include <cstdlib>
@@ -11,9 +13,9 @@
 #include <stdexcept> // For potential error throwing (optional)
 #include <iomanip>   // For std::setprecision
 #include <iostream>  // For std::cout, std::flush
-#include <set>       // For std::set in generateActivityMask
+#include <set>       // For std::set in generateActivityMask (now unused, but keep for history)
 #include <algorithm> // For std::sort, std::unique
-#include <numeric>   // For std::accumulate
+#include <numeric>   // For std::accumulate, iota (potentially useful)
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>
@@ -35,6 +37,9 @@
 #include <HYPRE.h>
 #include <HYPRE_struct_ls.h> // Includes headers for SMG, PFMG, Jacobi, PCG, GMRES, BiCGSTAB, FlexGMRES etc.
 #include <HYPRE_struct_mv.h>
+
+// MPI include (needed for MPI_Allgatherv)
+#include <mpi.h>
 
 // Define HYPRE error checking macro
 #define HYPRE_CHECK(ierr) do { \
@@ -408,12 +413,12 @@ void OpenImpala::TortuosityHypre::parallelFloodFill(
         amrex::Warning("TortuosityHypre::parallelFloodFill reached max iterations - flood fill might be incomplete.");
     }
      if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-         amrex::Print() << "    Flood fill completed in " << iter << " iterations." << std::endl;
+        amrex::Print() << "    Flood fill completed in " << iter << " iterations." << std::endl;
      }
 }
 
 
-// --- *** NEW METHOD: Generate Activity Mask *** ---
+// --- *** UPDATED METHOD: Generate Activity Mask using MPI_Allgatherv *** ---
 // Identifies percolating conducting phase using two boundary flood fills.
 void OpenImpala::TortuosityHypre::generateActivityMask(
     const amrex::iMultiFab& phaseFab, // Phase field (must have ghost cells)
@@ -429,7 +434,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
     // Define temporary masks for reachability (need 1 ghost cell for flood fill)
     amrex::iMultiFab mf_reached_inlet(m_ba, m_dm, 1, 1);
     amrex::iMultiFab mf_reached_outlet(m_ba, m_dm, 1, 1);
-    // Initialization happens within parallelFloodFill now
+    // Initialization happens within parallelFloodFill
 
     // Find seed points on boundaries for the current MPI rank
     amrex::Vector<amrex::IntVect> local_inlet_seeds; // Collect seeds locally first
@@ -464,8 +469,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         }
     } // End MFIter for seeds
 
-    // --- Gather all seeds using AllGather ---
-    // <<< FIX: Flatten IntVects to ints for AllGather >>>
+    // --- Gather all seeds using MPI_Allgatherv ---
 
     // 1. Flatten local vectors of IntVects into vectors of ints
     std::vector<int> flat_local_inlet_seeds;
@@ -484,15 +488,50 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         }
     }
 
-    // 2. Prepare vectors to receive gathered flattened data
-    std::vector<int> flat_inlet_seeds_gathered;
-    std::vector<int> flat_outlet_seeds_gathered;
+    // Get MPI communicator, rank, and size
+    MPI_Comm comm = amrex::ParallelDescriptor::Communicator();
+    int mpi_rank = amrex::ParallelDescriptor::MyProc(); // unused here, but good practice
+    int mpi_size = amrex::ParallelDescriptor::NProcs();
 
-    // 3. Call AllGather with the flattened integer vectors
-    amrex::ParallelDescriptor::AllGather(flat_local_inlet_seeds, flat_inlet_seeds_gathered);
-    amrex::ParallelDescriptor::AllGather(flat_local_outlet_seeds, flat_outlet_seeds_gathered);
+    // --- Gather Inlet Seeds ---
+    int send_count_inlet = static_cast<int>(flat_local_inlet_seeds.size());
+    std::vector<int> recv_counts_inlet(mpi_size);
+    MPI_Allgather(&send_count_inlet, 1, MPI_INT,
+                  recv_counts_inlet.data(), 1, MPI_INT, comm);
 
-    // 4. Unflatten the gathered integer vectors back into amrex::Vector<IntVect>
+    std::vector<int> displacements_inlet(mpi_size);
+    displacements_inlet[0] = 0;
+    int total_recv_count_inlet = recv_counts_inlet[0];
+    for (int i = 1; i < mpi_size; ++i) {
+        displacements_inlet[i] = displacements_inlet[i-1] + recv_counts_inlet[i-1];
+        total_recv_count_inlet += recv_counts_inlet[i];
+    }
+
+    std::vector<int> flat_inlet_seeds_gathered(total_recv_count_inlet);
+    MPI_Allgatherv(flat_local_inlet_seeds.data(), send_count_inlet, MPI_INT,
+                   flat_inlet_seeds_gathered.data(), recv_counts_inlet.data(), displacements_inlet.data(),
+                   MPI_INT, comm);
+
+    // --- Gather Outlet Seeds ---
+    int send_count_outlet = static_cast<int>(flat_local_outlet_seeds.size());
+    std::vector<int> recv_counts_outlet(mpi_size);
+    MPI_Allgather(&send_count_outlet, 1, MPI_INT,
+                  recv_counts_outlet.data(), 1, MPI_INT, comm);
+
+    std::vector<int> displacements_outlet(mpi_size);
+    displacements_outlet[0] = 0;
+    int total_recv_count_outlet = recv_counts_outlet[0];
+    for (int i = 1; i < mpi_size; ++i) {
+        displacements_outlet[i] = displacements_outlet[i-1] + recv_counts_outlet[i-1];
+        total_recv_count_outlet += recv_counts_outlet[i];
+    }
+
+    std::vector<int> flat_outlet_seeds_gathered(total_recv_count_outlet);
+    MPI_Allgatherv(flat_local_outlet_seeds.data(), send_count_outlet, MPI_INT,
+                   flat_outlet_seeds_gathered.data(), recv_counts_outlet.data(), displacements_outlet.data(),
+                   MPI_INT, comm);
+
+    // --- Unflatten the gathered integer vectors back into amrex::Vector<IntVect> ---
     amrex::Vector<amrex::IntVect> inlet_seeds;
     AMREX_ASSERT_WITH_MESSAGE(flat_inlet_seeds_gathered.size() % AMREX_SPACEDIM == 0,
                               "Gathered inlet seed integer count not divisible by AMREX_SPACEDIM");
@@ -516,7 +555,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         }
         outlet_seeds.push_back(iv);
     }
-    // --- End Seed Gathering Fix ---
+    // --- End Seed Gathering (MPI_Allgatherv) ---
 
 
     // Make seeds unique (now on the globally gathered vectors)
@@ -614,8 +653,8 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         // Use Domain().volume()
         amrex::Real total_domain_volume = static_cast<amrex::Real>(m_geom.Domain().volume());
         amrex::Real active_vf = (total_domain_volume > 0.0)
-                                  ? static_cast<amrex::Real>(global_active_volume) / total_domain_volume
-                                  : 0.0;
+                                 ? static_cast<amrex::Real>(global_active_volume) / total_domain_volume
+                                 : 0.0;
         amrex::Print() << "  Activity mask generated. Active Volume Fraction: " << active_vf << std::endl;
     }
 }
@@ -707,7 +746,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         // Call the modified Fortran routine
         tortuosity_fillmtx(matrix_values.data(), rhs_values.data(), initial_guess.data(),
                            &npts,
-                           p_ptr, pbox.loVect(), pbox.hiVect(),                 // Phase data
+                           p_ptr, pbox.loVect(), pbox.hiVect(),                // Phase data
                            mask_ptr, mask_box.loVect(), mask_box.hiVect(), // Mask data <<< NEW
                            bx.loVect(), bx.hiVect(), domain.loVect(), domain.hiVect(),
                            dxinv_sq.data(), &m_vlo, &m_vhi, &m_phase, &dir_int); // Pass original phase ID too, though Fortran may ignore it
@@ -729,7 +768,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         int global_data_ok = data_ok;
         amrex::ParallelDescriptor::ReduceIntMin(global_data_ok); // Use Min reduction (1=OK, 0=FAIL)
         if (global_data_ok == 0) {
-           amrex::Abort("NaN/Inf found in matrix/rhs/init_guess values returned from Fortran!");
+            amrex::Abort("NaN/Inf found in matrix/rhs/init_guess values returned from Fortran!");
         }
 
         auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx);
@@ -789,10 +828,10 @@ bool OpenImpala::TortuosityHypre::solve() {
         precond = NULL;
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
         HYPRE_CHECK(ierr);
-        HYPRE_StructPFMGSetTol(precond, 0.0);       // Solve to zero tolerance (relative) within precond
-        HYPRE_StructPFMGSetMaxIter(precond, 1);      // Use one V-cycle (or other cycle) per application
-        HYPRE_StructPFMGSetRelaxType(precond, 6);    // Tuned: Use Red-Black G-S type smoother
-        HYPRE_StructPFMGSetNumPreRelax(precond, 2);  // Tuned: Increase pre-relaxation sweeps
+        HYPRE_StructPFMGSetTol(precond, 0.0);      // Solve to zero tolerance (relative) within precond
+        HYPRE_StructPFMGSetMaxIter(precond, 1);     // Use one V-cycle (or other cycle) per application
+        HYPRE_StructPFMGSetRelaxType(precond, 6);   // Tuned: Use Red-Black G-S type smoother
+        HYPRE_StructPFMGSetNumPreRelax(precond, 2); // Tuned: Increase pre-relaxation sweeps
         HYPRE_StructPFMGSetNumPostRelax(precond, 2); // Tuned: Increase post-relaxation sweeps
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (tuned)." << std::endl;
         // --- End PFMG Setup ---
@@ -809,10 +848,10 @@ bool OpenImpala::TortuosityHypre::solve() {
         ierr = HYPRE_StructPCGSolve(solver, m_A, m_b, m_x);
         // Check for convergence issues
         if (ierr == HYPRE_ERROR_CONV) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
         } else if (ierr != 0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solve returned error code " << ierr << ". Possible divergence or other issue.\n";
-             // HYPRE_CHECK(ierr); // Optionally abort on any error
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solve returned error code " << ierr << ". Possible divergence or other issue.\n";
+            // HYPRE_CHECK(ierr); // Optionally abort on any error
         }
 
         // Get stats
@@ -858,10 +897,10 @@ bool OpenImpala::TortuosityHypre::solve() {
         ierr = HYPRE_StructGMRESSolve(solver, m_A, m_b, m_x);
          // Check for convergence issues
         if (ierr == HYPRE_ERROR_CONV) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE GMRES solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE GMRES solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
         } else if (ierr != 0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE GMRES solve returned error code " << ierr << ". Possible divergence or other issue (e.g., memory error).\n";
-             // HYPRE_CHECK(ierr); // Optionally abort on any error
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE GMRES solve returned error code " << ierr << ". Possible divergence or other issue (e.g., memory error).\n";
+            // HYPRE_CHECK(ierr); // Optionally abort on any error
         }
 
         // Get stats
@@ -889,7 +928,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_CHECK(ierr);
         HYPRE_StructPFMGSetTol(precond, 0.0);
         HYPRE_StructPFMGSetMaxIter(precond, 1);
-        HYPRE_StructPFMGSetRelaxType(precond, 6);    // Tuned: Red-Black G-S
+        HYPRE_StructPFMGSetRelaxType(precond, 6);   // Tuned: Red-Black G-S
         HYPRE_StructPFMGSetNumPreRelax(precond, 2); // Tuned: 2 sweeps
         HYPRE_StructPFMGSetNumPostRelax(precond, 2);// Tuned: 2 sweeps
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (TUNED settings)." << std::endl;
@@ -907,10 +946,10 @@ bool OpenImpala::TortuosityHypre::solve() {
         ierr = HYPRE_StructFlexGMRESSolve(solver, m_A, m_b, m_x);
          // Check for convergence issues
         if (ierr == HYPRE_ERROR_CONV) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE FlexGMRES solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE FlexGMRES solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
         } else if (ierr != 0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE FlexGMRES solve returned error code " << ierr << ". Possible divergence or other issue.\n";
-             // HYPRE_CHECK(ierr); // Optionally abort on any error
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE FlexGMRES solve returned error code " << ierr << ". Possible divergence or other issue.\n";
+            // HYPRE_CHECK(ierr); // Optionally abort on any error
         }
 
         // Get stats
@@ -951,10 +990,10 @@ bool OpenImpala::TortuosityHypre::solve() {
         ierr = HYPRE_StructBiCGSTABSolve(solver, m_A, m_b, m_x);
         // Check for convergence issues
         if (ierr == HYPRE_ERROR_CONV) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
         } else if (ierr != 0) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solve returned error code " << ierr << ". Possible divergence or other issue.\n";
-             // HYPRE_CHECK(ierr); // Optionally abort on any error
+            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solve returned error code " << ierr << ". Possible divergence or other issue.\n";
+            // HYPRE_CHECK(ierr); // Optionally abort on any error
         }
 
         // Get stats
@@ -997,7 +1036,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     // (Unchanged)
     if (m_write_plotfile) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  Writing solution plotfile..." << std::endl;
+            amrex::Print() << "  Writing solution plotfile..." << std::endl;
         }
         // Create MultiFab for plotting (potential + phase + mask)
         amrex::MultiFab mf_plot(m_ba, m_dm, numComponentsPhi, 0); // No ghost cells needed for plotfile
@@ -1031,15 +1070,15 @@ bool OpenImpala::TortuosityHypre::solve() {
              for (int kk = lo[2]; kk <= hi[2]; ++kk) {
                  for (int jj = lo[1]; jj <= hi[1]; ++jj) {
                      for (int ii = lo[0]; ii <= hi[0]; ++ii) {
-                          if (k_lin_idx < npts) {
-                                soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
-                          }
-                         k_lin_idx++;
+                         if (k_lin_idx < npts) {
+                              soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
+                         }
+                        k_lin_idx++;
                      }
                  }
              }
               if (k_lin_idx != npts) {
-                   amrex::Warning("Linear index mismatch during HYPRE->AMReX copy in solve()!");
+                 amrex::Warning("Linear index mismatch during HYPRE->AMReX copy in solve()!");
               }
         } // End MFIter loop for copying solution
 
@@ -1047,9 +1086,9 @@ bool OpenImpala::TortuosityHypre::solve() {
         amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0); // Temporary Real MF for mask
         amrex::Copy(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0); // Copy active mask (comp 0) to temp MF (comp 0)
 
-        amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);       // Solution to component 0
+        amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);      // Solution to component 0
         amrex::Copy(mf_plot, m_mf_phase, PhaseComp, 1, 1, 0); // Phase ID (comp PhaseComp) to component 1
-        amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);       // Active Mask to component 2
+        amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);      // Active Mask to component 2
 
 
         // Define plotfile name and variable names
@@ -1081,13 +1120,13 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 
         // ===> Handle non-convergence BEFORE calculating flux <===
         if (!converged) {
-             if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
+            if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "Warning: Solver did not converge (residual norm "
                                 << m_final_res_norm << " > tolerance " << m_eps
                                 << ", or NaN residual). Cannot calculate tortuosity. Returning NaN." << std::endl;
-             }
-             m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
-             return m_value; // Return NaN immediately
+            }
+            m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+            return m_value; // Return NaN immediately
         }
         // ===> End non-convergence check <===
 
@@ -1103,16 +1142,16 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
         // Calculate Tortuosity (logic remains the same, but now only runs if converged)
         amrex::Real vf_for_calc = m_vf;
         if (std::abs(flux_in) < tiny_flux_threshold) {
-             if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
+            if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "Warning: Calculated input flux is near zero (" << flux_in
                                 << ") despite solver convergence. Tortuosity is ill-defined or infinite. Returning NaN." << std::endl;
-             }
-             m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+            }
+            m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
         } else if (vf_for_calc <= 0.0) { // Check the VF used for calculation
-             if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
+            if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << "Warning: Volume fraction used for calculation is zero or negative. Tortuosity is ill-defined. Returning NaN." << std::endl;
-             }
-             m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+            }
+            m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
         } else {
             const amrex::Real* problo = m_geom.ProbLo();
             const amrex::Real* probhi = m_geom.ProbHi();
@@ -1139,10 +1178,10 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
             } else {
                 amrex::Real potential_diff = m_vhi - m_vlo;
                  if (std::abs(potential_diff) < tiny_flux_threshold) {
-                      if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                          amrex::Print() << "Warning: Applied potential difference (vhi - vlo) is near zero. Tortuosity is ill-defined. Returning NaN." << std::endl;
-                      }
-                      m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+                     if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
+                         amrex::Print() << "Warning: Applied potential difference (vhi - vlo) is near zero. Tortuosity is ill-defined. Returning NaN." << std::endl;
+                     }
+                     m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
                  } else {
                      amrex::Real potential_gradient_mag = std::abs(potential_diff) / length_parallel;
                      // Assuming intrinsic diffusivity/conductivity D_0 = 1 for the phase
@@ -1214,9 +1253,9 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
         HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
         if (get_ierr != 0) {
-             char hypre_error_msg[256] = "Unknown HYPRE Error";
-             HYPRE_DescribeError(get_ierr, hypre_error_msg);
-             amrex::Warning("HYPRE_StructVectorGetBoxValues failed in global_fluxes! Error: " + std::string(hypre_error_msg) + " (Code: " + std::to_string(get_ierr) + ")");
+            char hypre_error_msg[256] = "Unknown HYPRE Error";
+            HYPRE_DescribeError(get_ierr, hypre_error_msg);
+            amrex::Warning("HYPRE_StructVectorGetBoxValues failed in global_fluxes! Error: " + std::string(hypre_error_msg) + " (Code: " + std::to_string(get_ierr) + ")");
         }
 
         amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
@@ -1226,9 +1265,9 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         for (int kk = lo[2]; kk <= hi[2]; ++kk) {
             for (int jj = lo[1]; jj <= hi[1]; ++jj) {
                 for (int ii = lo[0]; ii <= hi[0]; ++ii) {
-                     if (k_lin_idx < npts) {
+                    if (k_lin_idx < npts) {
                          soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
-                     }
+                    }
                     k_lin_idx++;
                 }
             }
@@ -1281,10 +1320,10 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
                  for (int i = lo_flux[0]; i <= hi_flux[0]; ++i) {
                       iv[0]=i;
                       if (mask(iv, MaskComp) == cell_active) { // Use MaskComp
-                          // Flux = - D * grad(phi) = -1 * (phi_i - phi_{i-1})/dx (for X dir)
-                           grad = (soln(iv) - soln(iv - shift)) / dx[idir];
-                           flux = -grad; // Assumes D=1
-                           local_fxin += flux;
+                           // Flux = - D * grad(phi) = -1 * (phi_i - phi_{i-1})/dx (for X dir)
+                            grad = (soln(iv) - soln(iv - shift)) / dx[idir];
+                            flux = -grad; // Assumes D=1
+                            local_fxin += flux;
                       }
                  }
              }
