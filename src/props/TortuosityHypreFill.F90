@@ -60,7 +60,8 @@ contains
     real(amrex_real) :: domain_extent, factor
     logical :: print_debug_info
     ! Penalty factor for blocked cells
-    real(amrex_real), parameter :: penalty_factor = 1.0e20_amrex_real
+    ! <<< MODIFIED: Reduced penalty factor significantly to avoid potential overflow >>>
+    real(amrex_real), parameter :: penalty_factor = 1.0e8_amrex_real
 
     ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
@@ -86,11 +87,9 @@ contains
         do i = bxlo(1), bxhi(1)
 
           ! Calculate indices
+          ! Use Fortran 1-based index for rhs and xinit, 0-based for 'a' start
           m_idx = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
           stencil_idx_start = nstencil * (m_idx - 1)
-
-          ! --- DEBUG PRINT: Check indices --- (Optional)
-          ! if (m_idx == 1 .or. m_idx == nval) then ... end if
 
           ! --- Set Base Stencil (Laplacian) for ALL points initially ---
           a(stencil_idx_start + istn_c)  =  coeff_c
@@ -100,7 +99,7 @@ contains
           a(stencil_idx_start + istn_py) = -coeff_y
           a(stencil_idx_start + istn_mz) = -coeff_z
           a(stencil_idx_start + istn_pz) = -coeff_z
-          rhs(m_idx) = 0.0_amrex_real ! Default RHS
+          rhs(m_idx) = 0.0_amrex_real ! Default RHS (Fortran uses 1-based index m_idx)
 
           ! --- Apply Modifications Based on Phase ---
           if ( p(i,j,k,comp_phase) == phase ) then
@@ -109,7 +108,7 @@ contains
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Absorb flux
-                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                        ! Zero connection
+                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                          ! Zero connection
               end if
               ! +X face
               if ( p(i+1,j,k,comp_phase) .ne. phase ) then
@@ -142,7 +141,7 @@ contains
               ! Blocked cell (not the specified conductive phase)
               ! --- Apply Penalty Method ---
               ! Keep the base Laplacian stencil (already set)
-              ! Add large penalty factor to the diagonal coefficient
+              ! Add penalty factor to the diagonal coefficient
               a(stencil_idx_start + istn_c) = a(stencil_idx_start + istn_c) + penalty_factor
               ! RHS becomes penalty * desired_value (which is 0 here)
               rhs(m_idx) = penalty_factor * 0.0_amrex_real ! Still zero
@@ -188,7 +187,6 @@ contains
           end if ! End of Dirichlet BC overwrite
 
           ! --- Calculate Initial Guess ---
-          ! (This logic remains the same)
           if ( dir == direction_x ) then
               domain_extent = domhi(1) - domlo(1)
               if (abs(domain_extent) < 1.0e-12_amrex_real) then
@@ -216,14 +214,14 @@ contains
           else ! Should not happen if dir is 0, 1, or 2
               xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
           end if
+          ! Note: Fortran arrays rhs and xinit use 1-based index m_idx
 
           ! --- Debug check for near-zero diagonals ---
-          ! (Still useful to keep)
           if ( p(i,j,k,comp_phase) == phase ) then
              if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
                  write(*,'(A,3I5,A,ES10.3)') &
-                      "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, &
-                      " value=", a(stencil_idx_start + istn_c)
+                       "WARNING: Near-zero diagonal at (i,j,k)=", i,j,k, &
+                       " value=", a(stencil_idx_start + istn_c)
              end if
           end if
 
