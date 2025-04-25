@@ -13,6 +13,7 @@
 #include <iostream>  // For std::cout, std::flush
 #include <set>       // For std::set in generateActivityMask
 #include <algorithm> // For std::sort, std::unique
+#include <numeric>   // For std::accumulate
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>
@@ -455,10 +456,9 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         // Find outlet seeds on this tile's valid box
         amrex::Box outlet_intersect = validBox & domain_hi_face;
          if (!outlet_intersect.isEmpty()) {
-            // <<< FIX: Correct lambda signature >>>
-            amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // <<< CORRECTED: Added int k
+            amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // Correct signature
                  // Use PhaseComp consistently
-                 if (phase_arr(i, j, k, PhaseComp) == phaseID) { // <<< CORRECTED: Use k
+                 if (phase_arr(i, j, k, PhaseComp) == phaseID) { // Use k
                     local_outlet_seeds.push_back(amrex::IntVect(i,j,k));
                 }
             });
@@ -469,7 +469,8 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
     amrex::Vector<amrex::IntVect> inlet_seeds;  // Will hold seeds from all ranks
     amrex::Vector<amrex::IntVect> outlet_seeds; // Will hold seeds from all ranks
 
-    // <<< FIX: Use AllGather instead of Gatherv >>>
+    // <<< FIX: Use AllGather correctly >>>
+    // This gathers the vector from each rank and concatenates them into the recv vector on all ranks
     amrex::ParallelDescriptor::AllGather(local_inlet_seeds, inlet_seeds);
     amrex::ParallelDescriptor::AllGather(local_outlet_seeds, outlet_seeds);
     // --- End Seed Gathering ---
@@ -482,8 +483,8 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
     outlet_seeds.erase(std::unique(outlet_seeds.begin(), outlet_seeds.end()), outlet_seeds.end());
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  Found " << inlet_seeds.size() << " unique inlet seed points." << std::endl;
-        amrex::Print() << "  Found " << outlet_seeds.size() << " unique outlet seed points." << std::endl;
+        amrex::Print() << "  Found " << inlet_seeds.size() << " unique inlet seed points globally." << std::endl;
+        amrex::Print() << "  Found " << outlet_seeds.size() << " unique outlet seed points globally." << std::endl;
     }
     if (inlet_seeds.empty() || outlet_seeds.empty()) {
         amrex::Warning("TortuosityHypre::generateActivityMask: No seed points found on inlet or outlet boundary (or both). Mask will be empty.");
@@ -536,15 +537,15 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         amrex::Vector<std::string> varnames = {"active_mask"};
         // Need MultiFab not iMultiFab for plotfile - create temporary copy
         amrex::MultiFab mf_mask_plot(m_ba, m_dm, 1, 0);
-        // <<< FIX: Use amrex::Copy >>>
+        // Use amrex::Copy
         amrex::Copy(mf_mask_plot, m_mf_active_mask, MaskComp, 0, 1, 0); // Copy active mask (comp 0) to plot MF (comp 0)
         amrex::WriteSingleLevelPlotfile(maskfilename, mf_mask_plot, varnames, m_geom, 0.0, 0);
     }
 
      if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        // <<< FIX: Correct volume calculation >>>
-        amrex::Long local_active_volume = 0; // <<< FIX: Use amrex::Long
-        // <<< FIX: Remove "for" from #pragma, use correct MFIter ctor >>>
+        // Correct volume calculation
+        amrex::Long local_active_volume = 0; // Use amrex::Long
+        // Use #pragma omp parallel reduction, NOT parallel for
         #ifdef AMREX_USE_OMP
         #pragma omp parallel reduction(+:local_active_volume) if (amrex::Gpu::notInLaunchRegion())
         #endif
@@ -559,12 +560,15 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
                     loop_local_sum += 1;
                 }
             });
-            local_active_volume += loop_local_sum; // Add tile sum to thread-local sum
+            #ifdef AMREX_USE_OMP
+            // No critical needed due to reduction clause
+            #endif
+             local_active_volume += loop_local_sum; // Add tile sum to overall sum for this thread/rank
         } // End MFIter
-        amrex::Long global_active_volume = local_active_volume; // <<< FIX: Use amrex::Long
-        // <<< FIX: Use ReduceLongSum >>>
+        amrex::Long global_active_volume = local_active_volume; // Use amrex::Long
+        // Use ReduceLongSum
         amrex::ParallelDescriptor::ReduceLongSum(global_active_volume);
-        // <<< FIX: Use Domain().volume() >>>
+        // Use Domain().volume()
         amrex::Real total_domain_volume = static_cast<amrex::Real>(m_geom.Domain().volume());
         amrex::Real active_vf = (total_domain_volume > 0.0)
                                   ? static_cast<amrex::Real>(global_active_volume) / total_domain_volume
@@ -716,8 +720,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// (Solver selection logic remains unchanged - choose via input file)
-// (It's recommended to try FlexGMRES + Tuned PFMG first now)
+// (Unchanged - Solver choice depends on input file)
 bool OpenImpala::TortuosityHypre::solve() {
     BL_PROFILE("TortuosityHypre::solve"); // Add profile tag
     HYPRE_Int ierr = 0;
@@ -1002,7 +1005,6 @@ bool OpenImpala::TortuosityHypre::solve() {
         amrex::Copy(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0); // Copy active mask (comp 0) to temp MF (comp 0)
 
         amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);      // Solution to component 0
-        // <<< FIX: Copy correct PhaseComp from m_mf_phase >>>
         amrex::Copy(mf_plot, m_mf_phase, PhaseComp, 1, 1, 0); // Phase ID (comp PhaseComp) to component 1
         amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);      // Active Mask to component 2
 
@@ -1196,7 +1198,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     // Fill ghost cells of the solution MultiFab
     mf_soln_temp.FillBoundary(m_geom.periodicity());
     // Fill mask ghost cells as it's used below (needs to be non-const for this)
-    m_mf_active_mask.FillBoundary(m_geom.periodicity()); // <<< Call on non-const mask
+    m_mf_active_mask.FillBoundary(m_geom.periodicity()); // Call on non-const mask
 
     // --- Calculate flux using finite differences on mf_soln_temp ---
     amrex::Real local_fxin = 0.0;
