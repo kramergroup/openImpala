@@ -5,15 +5,15 @@ tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
 
 # --- Tortuosity specific parameters ---
 
-# Set explicitly which solver to test with the new PFMG preconditioner
 phase_id = 1          # ID of the phase to calculate tortuosity for
 direction = X         # X, Y, or Z
-solver = GMRES          # Test PCG solver first with PFMG (GMRES is another option)
+# Solver type (Options: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB)
+solver = BiCGSTAB     # Set solver to test BiCGSTAB + PFMG combination
 
 # --- Solver Controls ---
 # Allow sufficient iterations for the potentially more effective PFMG preconditioner.
 # Tolerance remains reasonably loose for testing speed.
-hypre.maxiter = 200     # Max solver iterations (Increased to allow PFMG convergence)
+hypre.maxiter = 200     # Max solver iterations
 hypre.eps = 1e-6        # Solver relative tolerance
 
 # --- Test Verbosity ---
