@@ -71,9 +71,9 @@ int main (int argc, char* argv[])
     // Initialize HYPRE First (as per previous debugging step)
     int hypre_ierr = HYPRE_Init();
     if (hypre_ierr != 0) {
-         fprintf(stderr, "FATAL ERROR: HYPRE_Init() failed with code %d\n", hypre_ierr);
-         // No MPI_Abort here as MPI might not be initialized yet. Standard return.
-         return 1;
+        fprintf(stderr, "FATAL ERROR: HYPRE_Init() failed with code %d\n", hypre_ierr);
+        // No MPI_Abort here as MPI might not be initialized yet. Standard return.
+        return 1;
     }
 
     amrex::Initialize(argc, argv);
@@ -135,19 +135,19 @@ int main (int argc, char* argv[])
 
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Tortuosity Test Configuration ---\n";
-            amrex::Print() << "  Input TIFF File:  " << tifffile << "\n";
-            amrex::Print() << "  Results Dir:      " << resultsdir << "\n";
-            amrex::Print() << "  Phase ID:         " << phase_id << "\n";
-            amrex::Print() << "  Direction:        " << direction_str << "\n";
-            amrex::Print() << "  Solver:           " << solver_str << "\n";
-            amrex::Print() << "  Box Size:         " << box_size << "\n";
-            amrex::Print() << "  Threshold Value:  " << threshold_val << "\n";
-            amrex::Print() << "  Boundary Values:  " << v_lo << " (lo), " << v_hi << " (hi)\n";
-            amrex::Print() << "  Write Plotfile:   " << (write_plotfile != 0 ? "Yes" : "No") << "\n";
-            amrex::Print() << "  Verbose Level:    " << verbose << "\n";
+            amrex::Print() << "  Input TIFF File:   " << tifffile << "\n";
+            amrex::Print() << "  Results Dir:       " << resultsdir << "\n";
+            amrex::Print() << "  Phase ID:          " << phase_id << "\n";
+            amrex::Print() << "  Direction:         " << direction_str << "\n";
+            amrex::Print() << "  Solver:            " << solver_str << "\n";
+            amrex::Print() << "  Box Size:          " << box_size << "\n";
+            amrex::Print() << "  Threshold Value:   " << threshold_val << "\n";
+            amrex::Print() << "  Boundary Values:   " << v_lo << " (lo), " << v_hi << " (hi)\n";
+            amrex::Print() << "  Write Plotfile:    " << (write_plotfile != 0 ? "Yes" : "No") << "\n";
+            amrex::Print() << "  Verbose Level:     " << verbose << "\n";
             if (expected_tau >= 0.0) {
-                 amrex::Print() << "  Expected Tau:     " << expected_tau << "\n";
-                 amrex::Print() << "  Check Tolerance:  " << tolerance << "\n";
+                 amrex::Print() << "  Expected Tau:      " << expected_tau << "\n";
+                 amrex::Print() << "  Check Tolerance:   " << tolerance << "\n";
             }
             amrex::Print() << "------------------------------------\n\n";
         }
@@ -187,11 +187,11 @@ int main (int argc, char* argv[])
             // Basic check on thresholded data
             int min_phase_tmp = mf_phase_no_ghost.min(0);
             int max_phase_tmp = mf_phase_no_ghost.max(0);
-             if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n"; }
-             // Check if the entire domain is a single phase after thresholding
-             if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) {
-                amrex::Abort("FAIL: Phase field uniform after thresholding. Check threshold value or input image.");
-             }
+              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n"; }
+              // Check if the entire domain is a single phase after thresholding
+              if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) {
+                  amrex::Abort("FAIL: Phase field uniform after thresholding. Check threshold value or input image.");
+              }
 
             // Create the final phase iMultiFab with ghost cells and copy data
             const int required_ghost_cells = 1; // Need 1 ghost cell for TortuosityHypre
@@ -218,12 +218,12 @@ int main (int argc, char* argv[])
         if (expected_vf >= 0.0) {
              // Allow small tolerance for floating point comparison
              if (std::abs(actual_vf - expected_vf) > 1e-9) {
-                  amrex::Abort("FAIL: Volume fraction mismatch. Expected: " + std::to_string(expected_vf) + ", Calculated: " + std::to_string(actual_vf));
+                 amrex::Abort("FAIL: Volume fraction mismatch. Expected: " + std::to_string(expected_vf) + ", Calculated: " + std::to_string(actual_vf));
              } else {
                   if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    PASS\n";
              }
         } else {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
         }
 
 
@@ -256,11 +256,7 @@ int main (int argc, char* argv[])
                     // if the solver failed. This catches cases where flux calculation might fail too.
                     test_passed = false; // Mark test as failed
                 }
-            } catch (const amrex::Abort& abortExc) {
-                 // Catch potential amrex::Abort from within TortuosityHypre if HYPRE_CHECK fails
-                 amrex::Print() << "FAIL: Caught amrex::Abort during Tortuosity calculation: " << abortExc.what() << "\n";
-                 test_passed = false;
-                 actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN(); // Ensure tau is NaN on failure
+            // <<< The invalid catch block for amrex::Abort was removed here >>>
             } catch (const std::exception& stdExc) {
                  amrex::Print() << "FAIL: Caught std::exception during Tortuosity calculation: " << stdExc.what() << "\n";
                  test_passed = false;
@@ -288,48 +284,48 @@ int main (int argc, char* argv[])
         // --- Check Tortuosity Value (if calculation was attempted and didn't fail immediately) ---
          if(amrex::ParallelDescriptor::IOProcessor()) {
              // Print calculated value regardless of whether expected value was provided
-             amrex::Print() << " Calculated Tortuosity:   " << std::fixed << std::setprecision(8) << actual_tau << "\n";
+             amrex::Print() << " Calculated Tortuosity:    " << std::fixed << std::setprecision(8) << actual_tau << "\n";
          }
 
         if (expected_tau >= 0.0) { // Check only if an expected value is provided
-             if(amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << " Expected Tortuosity:   " << std::fixed << std::setprecision(8) << expected_tau << "\n";
-             }
-            bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
+              if(amrex::ParallelDescriptor::IOProcessor()) {
+                  amrex::Print() << " Expected Tortuosity:    " << std::fixed << std::setprecision(8) << expected_tau << "\n";
+              }
+             bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
 
-            if (actual_is_invalid) {
-                // Failure message already printed above if tau is NaN/Inf
-                test_passed = false; // Ensure test_passed is false
-            } else {
-                // Compare valid numbers using the specified tolerance
-                if (std::abs(actual_tau - expected_tau) > tolerance) {
-                    if(amrex::ParallelDescriptor::IOProcessor()) {
-                        amrex::Print() << "FAIL: Tortuosity mismatch. Diff: "
-                                       << std::scientific << std::setprecision(6)
-                                       << std::abs(actual_tau - expected_tau)
-                                       << " > Tolerance: " << tolerance << "\n";
-                    }
-                    test_passed = false;
-                }
-            }
-            // Only print PASS if the check was performed and no failure occurred
-            if(test_passed && amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << " Tortuosity Check:       PASS\n";
-            }
-        } else { // No expected value provided
-             if(amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << " Tortuosity Check:       SKIPPED (no expected value provided)\n";
+             if (actual_is_invalid) {
+                 // Failure message already printed above if tau is NaN/Inf
+                 test_passed = false; // Ensure test_passed is false
+             } else {
+                 // Compare valid numbers using the specified tolerance
+                 if (std::abs(actual_tau - expected_tau) > tolerance) {
+                     if(amrex::ParallelDescriptor::IOProcessor()) {
+                         amrex::Print() << "FAIL: Tortuosity mismatch. Diff: "
+                                        << std::scientific << std::setprecision(6)
+                                        << std::abs(actual_tau - expected_tau)
+                                        << " > Tolerance: " << tolerance << "\n";
+                     }
+                     test_passed = false;
+                 }
              }
+             // Only print PASS if the check was performed and no failure occurred
+             if(test_passed && amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << " Tortuosity Check:         PASS\n";
+             }
+        } else { // No expected value provided
+              if(amrex::ParallelDescriptor::IOProcessor()) {
+                  amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
+              }
              // If tau is NaN/Inf here, it means calculation failed, test_passed should already be false.
              // If tau is a valid number, test passes by default if no expected value given.
         }
 
         // --- Final Verdict ---
         if (test_passed) {
-             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
+              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
         } else {
-             // Use amrex::Abort to ensure the test run fails with non-zero exit code in CI
-             amrex::Abort("Tortuosity Test FAILED.");
+              // Use amrex::Abort to ensure the test run fails with non-zero exit code in CI
+              amrex::Abort("Tortuosity Test FAILED.");
         }
 
         amrex::Real stop_time = amrex::second() - strt_time;
