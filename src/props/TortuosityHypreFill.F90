@@ -32,6 +32,9 @@ contains
   ! ::: -----------------------------------------------------------
   ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
   ! ::: Uses explicit decoupling for blocked cells (Aii=1, Aij=0, bi=0).
+  ! ::: Applies Neumann BCs at phase boundaries.
+  ! ::: Applies Dirichlet BCs at domain boundaries perp. to flow.
+  ! ::: FIX: Added decoupling for isolated conducting cells.
   ! ::: -----------------------------------------------------------
   subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
                                 bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir) bind(c)
@@ -55,7 +58,7 @@ contains
     integer :: len_x, len_y, len_z, expected_nval
     real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
-    logical :: on_dirichlet_boundary  ! <<< MOVED DECLARATION HERE
+    logical :: on_dirichlet_boundary  ! Flag for cells on Dirichlet boundary
 
     ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
@@ -102,7 +105,7 @@ contains
               ! -X face
               if ( p(i-1,j,k,comp_phase) .ne. phase ) then
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_x ! Absorb flux
-                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                          ! Zero connection
+                  a(stencil_idx_start + istn_mx) = 0.0_amrex_real                      ! Zero connection
               end if
               ! +X face
               if ( p(i+1,j,k,comp_phase) .ne. phase ) then
@@ -129,14 +132,14 @@ contains
                   a(stencil_idx_start + istn_c)  = a(stencil_idx_start + istn_c)  - coeff_z
                   a(stencil_idx_start + istn_pz) = 0.0_amrex_real
               end if
-              ! RHS remains 0.0 for internal fluid cells
+              ! RHS remains 0.0 for internal fluid cells before BCs
 
           else
               ! Blocked cell (not the specified conductive phase)
               ! --- Apply Explicit Decoupling (Aii=1, Aij=0, bi=0) ---
               a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Zero out all stencil entries
-              a(stencil_idx_start + istn_c) = 1.0_amrex_real                           ! Set diagonal to 1
-              rhs(m_idx) = 0.0_amrex_real                                              ! Set RHS to 0
+              a(stencil_idx_start + istn_c) = 1.0_amrex_real                      ! Set diagonal to 1
+              rhs(m_idx) = 0.0_amrex_real                                         ! Set RHS to 0
 
           end if ! End of fluid/blocked check
 
@@ -144,16 +147,19 @@ contains
           ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
           ! This applies AFTER the fluid/blocked logic, ensuring Dirichlet BCs take precedence
           ! at the boundary, regardless of whether the boundary cell is fluid or blocked.
+          on_dirichlet_boundary = .false. ! Assume not on Dirichlet boundary initially
           ! X-Direction Flow
           if ( dir == direction_x ) then
               if ( i == domlo(1) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
                   a(stencil_idx_start + istn_c) = 1.0_amrex_real
                   rhs(m_idx) = vlo
+                  on_dirichlet_boundary = .true.
               else if ( i == domhi(1) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
                   a(stencil_idx_start + istn_c) = 1.0_amrex_real
                   rhs(m_idx) = vhi
+                  on_dirichlet_boundary = .true.
               end if
           ! Y-Direction Flow
           else if ( dir == direction_y ) then
@@ -161,10 +167,12 @@ contains
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
                   a(stencil_idx_start + istn_c) = 1.0_amrex_real
                   rhs(m_idx) = vlo
+                  on_dirichlet_boundary = .true.
               else if ( j == domhi(2) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
                   a(stencil_idx_start + istn_c) = 1.0_amrex_real
                   rhs(m_idx) = vhi
+                  on_dirichlet_boundary = .true.
               end if
           ! Z-Direction Flow
           else if ( dir == direction_z ) then
@@ -172,63 +180,68 @@ contains
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
                   a(stencil_idx_start + istn_c) = 1.0_amrex_real
                   rhs(m_idx) = vlo
+                  on_dirichlet_boundary = .true.
               else if ( k == domhi(3) ) then
                   a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
                   a(stencil_idx_start + istn_c) = 1.0_amrex_real
                   rhs(m_idx) = vhi
+                  on_dirichlet_boundary = .true.
               end if
-          end if ! End of Dirichlet BC overwrite
+          end if ! End of Dirichlet BC overwrite check
+
+
+          ! --- *** FIX: Decouple isolated fluid cells *** ---
+          ! Check fluid cells that are NOT on a Dirichlet boundary AFTER Neumann adjustments.
+          ! If the diagonal is zero, the cell is effectively isolated. Decouple it.
+          if ( p(i,j,k,comp_phase) == phase .and. .not. on_dirichlet_boundary ) then
+             if ( abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
+                 ! This fluid cell is effectively isolated, decouple it
+                 a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Zero out all stencil entries
+                 a(stencil_idx_start + istn_c) = 1.0_amrex_real                      ! Set diagonal to 1
+                 rhs(m_idx) = 0.0_amrex_real                                         ! Set RHS to 0
+             end if
+          end if
+          ! --- *** END FIX *** ---
+
 
           ! --- Calculate Initial Guess ---
-          ! Set initial guess to 0 for blocked cells, linear ramp for fluid cells
-          if ( p(i,j,k,comp_phase) == phase ) then
+          ! Set initial guess to 0 for blocked OR isolated fluid cells, linear ramp for connected fluid cells
+          ! We check the final state after potential decoupling fix
+          if ( p(i,j,k,comp_phase) == phase .and. &
+               ( on_dirichlet_boundary .or. abs(a(stencil_idx_start + istn_c) - 1.0_amrex_real) > 1.0e-15_amrex_real ) ) then
+              ! This is a connected fluid cell (diagonal is not 1 due to decoupling) OR a Dirichlet BC cell
               if ( dir == direction_x ) then
                   domain_extent = domhi(1) - domlo(1)
                   if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                      factor = 0.0_amrex_real
+                     factor = 0.0_amrex_real
                   else
-                      factor = 1.0_amrex_real / domain_extent
+                     factor = 1.0_amrex_real / domain_extent
                   end if
                   xinit(m_idx) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
               else if ( dir == direction_y ) then
                   domain_extent = domhi(2) - domlo(2)
                   if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                      factor = 0.0_amrex_real
+                     factor = 0.0_amrex_real
                   else
-                      factor = 1.0_amrex_real / domain_extent
+                     factor = 1.0_amrex_real / domain_extent
                   end if
                   xinit(m_idx) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
               else if ( dir == direction_z ) then
                   domain_extent = domhi(3) - domlo(3)
                   if (abs(domain_extent) < 1.0e-12_amrex_real) then
-                      factor = 0.0_amrex_real
+                     factor = 0.0_amrex_real
                   else
-                      factor = 1.0_amrex_real / domain_extent
+                     factor = 1.0_amrex_real / domain_extent
                   end if
                   xinit(m_idx) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
               else ! Should not happen if dir is 0, 1, or 2
                   xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
               end if
           else
-              ! Set initial guess in blocked cells explicitly to 0 (consistent with bi=0)
+              ! Set initial guess in blocked cells OR decoupled fluid cells explicitly to 0
               xinit(m_idx) = 0.0_amrex_real
           end if
           ! Note: Fortran array xinit uses 1-based index m_idx
-
-          ! --- Debug check for near-zero diagonals (Only for fluid cells now) ---
-          if ( p(i,j,k,comp_phase) == phase ) then
-             ! Check applies only if NOT on a Dirichlet boundary (where diagonal should be 1)
-             on_dirichlet_boundary = .false. ! <<< INITIALIZE FLAG HERE
-             if (dir == direction_x .and. (i == domlo(1) .or. i == domhi(1))) on_dirichlet_boundary = .true.
-             if (dir == direction_y .and. (j == domlo(2) .or. j == domhi(2))) on_dirichlet_boundary = .true.
-             if (dir == direction_z .and. (k == domlo(3) .or. k == domhi(3))) on_dirichlet_boundary = .true.
-
-             if ( .not. on_dirichlet_boundary .and. abs(a(stencil_idx_start + istn_c)) < 1.0e-15_amrex_real ) then
-                 write(*,'(A,3I5,A,ES10.3)') &
-                       "WARNING: Near-zero diagonal at fluid cell (i,j,k)=", i,j,k, &
-                       " value=", a(stencil_idx_start + istn_c)
-             end if
-          end if
 
         end do ! i
       end do ! j
