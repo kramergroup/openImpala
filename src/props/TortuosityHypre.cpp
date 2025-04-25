@@ -88,7 +88,7 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
       m_mf_phase(mf_phase_input, amrex::make_alias, 0, mf_phase_input.nComp()), // Use alias
       m_phase(phase), m_vf(vf),
       m_dir(dir), m_solvertype(st),
-      m_eps(1e-9), m_maxiter(200),
+      m_eps(1e-6), m_maxiter(200), // <<< Reset default eps to 1e-6 based on log
       m_vlo(vlo), m_vhi(vhi),
       m_resultspath(resultspath), m_verbose(verbose),
       m_write_plotfile(write_plotfile),
@@ -262,9 +262,9 @@ void OpenImpala::TortuosityHypre::preconditionPhaseFab()
                                domain_box.loVect(), domain_box.hiVect());
         } // End MFIter loop
 
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
              amrex::Print() << "    DEBUG [preconditionPhaseFab]: Finished remspot pass " << pass + 1 << std::endl;
-        }
+         }
     } // End pass loop
 
     // Final boundary fill after all passes are done
@@ -406,7 +406,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// <<< MODIFIED: Added BiCGSTAB and FlexGMRES options with default PFMG >>>
+// <<< MODIFIED: Temporarily disabled preconditioner for BiCGSTAB diagnostic >>>
 bool OpenImpala::TortuosityHypre::solve() {
     HYPRE_Int ierr = 0;
     HYPRE_StructSolver solver;
@@ -430,11 +430,11 @@ bool OpenImpala::TortuosityHypre::solve() {
         // --- Setup Tuned PFMG Preconditioner ---
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
         HYPRE_CHECK(ierr);
-        HYPRE_StructPFMGSetTol(precond, 0.0);         // Solve to zero tolerance (relative) within precond
-        HYPRE_StructPFMGSetMaxIter(precond, 1);       // Use one V-cycle (or other cycle) per application
-        HYPRE_StructPFMGSetRelaxType(precond, 6);     // Tuned: Use Red-Black G-S type smoother
-        HYPRE_StructPFMGSetNumPreRelax(precond, 2);   // Tuned: Increase pre-relaxation sweeps
-        HYPRE_StructPFMGSetNumPostRelax(precond, 2);  // Tuned: Increase post-relaxation sweeps
+        HYPRE_StructPFMGSetTol(precond, 0.0);       // Solve to zero tolerance (relative) within precond
+        HYPRE_StructPFMGSetMaxIter(precond, 1);      // Use one V-cycle (or other cycle) per application
+        HYPRE_StructPFMGSetRelaxType(precond, 6);    // Tuned: Use Red-Black G-S type smoother
+        HYPRE_StructPFMGSetNumPreRelax(precond, 2);  // Tuned: Increase pre-relaxation sweeps
+        HYPRE_StructPFMGSetNumPostRelax(precond, 2); // Tuned: Increase post-relaxation sweeps
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (tuned)." << std::endl;
         // --- End PFMG Setup ---
 
@@ -450,10 +450,10 @@ bool OpenImpala::TortuosityHypre::solve() {
         ierr = HYPRE_StructPCGSolve(solver, m_A, m_b, m_x);
         // Check for convergence issues
         if (ierr == HYPRE_ERROR_CONV) {
-            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
         } else if (ierr != 0) {
-            if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solve returned error code " << ierr << ". Possible divergence or other issue.\n";
-            // HYPRE_CHECK(ierr); // Optionally abort on any error
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE PCG solve returned error code " << ierr << ". Possible divergence or other issue.\n";
+             // HYPRE_CHECK(ierr); // Optionally abort on any error
         }
 
         // Get stats
@@ -514,7 +514,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructGMRESDestroy(solver);
         if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
     }
-    // --- FlexGMRES Solver ---  <<< NEWLY IMPLEMENTED >>>
+    // --- FlexGMRES Solver ---
     else if (m_solvertype == SolverType::FlexGMRES) {
         // NOTE: Using DEFAULT PFMG settings here for initial testing
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with Default PFMG Preconditioner..." << std::endl;
@@ -563,17 +563,19 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructFlexGMRESDestroy(solver);
         if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
     }
-    // --- BiCGSTAB Solver --- <<< NEWLY IMPLEMENTED >>>
+    // --- BiCGSTAB Solver --- <<< SECTION MODIFIED FOR DIAGNOSTICS >>>
     else if (m_solvertype == SolverType::BiCGSTAB) {
-        // NOTE: Using DEFAULT PFMG settings here for initial testing
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver with Default PFMG Preconditioner..." << std::endl;
+        // *** DIAGNOSTIC STEP: Running WITHOUT preconditioner ***
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver *** WITHOUT PRECONDITIONER *** (Diagnostic)..." << std::endl; // <<< MODIFIED LOG MSG
         ierr = HYPRE_StructBiCGSTABCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
         HYPRE_StructBiCGSTABSetTol(solver, m_eps);
         HYPRE_StructBiCGSTABSetMaxIter(solver, m_maxiter);
         HYPRE_StructBiCGSTABSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
 
-        // --- Setup Default PFMG Preconditioner ---
+        // --- Setup Default PFMG Preconditioner ---  <<< START COMMENT OUT >>>
+        /*
+        precond = NULL; // Ensure precond starts NULL
         ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
         HYPRE_CHECK(ierr);
         HYPRE_StructPFMGSetTol(precond, 0.0);
@@ -582,18 +584,22 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructPFMGSetNumPreRelax(precond, 1); // Default: 1 sweep
         HYPRE_StructPFMGSetNumPostRelax(precond, 1);// Default: 1 sweep
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (default settings)." << std::endl;
-        // --- End PFMG Setup ---
+        */
+        // --- End PFMG Setup --- <<< END COMMENT OUT >>>
 
-        // Set PFMG as preconditioner for BiCGSTAB
+        // Set PFMG as preconditioner for BiCGSTAB  <<< START COMMENT OUT >>>
+        /*
         HYPRE_StructBiCGSTABSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG set as preconditioner for BiCGSTAB." << std::endl;
+        */
+       // <<< END COMMENT OUT >>>
 
         // Setup and Solve
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructBiCGSTABSetup..." << std::endl;
-        ierr = HYPRE_StructBiCGSTABSetup(solver, m_A, m_b, m_x);
+        ierr = HYPRE_StructBiCGSTABSetup(solver, m_A, m_b, m_x); // Setup without preconditioner
         HYPRE_CHECK(ierr);
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructBiCGSTABSolve..." << std::endl;
-        ierr = HYPRE_StructBiCGSTABSolve(solver, m_A, m_b, m_x);
+        ierr = HYPRE_StructBiCGSTABSolve(solver, m_A, m_b, m_x); // Solve without preconditioner
         // Check for convergence issues
         if (ierr == HYPRE_ERROR_CONV) {
              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE BiCGSTAB solver did not converge within max iterations (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
@@ -608,7 +614,7 @@ bool OpenImpala::TortuosityHypre::solve() {
 
         // Clean up
         HYPRE_StructBiCGSTABDestroy(solver);
-        if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
+        // if (precond) HYPRE_StructPFMGDestroy(precond); // <<< PRECOND NOT CREATED
     }
     // --- Jacobi Solver ---
     else if (m_solvertype == SolverType::Jacobi) {
@@ -623,7 +629,7 @@ bool OpenImpala::TortuosityHypre::solve() {
          HYPRE_CHECK(ierr);
          ierr = HYPRE_StructJacobiSolve(solver, m_A, m_b, m_x);
          if (ierr == HYPRE_ERROR_CONV) {
-              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE Jacobi solver did not converge (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Warning: HYPRE Jacobi solver did not converge (Error Code " << ierr << "). Tortuosity may be inaccurate.\n";
          } else if (ierr != 0) { HYPRE_CHECK(ierr); } // Abort on other Jacobi errors
          HYPRE_StructJacobiGetNumIterations(solver, &m_num_iterations);
          HYPRE_StructJacobiGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
@@ -677,14 +683,14 @@ bool OpenImpala::TortuosityHypre::solve() {
                  for (int jj = lo[1]; jj <= hi[1]; ++jj) {
                      for (int ii = lo[0]; ii <= hi[0]; ++ii) {
                           if (k_lin_idx < npts) {
-                              soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
+                               soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
                           }
-                          k_lin_idx++;
+                         k_lin_idx++;
                      }
                  }
              }
               if (k_lin_idx != npts) {
-                  amrex::Warning("Linear index mismatch during HYPRE->AMReX copy in solve()!");
+                   amrex::Warning("Linear index mismatch during HYPRE->AMReX copy in solve()!");
               }
         } // End MFIter loop for copying solution
 
@@ -756,7 +762,7 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
              m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
         } else if (m_vf <= 0.0) {
              if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                  amrex::Print() << "Warning: Volume fraction is zero or negative. Tortuosity is ill-defined. Returning NaN." << std::endl;
+                 amrex::Print() << "Warning: Volume fraction is zero or negative. Tortuosity is ill-defined. Returning NaN." << std::endl;
              }
              m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
         } else {
@@ -796,13 +802,13 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 
                      if (effective_diffusivity <= 0.0) {
                           if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                               amrex::Print() << "Warning: Calculated effective diffusivity is zero or negative (" << effective_diffusivity
-                                              << "). Check flux direction relative to potential gradient. Returning NaN." << std::endl;
+                              amrex::Print() << "Warning: Calculated effective diffusivity is zero or negative (" << effective_diffusivity
+                                             << "). Check flux direction relative to potential gradient. Returning NaN." << std::endl;
                           }
                           m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
                      } else {
                          // Tortuosity = VolumeFraction / EffectiveDiffusivity (assuming D_intrinsic = 1)
-                         m_value = m_vf / effective_diffusivity;
+                        m_value = m_vf / effective_diffusivity;
                      }
                  }
             }
@@ -871,9 +877,9 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         for (int kk = lo[2]; kk <= hi[2]; ++kk) {
             for (int jj = lo[1]; jj <= hi[1]; ++jj) {
                 for (int ii = lo[0]; ii <= hi[0]; ++ii) {
-                    if (k_lin_idx < npts) {
-                        soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
-                    }
+                     if (k_lin_idx < npts) {
+                         soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
+                     }
                     k_lin_idx++;
                 }
             }
@@ -921,17 +927,17 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         for (int k = lo_flux[2]; k <= hi_flux[2]; ++k) {
              iv[2]=k;
              for (int j = lo_flux[1]; j <= hi_flux[1]; ++j) {
-                  iv[1]=j;
-                  for (int i = lo_flux[0]; i <= hi_flux[0]; ++i) {
-                       iv[0]=i;
-                       if (phase(iv, PhaseComp) == m_phase) { // Is it conductive phase?
-                            // Flux = - D * grad(phi) = -1 * (phi_i - phi_{i-1})/dx (for X dir)
-                            // Note: soln array has ghost cells filled
-                            grad = (soln(iv) - soln(iv - shift)) / dx[idir];
-                            flux = -grad; // Assumes D=1
-                            local_fxin += flux;
-                       }
-                  }
+                 iv[1]=j;
+                 for (int i = lo_flux[0]; i <= hi_flux[0]; ++i) {
+                      iv[0]=i;
+                      if (phase(iv, PhaseComp) == m_phase) { // Is it conductive phase?
+                          // Flux = - D * grad(phi) = -1 * (phi_i - phi_{i-1})/dx (for X dir)
+                          // Note: soln array has ghost cells filled
+                           grad = (soln(iv) - soln(iv - shift)) / dx[idir];
+                           flux = -grad; // Assumes D=1
+                           local_fxin += flux;
+                      }
+                 }
              }
         }
 
@@ -943,14 +949,14 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
             for (int j = lo_flux_hi[1]; j <= hi_flux_hi[1]; ++j) {
                 iv[1]=j;
                 for (int i = lo_flux_hi[0]; i <= hi_flux_hi[0]; ++i) {
-                     iv[0]=i;
-                     if (phase(iv, PhaseComp) == m_phase) { // Is it conductive phase?
-                           // Flux = - D * grad(phi) = -1 * (phi_{i+1} - phi_i)/dx (for X dir)
-                           // Note: soln array has ghost cells filled
+                      iv[0]=i;
+                      if (phase(iv, PhaseComp) == m_phase) { // Is it conductive phase?
+                          // Flux = - D * grad(phi) = -1 * (phi_{i+1} - phi_i)/dx (for X dir)
+                          // Note: soln array has ghost cells filled
                            grad = (soln(iv + shift) - soln(iv)) / dx[idir];
                            flux = -grad; // Assumes D=1
                            local_fxout += flux;
-                     }
+                      }
                 }
             }
         }
