@@ -405,11 +405,11 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// <<< MODIFIED: Using TUNED PFMG settings for BiCGSTAB >>>
+// <<< MODIFIED: Using Jacobi preconditioner for BiCGSTAB >>>
 bool OpenImpala::TortuosityHypre::solve() {
     HYPRE_Int ierr = 0;
     HYPRE_StructSolver solver;
-    HYPRE_StructSolver precond = NULL; // Use HYPRE_StructSolver type for PFMG too
+    HYPRE_StructSolver precond = NULL; // Can represent different preconditioner types
 
     m_num_iterations = -1;
     m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN();
@@ -559,31 +559,29 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructFlexGMRESDestroy(solver);
         if (precond) HYPRE_StructPFMGDestroy(precond); // Destroy PFMG
     }
-    // --- BiCGSTAB Solver --- <<< SECTION MODIFIED FOR TUNED PFMG >>>
+    // --- BiCGSTAB Solver --- <<< SECTION MODIFIED FOR JACOBI PRECONDITIONER >>>
     else if (m_solvertype == SolverType::BiCGSTAB) {
-        // *** Using TUNED PFMG settings ***
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver with Tuned PFMG Preconditioner..." << std::endl; // <<< MODIFIED LOG MSG
+        // *** Using Jacobi Preconditioner ***
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver with Jacobi Preconditioner..." << std::endl; // <<< MODIFIED LOG MSG
         ierr = HYPRE_StructBiCGSTABCreate(MPI_COMM_WORLD, &solver);
         HYPRE_CHECK(ierr);
         HYPRE_StructBiCGSTABSetTol(solver, m_eps);
         HYPRE_StructBiCGSTABSetMaxIter(solver, m_maxiter);
         HYPRE_StructBiCGSTABSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
 
-        // --- Setup Tuned PFMG Preconditioner --- // <<< RE-ENABLED & MODIFIED >>>
+        // --- Setup Jacobi Preconditioner --- // <<< MODIFIED >>>
         precond = NULL; // Ensure precond starts NULL
-        ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond);
+        ierr = HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &precond);
         HYPRE_CHECK(ierr);
-        HYPRE_StructPFMGSetTol(precond, 0.0);       // Solve to zero tolerance
-        HYPRE_StructPFMGSetMaxIter(precond, 1);      // One V-cycle
-        HYPRE_StructPFMGSetRelaxType(precond, 6);    // Tuned: Red-Black G-S
-        HYPRE_StructPFMGSetNumPreRelax(precond, 2);  // Tuned: 2 sweeps
-        HYPRE_StructPFMGSetNumPostRelax(precond, 2); // Tuned: 2 sweeps
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG Preconditioner created and configured (TUNED settings)." << std::endl; // <<< MODIFIED LOG MSG
-        // --- End PFMG Setup ---
+        // Configure Jacobi - typically just need to set max iterations to 1 for use as preconditioner
+        HYPRE_StructJacobiSetMaxIter(precond, 1);
+        // HYPRE_StructJacobiSetTol(precond, 0.0); // Usually tolerance is 0 for preconditioner solve
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Jacobi Preconditioner created and configured." << std::endl; // <<< MODIFIED LOG MSG
+        // --- End Jacobi Setup ---
 
-        // Set PFMG as preconditioner for BiCGSTAB // <<< RE-ENABLED >>>
-        HYPRE_StructBiCGSTABSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  PFMG (TUNED) set as preconditioner for BiCGSTAB." << std::endl; // <<< MODIFIED LOG MSG
+        // Set Jacobi as preconditioner for BiCGSTAB // <<< MODIFIED >>>
+        HYPRE_StructBiCGSTABSetPrecond(solver, HYPRE_StructJacobiSolve, HYPRE_StructJacobiSetup, precond);
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Jacobi set as preconditioner for BiCGSTAB." << std::endl; // <<< MODIFIED LOG MSG
 
         // Setup and Solve
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Running HYPRE_StructBiCGSTABSetup..." << std::endl;
@@ -605,7 +603,7 @@ bool OpenImpala::TortuosityHypre::solve() {
 
         // Clean up
         HYPRE_StructBiCGSTABDestroy(solver);
-        if (precond) HYPRE_StructPFMGDestroy(precond); // <<< RE-ENABLED >>>
+        if (precond) HYPRE_StructJacobiDestroy(precond); // <<< MODIFIED >>>
     }
     // --- Jacobi Solver ---
     else if (m_solvertype == SolverType::Jacobi) {
