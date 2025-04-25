@@ -55,7 +55,7 @@ contains
     integer :: len_x, len_y, len_z, expected_nval
     real(amrex_real) :: coeff_c, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
-    ! Removed penalty_factor parameter as it's no longer used
+    logical :: on_dirichlet_boundary  ! <<< MOVED DECLARATION HERE
 
     ! Calculate box dimensions based on bxlo/bxhi (the valid box)
     len_x = bxhi(1) - bxlo(1) + 1
@@ -218,7 +218,7 @@ contains
           ! --- Debug check for near-zero diagonals (Only for fluid cells now) ---
           if ( p(i,j,k,comp_phase) == phase ) then
              ! Check applies only if NOT on a Dirichlet boundary (where diagonal should be 1)
-             logical :: on_dirichlet_boundary = .false.
+             on_dirichlet_boundary = .false. ! <<< INITIALIZE FLAG HERE
              if (dir == direction_x .and. (i == domlo(1) .or. i == domhi(1))) on_dirichlet_boundary = .true.
              if (dir == direction_y .and. (j == domlo(2) .or. j == domhi(2))) on_dirichlet_boundary = .true.
              if (dir == direction_z .and. (k == domlo(3) .or. k == domhi(3))) on_dirichlet_boundary = .true.
