@@ -1,4 +1,4 @@
-// src/props/TortuosityHypre.cpp (with component index fix and debug print)
+// src/props/TortuosityHypre.cpp (with component index fix and targeted outlet seed debug)
 
 #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"      // For tortuosity_remspot, tortuosity_filct
@@ -16,7 +16,7 @@
 #include <set>       // For std::set in generateActivityMask (now unused, but keep for history)
 #include <algorithm> // For std::sort, std::unique
 #include <numeric>   // For std::accumulate, iota (potentially useful)
-#include <sstream>   // For std::stringstream in debug print
+#include <sstream>   // For std::stringstream
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H>
@@ -88,7 +88,7 @@ inline amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex:
 }
 
 // --- Constructor ---
-// (Unchanged in principle, but initialization depends on correct subsequent function calls)
+// (Unchanged)
 OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              const amrex::BoxArray& ba,
                                              const amrex::DistributionMapping& dm,
@@ -301,7 +301,7 @@ void OpenImpala::TortuosityHypre::preconditionPhaseFab()
 
 
 // --- *** NEW METHOD: Parallel Flood Fill *** ---
-// (CHANGED phase access index)
+// (Unchanged)
 void OpenImpala::TortuosityHypre::parallelFloodFill(
     amrex::iMultiFab& reachabilityMask, // Mask to fill (1=reached, 0=not). Must have 1 ghost cell. Comp 0.
     const amrex::iMultiFab& phaseFab,   // Phase field (only fill within specified phase). Must have 1 ghost cell. Comp 0.
@@ -328,7 +328,7 @@ void OpenImpala::TortuosityHypre::parallelFloodFill(
             if (tileBox.contains(seed)) {
                 // Mark seed only if it's the correct phase
                 // Use index 0 for phase data
-                if (phase_arr(seed, 0) == phaseID) { // <<< CHANGED from PhaseComp to 0
+                if (phase_arr(seed, 0) == phaseID) {
                     // Use MaskComp (0) for mask data
                     mask_arr(seed, MaskComp) = cell_active;
                 }
@@ -374,7 +374,7 @@ void OpenImpala::TortuosityHypre::parallelFloodFill(
 
                     // Skip if already reached or not the correct phase
                     // Use MaskComp (0) for mask data and index 0 for phase data
-                    if (mask_arr(current_cell, MaskComp) == cell_active || phase_arr(current_cell, 0) != phaseID) { // <<< CHANGED from PhaseComp to 0
+                    if (mask_arr(current_cell, MaskComp) == cell_active || phase_arr(current_cell, 0) != phaseID) {
                         return; // equivalent to continue in standard loop
                     }
 
@@ -429,7 +429,6 @@ void OpenImpala::TortuosityHypre::parallelFloodFill(
 
 // --- *** UPDATED METHOD: Generate Activity Mask using MPI_Allgatherv *** ---
 // Identifies percolating conducting phase using two boundary flood fills.
-// (CHANGED phase access index)
 void OpenImpala::TortuosityHypre::generateActivityMask(
     const amrex::iMultiFab& phaseFab, // Phase field (must have ghost cells, comp 0)
     int phaseID,                      // Conducting phase ID
@@ -439,32 +438,23 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
     AMREX_ASSERT(phaseFab.nGrow() >= 1);
     AMREX_ASSERT(phaseFab.nComp() == 1); // Ensure input has only 1 component
 
-    // ================== DEBUG PRINT ADDED HERE ==================
+    // ================== VERBOSE DEBUG PRINT DISABLED ==================
+    /*
     if (amrex::ParallelDescriptor::IOProcessor()) { // Add header only once
         amrex::Print() << "\n--- DEBUG: Phase values for X=98 and X=99 ---\n";
     }
-    // Ensure all ranks print header before data (optional, but helps order)
     amrex::ParallelDescriptor::Barrier();
-
-    // Define the boxes for the layers of interest
-    const amrex::Box& domain_box_debug = m_geom.Domain(); // Use geometry's domain
+    const amrex::Box& domain_box_debug = m_geom.Domain();
     amrex::Box layer98_box = domain_box_debug;
-    layer98_box.setSmall(0, 98); // X=98
-    layer98_box.setBig(0, 98);   // X=98
+    layer98_box.setSmall(0, 98); layer98_box.setBig(0, 98);
     amrex::Box layer99_box = domain_box_debug;
-    layer99_box.setSmall(0, 99); // X=99 (Last layer assuming X runs 0 to 99)
-    layer99_box.setBig(0, 99);   // X=99
+    layer99_box.setSmall(0, 99); layer99_box.setBig(0, 99);
 
-    // Loop through the MultiFab owned by this rank
     for (amrex::MFIter mfi(phaseFab); mfi.isValid(); ++mfi) {
         const amrex::Box& validBox = mfi.validbox();
-        const auto phase_arr = phaseFab.const_array(mfi); // Access phase data (comp 0)
-
-        // Check intersection with layer X=98
+        const auto phase_arr = phaseFab.const_array(mfi);
         amrex::Box intersection98 = validBox & layer98_box;
-        if (intersection98.ok()) { // If this rank owns part of layer 98
-            // Using std::cout directly from each rank for simplicity.
-            // Output might be interleaved when running with MPI > 1.
+        if (intersection98.ok()) {
             std::stringstream ss98;
             ss98 << "Rank " << amrex::ParallelDescriptor::MyProc() << " Layer X=98 Data:\n";
             amrex::LoopOnCpu(intersection98, [&](int i, int j, int k) {
@@ -472,10 +462,8 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
             });
             std::cout << ss98.str() << std::flush;
         }
-
-        // Check intersection with layer X=99
         amrex::Box intersection99 = validBox & layer99_box;
-        if (intersection99.ok()) { // If this rank owns part of layer 99
+        if (intersection99.ok()) {
             std::stringstream ss99;
             ss99 << "Rank " << amrex::ParallelDescriptor::MyProc() << " Layer X=99 Data:\n";
             amrex::LoopOnCpu(intersection99, [&](int i, int j, int k) {
@@ -484,12 +472,12 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
              std::cout << ss99.str() << std::flush;
         }
     }
-    // Barrier to let prints finish before continuing
     amrex::ParallelDescriptor::Barrier();
-     if (amrex::ParallelDescriptor::IOProcessor()) { // Add footer only once
+     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "--- END DEBUG: Phase values ---\n\n";
     }
-    // ================== END DEBUG PRINT ==================
+    */
+    // ================== END VERBOSE DEBUG PRINT ==================
 
 
     // Original code continues below...
@@ -516,7 +504,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         if (!inlet_intersect.isEmpty()) {
             amrex::LoopOnCpu(inlet_intersect, [&](int i, int j, int k) {
                 // Use index 0 consistently for phase data
-                if (phase_arr(i, j, k, 0) == phaseID) { // <<< CHANGED from PhaseComp to 0
+                if (phase_arr(i, j, k, 0) == phaseID) {
                     local_inlet_seeds.push_back(amrex::IntVect(i,j,k));
                 }
             });
@@ -525,18 +513,39 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         // Find outlet seeds on this tile's valid box
         amrex::Box outlet_intersect = validBox & domain_hi_face;
         if (!outlet_intersect.isEmpty()) {
-            amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // Correct signature
-                // Use index 0 consistently for phase data
-                if (phase_arr(i, j, k, 0) == phaseID) { // <<< CHANGED from PhaseComp to 0
+            // ================== TARGETED OUTLET SEED DEBUG ==================
+            // Print the intersection box being checked by this rank (once per FAB)
+            std::cout << "Rank " << amrex::ParallelDescriptor::MyProc() << " DEBUG: Checking outlet intersection: " << outlet_intersect << "\n";
+            std::cout << std::flush; // Ensure this prints before the loop data
+
+            amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // Loop over the intersection
+                int current_phase = phase_arr(i, j, k, 0);
+                bool condition_met = (current_phase == phaseID);
+                // Print details for EVERY cell checked in the intersection
+                std::cout << "Rank " << amrex::ParallelDescriptor::MyProc()
+                          << " OutletSeedCheck: (" << i << "," << j << "," << k << ")"
+                          << " PhaseValue=" << current_phase
+                          << " TargetPhaseID=" << phaseID
+                          << " ConditionMet=" << std::boolalpha << condition_met << std::endl;
+
+                if (condition_met) {
                     local_outlet_seeds.push_back(amrex::IntVect(i,j,k));
+                    // Optional: Print when a seed IS found
+                    // std::cout << "Rank " << amrex::ParallelDescriptor::MyProc() << " ---> FOUND Outlet Seed at (" << i << "," << j << "," << k << ")" << std::endl;
                 }
             });
+            std::cout << std::flush; // Flush rank output after loop
+            // ================== END TARGETED OUTLET SEED DEBUG ==================
         }
+        // Optional: Print if the intersection is empty for this rank
+        // else {
+        //     std::cout << "Rank " << amrex::ParallelDescriptor::MyProc() << " DEBUG: Outlet intersection is EMPTY.\n" << std::flush;
+        // }
     } // End MFIter for seeds
+    amrex::ParallelDescriptor::Barrier("Outlet_Seed_Debug_Prints"); // Add barrier after prints
 
     // --- Gather all seeds using MPI_Allgatherv ---
     // (MPI Logic Unchanged)
-
     // 1. Flatten local vectors of IntVects into vectors of ints
     std::vector<int> flat_local_inlet_seeds;
     flat_local_inlet_seeds.reserve(local_inlet_seeds.size() * AMREX_SPACEDIM);
@@ -633,7 +642,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  Found " << inlet_seeds.size() << " unique inlet seed points globally." << std::endl;
-        amrex::Print() << "  Found " << outlet_seeds.size() << " unique outlet seed points globally." << std::endl; // <<< Hopefully non-zero now!
+        amrex::Print() << "  Found " << outlet_seeds.size() << " unique outlet seed points globally." << std::endl; // <<< Check this value after MPI gather
     }
     // Warning message for non-percolation (unchanged, but hopefully less likely now)
     if (inlet_seeds.empty() || outlet_seeds.empty()) {
@@ -724,7 +733,7 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
 
 
 // --- Setup HYPRE Matrix and Vectors, Call Fortran Fill Routine ---
-// (Unchanged C++ part, assumes Fortran uses mask correctly)
+// (Unchanged)
 void OpenImpala::TortuosityHypre::setupMatrixEquation()
 {
     BL_PROFILE("TortuosityHypre::setupMatrixEquation"); // Add profile tag
@@ -866,7 +875,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 
 
 // --- Solve the Linear System using HYPRE ---
-// (Unchanged solver setup/call logic)
+// (Unchanged)
 bool OpenImpala::TortuosityHypre::solve() {
     BL_PROFILE("TortuosityHypre::solve"); // Add profile tag
     HYPRE_Int ierr = 0;
@@ -1097,7 +1106,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     }
 
     // --- Write plot file if requested ---
-    // (CHANGED phase access index for copy)
+    // (Unchanged)
     if (m_write_plotfile) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "  Writing solution plotfile..." << std::endl;
@@ -1152,13 +1161,13 @@ bool OpenImpala::TortuosityHypre::solve() {
 
         amrex::Copy(mf_plot, mf_soln_temp, 0, 0, 1, 0);     // Solution to component 0
         // Copy Phase ID (component 0) from m_mf_phase into component 1 of mf_plot
-        amrex::Copy(mf_plot, m_mf_phase, 0, 1, 1, 0); // <<< CHANGED srcComp from PhaseComp (1) to 0
+        amrex::Copy(mf_plot, m_mf_phase, 0, 1, 1, 0);
         amrex::Copy(mf_plot, mf_mask_temp, 0, 2, 1, 0);     // Active Mask to component 2
 
 
         // Define plotfile name and variable names
         std::string plotfilename = m_resultspath + "/tortuosity_solution";
-        amrex::Vector<std::string> varnames = {"solution_potential", "phase_id", "active_mask"}; // Phase is now correctly copied
+        amrex::Vector<std::string> varnames = {"solution_potential", "phase_id", "active_mask"};
 
         // Write the plotfile
         amrex::WriteSingleLevelPlotfile(plotfilename, mf_plot, varnames, m_geom, 0.0, 0);
@@ -1174,7 +1183,7 @@ bool OpenImpala::TortuosityHypre::solve() {
 
 
 // --- Calculate Tortuosity Value (Calls Solve if needed) ---
-// (Unchanged logic, but relies on correct solve() behavior)
+// (Unchanged)
 amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 {
     if (m_first_call || refresh) {
@@ -1289,7 +1298,7 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
 
 
 // --- Calculate Global Fluxes Across Domain Boundaries ---
-// (Unchanged flux calculation logic, relies on correct solution)
+// (Unchanged)
 void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout) /* const removed */
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
