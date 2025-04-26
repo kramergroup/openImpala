@@ -5,7 +5,7 @@ tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
 
 # --- Tortuosity specific parameters ---
 
-phase_id = 1          # ID of the phase to calculate tortuosity for
+phase_id = 0          # ID of the phase to calculate tortuosity for
 direction = X         # X, Y, or Z
 # Solver type (Options: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB)
 solver = FlexGMRES     # Set solver to test BiCGSTAB + PFMG combination
