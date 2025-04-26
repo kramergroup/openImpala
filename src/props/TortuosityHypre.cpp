@@ -1,4 +1,4 @@
-// src/props/TortuosityHypre.cpp (with component index fix and targeted outlet seed debug)
+// src/props/TortuosityHypre.cpp (with component index fix and detailed outlet seed box debug)
 
 #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"      // For tortuosity_remspot, tortuosity_filct
@@ -512,11 +512,22 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
 
         // Find outlet seeds on this tile's valid box
         amrex::Box outlet_intersect = validBox & domain_hi_face;
-        if (!outlet_intersect.isEmpty()) {
-            // ================== TARGETED OUTLET SEED DEBUG ==================
-            // Print the intersection box being checked by this rank (once per FAB)
-            std::cout << "Rank " << amrex::ParallelDescriptor::MyProc() << " DEBUG: Checking outlet intersection: " << outlet_intersect << "\n";
-            std::cout << std::flush; // Ensure this prints before the loop data
+
+        // =============== NEW BOX INTERSECTION DEBUG ===============
+        std::cout << "Rank " << amrex::ParallelDescriptor::MyProc()
+                  << " outlet_seed_finding:"
+                  << " validBox=" << validBox
+                  << " domain_hi_face=" << domain_hi_face
+                  << " outlet_intersect=" << outlet_intersect
+                  << " isEmpty=" << std::boolalpha << outlet_intersect.isEmpty()
+                  << std::endl << std::flush;
+        // =============== END NEW BOX INTERSECTION DEBUG ===============
+
+        if (!outlet_intersect.isEmpty()) { // Check if the intersection is valid
+
+            // Print the header for the detailed check only if intersection is OK
+            //std::cout << "Rank " << amrex::ParallelDescriptor::MyProc() << " DEBUG: Checking outlet intersection: " << outlet_intersect << "\n";
+            //std::cout << std::flush;
 
             amrex::LoopOnCpu(outlet_intersect, [&](int i, int j, int k) { // Loop over the intersection
                 int current_phase = phase_arr(i, j, k, 0);
@@ -535,14 +546,15 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
                 }
             });
             std::cout << std::flush; // Flush rank output after loop
-            // ================== END TARGETED OUTLET SEED DEBUG ==================
         }
         // Optional: Print if the intersection is empty for this rank
         // else {
         //     std::cout << "Rank " << amrex::ParallelDescriptor::MyProc() << " DEBUG: Outlet intersection is EMPTY.\n" << std::flush;
         // }
+
     } // End MFIter for seeds
     amrex::ParallelDescriptor::Barrier("Outlet_Seed_Debug_Prints"); // Add barrier after prints
+
 
     // --- Gather all seeds using MPI_Allgatherv ---
     // (MPI Logic Unchanged)
