@@ -72,6 +72,20 @@ namespace {
 // Helper Functions and Class Implementation
 namespace OpenImpala {
 
+amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::loV (const amrex::Box& b) {
+    const int* lo_ptr = b.loVect();
+    amrex::Array<HYPRE_Int,AMREX_SPACEDIM> hypre_lo;
+    for (int i=0; i<AMREX_SPACEDIM; ++i) hypre_lo[i] = static_cast<HYPRE_Int>(lo_ptr[i]);
+    return hypre_lo;
+}
+
+amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex::Box& b) {
+    const int* hi_ptr = b.hiVect();
+    amrex::Array<HYPRE_Int,AMREX_SPACEDIM> hypre_hi;
+    for (int i=0; i<AMREX_SPACEDIM; ++i) hypre_hi[i] = static_cast<HYPRE_Int>(hi_ptr[i]);
+    return hypre_hi;
+}
+
 // --- Constructor ---
 // <<< MODIFIED: m_mf_phase is now initialized as a copy >>>
 OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
