@@ -3,6 +3,7 @@
 
 #include <string> // Needed for std::string
 #include <vector> // Needed for Vector<IntVect> in helper functions
+#include <limits> // Needed for std::numeric_limits
 
 #include <AMReX.H>
 #include <AMReX_iMultiFab.H>
@@ -26,7 +27,10 @@ namespace OpenImpala {
 
 /** Computes the tortuosity of a porous structure using HYPRE.
  *
- * (Rest of Doxygen comments remain the same...)
+ * Solves a diffusion equation (-Div(Grad(phi)) = 0 with Dirichlet BCs)
+ * on a masked subset of the domain derived from phase data, using HYPRE's
+ * structured-grid solvers (PFMG, SMG, Krylov methods) to find the potential field.
+ * Tortuosity is calculated from the resulting flux and volume fraction.
  */
 class TortuosityHypre : public OpenImpala::Tortuosity
 {
@@ -39,12 +43,25 @@ public:
         GMRES,      /**< HYPRE_StructGMRES */
         FlexGMRES,  /**< HYPRE_StructFlexGMRES */
         PCG,        /**< HYPRE_StructPCG */
-        BiCGSTAB    /**< HYPRE_StructBiCGSTAB */
+        BiCGSTAB,   /**< HYPRE_StructBiCGSTAB */
+        SMG         /**< HYPRE_StructSMG */ // <<< ADDED SMG HERE
     };
 
     /** Construct new Tortuosity solver using HYPRE.
      *
-     * (Constructor Doxygen comments remain the same...)
+     * @param geom AMReX Geometry object defining the domain.
+     * @param ba AMReX BoxArray defining the distribution of grid patches.
+     * @param dm AMReX DistributionMapping defining processor assignments.
+     * @param mf_phase_input Input iMultiFab containing phase IDs (expects 1 component, >=1 ghost cell).
+     * @param vf Volume fraction of the phase of interest (used in tortuosity calculation).
+     * @param phase Phase ID to calculate tortuosity for.
+     * @param dir Direction across which to apply potential difference (X, Y, or Z).
+     * @param solvertype Solver type to use (from SolverType enum).
+     * @param resultspath Path to directory for writing output files (e.g., plotfiles).
+     * @param vlo Potential value applied at the low boundary in the specified direction. Default 0.0.
+     * @param vhi Potential value applied at the high boundary in the specified direction. Default 1.0.
+     * @param verbose Verbosity level (0=silent, 1=basic, 2=detailed HYPRE output). Default 0.
+     * @param write_plotfile If true, write a plotfile of the solution potential field. Default false.
      */
     TortuosityHypre(const amrex::Geometry& geom,
                     const amrex::BoxArray& ba,
@@ -69,7 +86,12 @@ public:
 
     /** Calculate or retrieve the tortuosity value.
      *
-     * (value() Doxygen comments remain the same...)
+     * Solves the underlying diffusion equation using HYPRE if not already solved
+     * or if refresh is requested. Calculates flux and computes tortuosity.
+     * Returns NaN if the solver fails to converge or if fluxes/VF are invalid.
+     *
+     * @param refresh If true, forces recalculation by running the solver again. Default false.
+     * @return Tortuosity value (VF / (Deff/D0)), or NaN on failure/non-convergence.
      */
     amrex::Real value(const bool refresh = false) override;
 
@@ -86,8 +108,8 @@ private:
     void setupStencil();
     void setupMatrixEquation(); // Calls modified Fortran routine
     void preconditionPhaseFab();
-    void generateActivityMask(const amrex::iMultiFab& phaseFab, int phaseID, OpenImpala::Direction dir); // <<< NEW
-    void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // <<< NEW
+    void generateActivityMask(const amrex::iMultiFab& phaseFab, int phaseID, OpenImpala::Direction dir); // <<< From previous version
+    void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // <<< From previous version
     void getSolution (amrex::MultiFab& soln, int ncomp=0);
     void getCellTypes(amrex::MultiFab& phi, int ncomp=1);
     void global_fluxes(amrex::Real& fxin, amrex::Real& fxout);
@@ -100,9 +122,9 @@ private:
     const OpenImpala::Direction m_dir;
     const amrex::Real m_vlo;
     const amrex::Real m_vhi;
-    amrex::Real m_eps = 1e-7; // Consider using param parse default from cpp
-    int m_maxiter = 50000; // Consider using param parse default from cpp
-    int m_verbose = 0;
+    amrex::Real m_eps; // Now initialized via ParmParse in constructor
+    int m_maxiter;     // Now initialized via ParmParse in constructor
+    int m_verbose;
     amrex::Real m_vf;
     bool m_write_plotfile;
 
@@ -110,9 +132,11 @@ private:
     const amrex::Geometry& m_geom;
     const amrex::BoxArray& m_ba;
     const amrex::DistributionMapping& m_dm;
-    amrex::iMultiFab m_mf_phase;       // Original phase data (aliased from input)
-    amrex::MultiFab m_mf_phi;         // Solution field (potential, etc.)
-    amrex::iMultiFab m_mf_active_mask; // Mask for active/percolating cells <<< NEW
+    // Using make_alias in constructor means m_mf_phase refers to mf_phase_input's data
+    // Need careful lifetime management if TortuosityHypre object outlives input mf_phase_input
+    const amrex::iMultiFab m_mf_phase;
+    amrex::MultiFab m_mf_phi;           // Solution field (potential, phase, mask)
+    amrex::iMultiFab m_mf_active_mask;  // Mask for active/percolating cells (owned)
 
     // State
     amrex::Real m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
@@ -120,7 +144,7 @@ private:
 
     // Solver Statistics
     HYPRE_Int m_num_iterations = -1;
-    amrex::Real m_final_res_norm = -1.0;
+    amrex::Real m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN(); // Use NaN sentinel
 
     // HYPRE Data Structures
     HYPRE_StructGrid m_grid = NULL;
@@ -138,7 +162,7 @@ extern "C" {
     void tortuosity_fillmtx(
         amrex::Real* a, amrex::Real* rhs, amrex::Real* xinit,
         const int* nval,
-        const int* p, const int* p_lo, const int* p_hi,             // Phase data
+        const int* p, const int* p_lo, const int* p_hi,           // Phase data
         const int* active_mask, const int* mask_lo, const int* mask_hi, // <<< NEW: Mask data
         const int* bxlo, const int* bxhi,
         const int* domlo, const int* domhi,
