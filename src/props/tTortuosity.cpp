@@ -1,18 +1,19 @@
 #include "../io/TiffReader.H" // Assuming TiffReader is in OpenImpala namespace
 #include "TortuosityHypre.H"  // Assuming TortuosityHypre is in OpenImpala namespace
 #include "VolumeFraction.H"   // Assuming VolumeFraction is in OpenImpala namespace
+#include "Tortuosity.H"       // Include base class for OpenImpala::Direction enum
 
 #include <AMReX.H>
-#include <AMReX_ParmParse.H>         // For reading parameters
-#include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory
+#include <AMReX_ParmParse.H>           // For reading parameters
+#include <AMReX_Utility.H>             // For amrex::UtilCreateDirectory
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Print.H>
-#include <AMReX_PlotFileUtil.H>      // Include for plotfile writing if enabled
-#include <AMReX_MultiFabUtil.H>      // For amrex::Copy
+#include <AMReX_PlotFileUtil.H>        // Include for plotfile writing if enabled
+#include <AMReX_MultiFabUtil.H>        // For amrex::Copy, Convert
 #include <AMReX_Exception.H>
 
 #include <cstdlib>   // For getenv
@@ -23,6 +24,7 @@
 #include <memory>    // For std::unique_ptr
 #include <iomanip>   // For std::setprecision
 #include <stdio.h>   // For fprintf
+#include <algorithm> // For std::transform
 
 #include <HYPRE.h>   // Include main HYPRE header
 #include <mpi.h>     // Include MPI header for MPI_Finalize
@@ -32,7 +34,8 @@
 OpenImpala::Direction stringToDirection(const std::string& dir_str) {
     // Allow case-insensitive matching
     std::string lower_dir_str = dir_str;
-    std::transform(lower_dir_str.begin(), lower_dir_str.end(), lower_dir_str.begin(), ::tolower);
+    std::transform(lower_dir_str.begin(), lower_dir_str.end(), lower_dir_str.begin(),
+                   [](unsigned char c){ return std::tolower(c); }); // Use lambda for safety
 
     if (lower_dir_str == "x") {
         return OpenImpala::Direction::X;
@@ -47,11 +50,12 @@ OpenImpala::Direction stringToDirection(const std::string& dir_str) {
 }
 
 // Helper function to convert string to SolverType enum
-// <<< UPDATED to include SMG >>>
+// <<< UPDATED to include SMG and PFMG >>>
 OpenImpala::TortuosityHypre::SolverType stringToSolverType(const std::string& solver_str) {
     // Allow case-insensitive matching
     std::string lower_solver_str = solver_str;
-    std::transform(lower_solver_str.begin(), lower_solver_str.end(), lower_solver_str.begin(), ::tolower);
+     std::transform(lower_solver_str.begin(), lower_solver_str.end(), lower_solver_str.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
 
     if (lower_solver_str == "jacobi") {
         return OpenImpala::TortuosityHypre::SolverType::Jacobi;
@@ -63,12 +67,14 @@ OpenImpala::TortuosityHypre::SolverType stringToSolverType(const std::string& so
         return OpenImpala::TortuosityHypre::SolverType::PCG;
     } else if (lower_solver_str == "bicgstab") {
         return OpenImpala::TortuosityHypre::SolverType::BiCGSTAB;
-    } else if (lower_solver_str == "smg") { // <<< ADDED SMG CHECK HERE
+    } else if (lower_solver_str == "smg") {
         return OpenImpala::TortuosityHypre::SolverType::SMG;
+    } else if (lower_solver_str == "pfmg") { // <<< ADDED PFMG CHECK HERE
+        return OpenImpala::TortuosityHypre::SolverType::PFMG;
     }
     else {
         // <<< UPDATED Error Message >>>
-        amrex::Abort("Invalid solver string: " + solver_str + ". Supported: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB, SMG");
+        amrex::Abort("Invalid solver string: '" + solver_str + "'. Supported: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB, SMG, PFMG");
         // Return a default to avoid compiler warnings, although Abort stops execution
         return OpenImpala::TortuosityHypre::SolverType::GMRES;
     }
@@ -97,7 +103,7 @@ int main (int argc, char* argv[])
         std::string solver_str = "GMRES"; // Default if not specified in inputs
         int box_size = 32;
         int verbose = 1;
-        int write_plotfile = 0;
+        int write_plotfile = 0; // Use int for ParmParse compatibility (0=false, non-zero=true)
         amrex::Real expected_vf = -1.0;  // Use negative to indicate not set
         amrex::Real expected_tau = -1.0; // Use negative to indicate not set
         amrex::Real tolerance = 1e-9;    // Default tolerance for value check if expected_tau is set
@@ -158,6 +164,9 @@ int main (int argc, char* argv[])
                  amrex::Print() << "  Expected Tau:       " << expected_tau << "\n";
                  amrex::Print() << "  Check Tolerance:    " << tolerance << "\n";
             }
+            if (expected_vf >= 0.0) {
+                  amrex::Print() << "  Expected VF:        " << expected_vf << "\n";
+            }
             amrex::Print() << "------------------------------------\n\n";
         }
 
@@ -196,11 +205,11 @@ int main (int argc, char* argv[])
             // Basic check on thresholded data
             int min_phase_tmp = mf_phase_no_ghost.min(0);
             int max_phase_tmp = mf_phase_no_ghost.max(0);
-              if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n"; }
-              // Check if the entire domain is a single phase after thresholding
-              if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) {
-                   amrex::Abort("FAIL: Phase field uniform after thresholding. Check threshold value or input image.");
-              }
+               if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n"; }
+               // Check if the entire domain is a single phase after thresholding
+               if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) {
+                    amrex::Abort("FAIL: Phase field uniform after thresholding. Check threshold value or input image.");
+               }
 
             // Create the final phase iMultiFab with ghost cells and copy data
             const int required_ghost_cells = 1; // Need 1 ghost cell for TortuosityHypre
@@ -232,7 +241,7 @@ int main (int argc, char* argv[])
                    if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    PASS\n";
               }
         } else {
-              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
+               if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
         }
 
 
@@ -248,33 +257,76 @@ int main (int argc, char* argv[])
         // Only calculate tortuosity if the phase exists
         if (actual_vf > std::numeric_limits<amrex::Real>::epsilon()) // Use epsilon check for > 0
         {
-            if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Tortuosity...\n";
+            if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Constructing TortuosityHypre object...\n";
+            std::unique_ptr<OpenImpala::TortuosityHypre> tortuosity_ptr;
             try {
-                // Create and run the Tortuosity calculation
-                OpenImpala::TortuosityHypre tortuosity(
-                    geom, ba_original, dm_original, mf_phase_with_ghost,
-                    actual_vf, phase_id, direction, solver_type, resultsdir,
-                    v_lo, v_hi, verbose, (write_plotfile != 0)
-                );
-                actual_tau = tortuosity.value(); // Calculate tortuosity (this calls solve() internally)
-
-                // Check if the calculation itself resulted in NaN/Inf (e.g., due to solver failure)
-                if (std::isnan(actual_tau) || std::isinf(actual_tau)) {
-                    amrex::Print() << "FAIL: Calculated tortuosity is NaN or Inf!\n";
-                    // NOTE: The TortuosityHypre::value() method should have already printed a warning
-                    // if the solver failed. This catches cases where flux calculation might fail too.
-                    test_passed = false; // Mark test as failed
-                }
+                 tortuosity_ptr = std::make_unique<OpenImpala::TortuosityHypre>(
+                     geom, ba_original, dm_original, mf_phase_with_ghost,
+                     actual_vf, phase_id, direction, solver_type, resultsdir,
+                     v_lo, v_hi, verbose, (write_plotfile != 0)
+                 );
             } catch (const std::exception& stdExc) {
-                 amrex::Print() << "FAIL: Caught std::exception during Tortuosity calculation: " << stdExc.what() << "\n";
-                 test_passed = false;
-                 actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN();
+                amrex::Print() << "FAIL: Caught std::exception during TortuosityHypre construction: " << stdExc.what() << "\n";
+                test_passed = false;
+                // Abort here as subsequent checks/calculations will fail
+                amrex::Abort("TortuosityHypre construction failed.");
             } catch (...) {
-                 amrex::Print() << "FAIL: Caught unknown exception during Tortuosity calculation.\n";
+                amrex::Print() << "FAIL: Caught unknown exception during TortuosityHypre construction.\n";
                  test_passed = false;
-                 actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN();
+                 amrex::Abort("TortuosityHypre construction failed.");
             }
-        } else {
+
+
+            // --- << NEW: Perform Matrix Checks >> ---
+            if (test_passed) { // Only check if construction succeeded
+                if (ParallelDescriptor::IOProcessor()) {
+                    Print() << " Performing mathematical checks on the assembled matrix...\n";
+                }
+                bool matrix_checks_ok = tortuosity_ptr->checkMatrixProperties(); // Call the check function
+
+                if (!matrix_checks_ok) {
+                    amrex::Abort("FATAL: Assembled matrix/vector failed property checks in tTortuosity.");
+                    // Or: Record test failure without aborting if preferred
+                    // test_passed = false;
+                } else {
+                     if (ParallelDescriptor::IOProcessor()) {
+                         Print() << " Matrix property checks passed.\n";
+                     }
+                }
+            }
+            // --- End New Checks ---
+
+
+            // --- Calculate Tortuosity (calls solve internally) ---
+            if (test_passed) { // Only proceed if checks passed
+                 if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Tortuosity value...\n";
+                 try {
+                     actual_tau = tortuosity_ptr->value(); // Calculate tortuosity (this calls solve() internally)
+
+                     // Check if the calculation itself resulted in NaN/Inf (e.g., due to solver failure)
+                     if (std::isnan(actual_tau) || std::isinf(actual_tau)) {
+                         amrex::Print() << "FAIL: Calculated tortuosity is NaN or Inf!\n";
+                         // NOTE: The TortuosityHypre::value() method should have already printed a warning
+                         // if the solver failed. This catches cases where flux calculation might fail too.
+                         test_passed = false; // Mark test as failed
+                     }
+                 } catch (const amrex::AbortException& abortExc) {
+                     // Catch potential Aborts from within the solver/value call if not caught earlier
+                     amrex::Print() << "FAIL: Caught amrex::AbortException during Tortuosity calculation: " << abortExc.what() << "\n";
+                     test_passed = false;
+                     actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN();
+                 } catch (const std::exception& stdExc) {
+                      amrex::Print() << "FAIL: Caught std::exception during Tortuosity calculation: " << stdExc.what() << "\n";
+                      test_passed = false;
+                      actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN();
+                 } catch (...) {
+                      amrex::Print() << "FAIL: Caught unknown exception during Tortuosity calculation.\n";
+                      test_passed = false;
+                      actual_tau = std::numeric_limits<amrex::Real>::quiet_NaN();
+                 }
+            } // end if test_passed (after checks)
+
+        } else { // VF is zero
              if (verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) // Print even if verbose=0
                  amrex::Print() << " Skipping Tortuosity calculation because Volume Fraction is effectively zero (" << actual_vf << ").\n";
              // Decide how to handle expected_tau if VF is zero
@@ -296,36 +348,36 @@ int main (int argc, char* argv[])
          }
 
         if (expected_tau >= 0.0) { // Check only if an expected value is provided
-             if(amrex::ParallelDescriptor::IOProcessor()) {
+              if(amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << " Expected Tortuosity:    " << std::fixed << std::setprecision(8) << expected_tau << "\n";
-             }
-             bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
+              }
+              bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
 
-             if (actual_is_invalid) {
-                 // Failure message already printed above if tau is NaN/Inf
-                 test_passed = false; // Ensure test_passed is false
-             } else {
-                 // Compare valid numbers using the specified tolerance
-                 if (std::abs(actual_tau - expected_tau) > tolerance) {
-                     if(amrex::ParallelDescriptor::IOProcessor()) {
-                         amrex::Print() << "FAIL: Tortuosity mismatch. Diff: "
-                                        << std::scientific << std::setprecision(6)
-                                        << std::abs(actual_tau - expected_tau)
-                                        << " > Tolerance: " << tolerance << "\n";
-                     }
-                     test_passed = false;
-                 }
-             }
-             // Only print PASS if the check was performed and no failure occurred
-             if(test_passed && amrex::ParallelDescriptor::IOProcessor()) {
+              if (actual_is_invalid) {
+                  // Failure message already printed above if tau is NaN/Inf
+                  test_passed = false; // Ensure test_passed is false
+              } else {
+                  // Compare valid numbers using the specified tolerance
+                  if (std::abs(actual_tau - expected_tau) > tolerance) {
+                       if(amrex::ParallelDescriptor::IOProcessor()) {
+                           amrex::Print() << "FAIL: Tortuosity mismatch. Diff: "
+                                          << std::scientific << std::setprecision(6)
+                                          << std::abs(actual_tau - expected_tau)
+                                          << " > Tolerance: " << tolerance << "\n";
+                       }
+                       test_passed = false;
+                  }
+              }
+              // Only print PASS if the check was performed and no failure occurred
+              if(test_passed && amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << " Tortuosity Check:         PASS\n";
-             }
+              }
         } else { // No expected value provided
-             if(amrex::ParallelDescriptor::IOProcessor()) {
+              if(amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
-             }
-             // If tau is NaN/Inf here, it means calculation failed, test_passed should already be false.
-             // If tau is a valid number, test passes by default if no expected value given.
+              }
+              // If tau is NaN/Inf here, it means calculation failed, test_passed should already be false.
+              // If tau is a valid number, test passes by default if no expected value given.
         }
 
         // --- Final Verdict ---
