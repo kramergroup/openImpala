@@ -8,7 +8,7 @@ tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
 phase_id = 0          # ID of the phase to calculate tortuosity for
 direction = X         # X, Y, or Z
 # Solver type (Options: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB)
-solver = PCG     # Set solver to test BiCGSTAB + PFMG combination
+solver = FlexGMRES     # Set solver to test BiCGSTAB + PFMG combination
 
 # --- Solver Controls ---
 # Allow sufficient iterations for the potentially more effective PFMG preconditioner.
