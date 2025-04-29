@@ -4,6 +4,7 @@
 #include <string> // Needed for std::string
 #include <vector> // Needed for Vector<IntVect> in helper functions
 #include <limits> // Needed for std::numeric_limits
+// <cmath> is generally needed for implementation (.cpp), not declaration (.h)
 
 #include <AMReX.H>
 #include <AMReX_iMultiFab.H>
@@ -44,7 +45,8 @@ public:
         FlexGMRES,  /**< HYPRE_StructFlexGMRES */
         PCG,        /**< HYPRE_StructPCG */
         BiCGSTAB,   /**< HYPRE_StructBiCGSTAB */
-        SMG         /**< HYPRE_StructSMG */ // <<< ADDED SMG HERE
+        SMG,        /**< HYPRE_StructSMG */
+        PFMG        /**< HYPRE_StructPFMG */ // <<< ADDED PFMG HERE
     };
 
     /** Construct new Tortuosity solver using HYPRE.
@@ -95,6 +97,16 @@ public:
      */
     amrex::Real value(const bool refresh = false) override;
 
+    /**
+     * @brief Performs mathematical checks on the assembled HYPRE matrix and RHS vector.
+     * @details Iterates over local cells, retrieves matrix/vector values using HYPRE
+     * functions, and verifies properties like NaN/Inf absence, expected diagonal
+     * values based on cell activity/BCs, and row sums for interior nodes.
+     * Intended for use in testing/debugging *after* object construction but *before* calling value() or solve().
+     * @return True if all checks pass on all ranks, False otherwise.
+     */
+    bool checkMatrixProperties(); // <<< ADDED DECLARATION HERE
+
     // Static Helper Functions
     static amrex::Array<HYPRE_Int,AMREX_SPACEDIM> loV (const amrex::Box& b);
     static amrex::Array<HYPRE_Int,AMREX_SPACEDIM> hiV (const amrex::Box& b);
@@ -108,10 +120,10 @@ private:
     void setupStencil();
     void setupMatrixEquation(); // Calls modified Fortran routine
     void preconditionPhaseFab();
-    void generateActivityMask(const amrex::iMultiFab& phaseFab, int phaseID, OpenImpala::Direction dir); // <<< From previous version
-    void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // <<< From previous version
-    void getSolution (amrex::MultiFab& soln, int ncomp=0);
-    void getCellTypes(amrex::MultiFab& phi, int ncomp=1);
+    void generateActivityMask(const amrex::iMultiFab& phaseFab, int phaseID, OpenImpala::Direction dir); // Uses flood fill
+    void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // Helper for mask generation
+    void getSolution (amrex::MultiFab& soln, int ncomp=0); // Not implemented
+    void getCellTypes(amrex::MultiFab& phi, int ncomp=1); // Not implemented
     void global_fluxes(amrex::Real& fxin, amrex::Real& fxout);
 
     // --- Member Variables ---
@@ -122,8 +134,8 @@ private:
     const OpenImpala::Direction m_dir;
     const amrex::Real m_vlo;
     const amrex::Real m_vhi;
-    amrex::Real m_eps; // Now initialized via ParmParse in constructor
-    int m_maxiter;     // Now initialized via ParmParse in constructor
+    amrex::Real m_eps; // Initialized via ParmParse
+    int m_maxiter;     // Initialized via ParmParse
     int m_verbose;
     amrex::Real m_vf;
     bool m_write_plotfile;
@@ -132,10 +144,9 @@ private:
     const amrex::Geometry& m_geom;
     const amrex::BoxArray& m_ba;
     const amrex::DistributionMapping& m_dm;
-    // Using make_alias in constructor means m_mf_phase refers to mf_phase_input's data
-    // Need careful lifetime management if TortuosityHypre object outlives input mf_phase_input
+    // m_mf_phase is now an owned copy, initialized in constructor
     amrex::iMultiFab m_mf_phase;
-    amrex::MultiFab m_mf_phi;           // Solution field (potential, phase, mask)
+    amrex::MultiFab m_mf_phi;           // Solution field (potential, phase, mask) - potentially remove if only plotfile needed
     amrex::iMultiFab m_mf_active_mask;  // Mask for active/percolating cells (owned)
 
     // State
@@ -159,23 +170,29 @@ private:
 // Place this outside the class, potentially within the namespace or globally
 // Ensure these match the declarations used for binding in your build system
 extern "C" {
+    // Fills matrix/rhs/xinit based on phase (optional), mask, and BCs
     void tortuosity_fillmtx(
         amrex::Real* a, amrex::Real* rhs, amrex::Real* xinit,
         const int* nval,
-        const int* p, const int* p_lo, const int* p_hi,           // Phase data
-        const int* active_mask, const int* mask_lo, const int* mask_hi, // <<< NEW: Mask data
-        const int* bxlo, const int* bxhi,
-        const int* domlo, const int* domhi,
-        const amrex::Real* dxinv,
-        const amrex::Real* vlo, const amrex::Real* vhi,
-        const int* phase_unused, const int* dir // phase arg now unused in F90 logic
+        const int* p, const int* p_lo, const int* p_hi,           // Phase data (Comp 0)
+        const int* active_mask, const int* mask_lo, const int* mask_hi, // Mask data (Comp 0)
+        const int* bxlo, const int* bxhi, // Box to compute coeffs over
+        const int* domlo, const int* domhi, // Domain bounds
+        const amrex::Real* dxinv, // 1/dx^2 array
+        const amrex::Real* vlo, const amrex::Real* vhi, // BC values
+        const int* phase_unused, const int* dir // Phase ID (unused), Direction
     );
 
-    void tortuosity_remspot(int* q, const int* q_lo, const int* q_hi, const int* ncomp,
-                            const int* bxlo, const int* bxhi,
-                            const int* domlo, const int* domhi);
+    // Removes isolated spots from phase data (operates on Comp 0)
+    void tortuosity_remspot(
+        int* q, const int* q_lo, const int* q_hi, // Data + bounds (incl ghosts)
+        const int* ncomp, // Number of components in q
+        const int* bxlo, const int* bxhi, // Box to iterate over
+        const int* domlo, const int* domhi // Domain bounds
+    );
 
     // Add declarations for other Fortran routines called from C++ if needed
+    // (These are not called from the C++ provided, but might exist)
     // void tortuosity_filct(...);
     // void tortuosity_filbc(...);
     // void tortuosity_filic(...);
