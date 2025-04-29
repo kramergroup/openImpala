@@ -3,16 +3,16 @@
 #include "VolumeFraction.H"   // Assuming VolumeFraction is in OpenImpala namespace
 
 #include <AMReX.H>
-#include <AMReX_ParmParse.H>        // For reading parameters
-#include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory
+#include <AMReX_ParmParse.H>         // For reading parameters
+#include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_BoxArray.H>
 #include <AMReX_DistributionMapping.H>
 #include <AMReX_iMultiFab.H>
 #include <AMReX_Print.H>
-#include <AMReX_PlotFileUtil.H>     // Include for plotfile writing if enabled
-#include <AMReX_MultiFabUtil.H>     // For amrex::Copy
+#include <AMReX_PlotFileUtil.H>      // Include for plotfile writing if enabled
+#include <AMReX_MultiFabUtil.H>      // For amrex::Copy
 #include <AMReX_Exception.H>
 
 #include <cstdlib>   // For getenv
@@ -30,11 +30,15 @@
 
 // Helper function to convert string to Direction enum
 OpenImpala::Direction stringToDirection(const std::string& dir_str) {
-    if (dir_str == "X" || dir_str == "x") {
+    // Allow case-insensitive matching
+    std::string lower_dir_str = dir_str;
+    std::transform(lower_dir_str.begin(), lower_dir_str.end(), lower_dir_str.begin(), ::tolower);
+
+    if (lower_dir_str == "x") {
         return OpenImpala::Direction::X;
-    } else if (dir_str == "Y" || dir_str == "y") {
+    } else if (lower_dir_str == "y") {
         return OpenImpala::Direction::Y;
-    } else if (dir_str == "Z" || dir_str == "z") {
+    } else if (lower_dir_str == "z") {
         return OpenImpala::Direction::Z;
     } else {
         amrex::Abort("Invalid direction string: " + dir_str + ". Use X, Y, or Z.");
@@ -43,23 +47,28 @@ OpenImpala::Direction stringToDirection(const std::string& dir_str) {
 }
 
 // Helper function to convert string to SolverType enum
-// <<< MODIFIED to include BiCGSTAB and FlexGMRES >>>
+// <<< UPDATED to include SMG >>>
 OpenImpala::TortuosityHypre::SolverType stringToSolverType(const std::string& solver_str) {
-    if (solver_str == "Jacobi") {
+    // Allow case-insensitive matching
+    std::string lower_solver_str = solver_str;
+    std::transform(lower_solver_str.begin(), lower_solver_str.end(), lower_solver_str.begin(), ::tolower);
+
+    if (lower_solver_str == "jacobi") {
         return OpenImpala::TortuosityHypre::SolverType::Jacobi;
-    } else if (solver_str == "GMRES") {
+    } else if (lower_solver_str == "gmres") {
         return OpenImpala::TortuosityHypre::SolverType::GMRES;
-    } else if (solver_str == "FlexGMRES") {
-        // NOTE: Implementation in TortuosityHypre.cpp might still be placeholder
+    } else if (lower_solver_str == "flexgmres") {
         return OpenImpala::TortuosityHypre::SolverType::FlexGMRES;
-    } else if (solver_str == "PCG") {
+    } else if (lower_solver_str == "pcg") {
         return OpenImpala::TortuosityHypre::SolverType::PCG;
-    } else if (solver_str == "BiCGSTAB") { // <<< ADDED
+    } else if (lower_solver_str == "bicgstab") {
         return OpenImpala::TortuosityHypre::SolverType::BiCGSTAB;
+    } else if (lower_solver_str == "smg") { // <<< ADDED SMG CHECK HERE
+        return OpenImpala::TortuosityHypre::SolverType::SMG;
     }
     else {
         // <<< UPDATED Error Message >>>
-        amrex::Abort("Invalid solver string: " + solver_str + ". Supported: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB");
+        amrex::Abort("Invalid solver string: " + solver_str + ". Supported: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB, SMG");
         // Return a default to avoid compiler warnings, although Abort stops execution
         return OpenImpala::TortuosityHypre::SolverType::GMRES;
     }
@@ -131,23 +140,23 @@ int main (int argc, char* argv[])
 
         // Convert string parameters to enums
         OpenImpala::Direction direction = stringToDirection(direction_str);
-        OpenImpala::TortuosityHypre::SolverType solver_type = stringToSolverType(solver_str);
+        OpenImpala::TortuosityHypre::SolverType solver_type = stringToSolverType(solver_str); // Use updated function
 
         if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "\n--- Tortuosity Test Configuration ---\n";
-            amrex::Print() << "  Input TIFF File:   " << tifffile << "\n";
-            amrex::Print() << "  Results Dir:       " << resultsdir << "\n";
-            amrex::Print() << "  Phase ID:          " << phase_id << "\n";
-            amrex::Print() << "  Direction:         " << direction_str << "\n";
-            amrex::Print() << "  Solver:            " << solver_str << "\n";
-            amrex::Print() << "  Box Size:          " << box_size << "\n";
-            amrex::Print() << "  Threshold Value:   " << threshold_val << "\n";
-            amrex::Print() << "  Boundary Values:   " << v_lo << " (lo), " << v_hi << " (hi)\n";
-            amrex::Print() << "  Write Plotfile:    " << (write_plotfile != 0 ? "Yes" : "No") << "\n";
-            amrex::Print() << "  Verbose Level:     " << verbose << "\n";
+            amrex::Print() << "  Input TIFF File:    " << tifffile << "\n";
+            amrex::Print() << "  Results Dir:        " << resultsdir << "\n";
+            amrex::Print() << "  Phase ID:           " << phase_id << "\n";
+            amrex::Print() << "  Direction:          " << direction_str << "\n";
+            amrex::Print() << "  Solver:             " << solver_str << "\n"; // Print the string read from input
+            amrex::Print() << "  Box Size:           " << box_size << "\n";
+            amrex::Print() << "  Threshold Value:    " << threshold_val << "\n";
+            amrex::Print() << "  Boundary Values:    " << v_lo << " (lo), " << v_hi << " (hi)\n";
+            amrex::Print() << "  Write Plotfile:     " << (write_plotfile != 0 ? "Yes" : "No") << "\n";
+            amrex::Print() << "  Verbose Level:      " << verbose << "\n";
             if (expected_tau >= 0.0) {
-                 amrex::Print() << "  Expected Tau:      " << expected_tau << "\n";
-                 amrex::Print() << "  Check Tolerance:   " << tolerance << "\n";
+                 amrex::Print() << "  Expected Tau:       " << expected_tau << "\n";
+                 amrex::Print() << "  Check Tolerance:    " << tolerance << "\n";
             }
             amrex::Print() << "------------------------------------\n\n";
         }
@@ -190,7 +199,7 @@ int main (int argc, char* argv[])
               if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "   Temporary phase field min/max: " << min_phase_tmp << " / " << max_phase_tmp << "\n"; }
               // Check if the entire domain is a single phase after thresholding
               if (min_phase_tmp == max_phase_tmp && ba_original.numPts() > 0) {
-                  amrex::Abort("FAIL: Phase field uniform after thresholding. Check threshold value or input image.");
+                   amrex::Abort("FAIL: Phase field uniform after thresholding. Check threshold value or input image.");
               }
 
             // Create the final phase iMultiFab with ghost cells and copy data
@@ -216,12 +225,12 @@ int main (int argc, char* argv[])
 
         // Optional check against expected VF
         if (expected_vf >= 0.0) {
-             // Allow small tolerance for floating point comparison
-             if (std::abs(actual_vf - expected_vf) > 1e-9) {
-                 amrex::Abort("FAIL: Volume fraction mismatch. Expected: " + std::to_string(expected_vf) + ", Calculated: " + std::to_string(actual_vf));
-             } else {
-                  if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    PASS\n";
-             }
+              // Allow small tolerance for floating point comparison
+              if (std::abs(actual_vf - expected_vf) > 1e-9) {
+                   amrex::Abort("FAIL: Volume fraction mismatch. Expected: " + std::to_string(expected_vf) + ", Calculated: " + std::to_string(actual_vf));
+              } else {
+                   if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    PASS\n";
+              }
         } else {
               if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Volume Fraction Check:    SKIPPED (no expected value provided)\n";
         }
@@ -256,7 +265,6 @@ int main (int argc, char* argv[])
                     // if the solver failed. This catches cases where flux calculation might fail too.
                     test_passed = false; // Mark test as failed
                 }
-            // <<< The invalid catch block for amrex::Abort was removed here >>>
             } catch (const std::exception& stdExc) {
                  amrex::Print() << "FAIL: Caught std::exception during Tortuosity calculation: " << stdExc.what() << "\n";
                  test_passed = false;
@@ -288,9 +296,9 @@ int main (int argc, char* argv[])
          }
 
         if (expected_tau >= 0.0) { // Check only if an expected value is provided
-              if(amrex::ParallelDescriptor::IOProcessor()) {
-                  amrex::Print() << " Expected Tortuosity:    " << std::fixed << std::setprecision(8) << expected_tau << "\n";
-              }
+             if(amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << " Expected Tortuosity:    " << std::fixed << std::setprecision(8) << expected_tau << "\n";
+             }
              bool actual_is_invalid = std::isnan(actual_tau) || std::isinf(actual_tau);
 
              if (actual_is_invalid) {
@@ -313,19 +321,19 @@ int main (int argc, char* argv[])
                  amrex::Print() << " Tortuosity Check:         PASS\n";
              }
         } else { // No expected value provided
-              if(amrex::ParallelDescriptor::IOProcessor()) {
-                  amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
-              }
+             if(amrex::ParallelDescriptor::IOProcessor()) {
+                 amrex::Print() << " Tortuosity Check:         SKIPPED (no expected value provided)\n";
+             }
              // If tau is NaN/Inf here, it means calculation failed, test_passed should already be false.
              // If tau is a valid number, test passes by default if no expected value given.
         }
 
         // --- Final Verdict ---
         if (test_passed) {
-              if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
+             if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "\n Test Completed Successfully.\n";
         } else {
-              // Use amrex::Abort to ensure the test run fails with non-zero exit code in CI
-              amrex::Abort("Tortuosity Test FAILED.");
+             // Use amrex::Abort to ensure the test run fails with non-zero exit code in CI
+             amrex::Abort("Tortuosity Test FAILED.");
         }
 
         amrex::Real stop_time = amrex::second() - strt_time;
