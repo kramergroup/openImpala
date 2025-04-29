@@ -134,7 +134,7 @@ private:
     const amrex::DistributionMapping& m_dm;
     // Using make_alias in constructor means m_mf_phase refers to mf_phase_input's data
     // Need careful lifetime management if TortuosityHypre object outlives input mf_phase_input
-    const amrex::iMultiFab m_mf_phase;
+    amrex::iMultiFab m_mf_phase;
     amrex::MultiFab m_mf_phi;           // Solution field (potential, phase, mask)
     amrex::iMultiFab m_mf_active_mask;  // Mask for active/percolating cells (owned)
 
