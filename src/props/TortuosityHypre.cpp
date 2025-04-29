@@ -732,8 +732,15 @@ bool OpenImpala::TortuosityHypre::solve() {
             const amrex::IntVect lo = bx.smallEnd();
             const amrex::IntVect hi = bx.bigEnd();
             long long k_lin_idx = 0;
-            for (int kk = lo[2]; kk <= hi[2]; ++kk) { /* ... nested loops ... */
-                soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]); k_lin_idx++;
+            for (int kk = lo[2]; kk <= hi[2]; ++kk) {
+                for (int jj = lo[1]; jj <= hi[1]; ++jj) {
+                    for (int ii = lo[0]; ii <= hi[0]; ++ii) {
+                        if (k_lin_idx < npts) { // Bounds check
+                           soln_arr(ii,jj,kk) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
+                        }
+                        k_lin_idx++;
+                    }
+                }
             }
             if (k_lin_idx != npts) { amrex::Warning("..."); }
         } // End MFIter
