@@ -1,4 +1,4 @@
-// src/props/TortuosityHypre.cpp (Fix Fortran calls, namespaces, Convert->convert)
+// src/props/TortuosityHypre.cpp (Fix convert->Copy for MultiFab type change)
 
 #include "TortuosityHypre.H"
 #include "Tortuosity_filcc_F.H"     // For tortuosity_remspot
@@ -19,7 +19,7 @@
 #include <sstream>   // For std::stringstream
 
 #include <AMReX_MultiFab.H>
-#include <AMReX_MultiFabUtil.H> // Needed for amrex::convert
+#include <AMReX_MultiFabUtil.H> // Needed for amrex::Copy
 #include <AMReX_PlotFileUtil.H>
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
@@ -426,11 +426,16 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
      }
 
      // --- Gather seeds across all MPI ranks ---
-     // (Flattening and MPI calls as before - code assumed correct from previous step)
      std::vector<int> flat_local_inlet_seeds(local_inlet_seeds.size() * AMREX_SPACEDIM);
-     for (size_t i = 0; i < local_inlet_seeds.size(); ++i) { /* Flatten */ for (int d=0; d<AMREX_SPACEDIM; ++d) flat_local_inlet_seeds[i*AMREX_SPACEDIM+d]=local_inlet_seeds[i][d]; }
+     // Flatten local_inlet_seeds
+     for (size_t i = 0; i < local_inlet_seeds.size(); ++i) {
+         for (int d=0; d<AMREX_SPACEDIM; ++d) flat_local_inlet_seeds[i*AMREX_SPACEDIM+d]=local_inlet_seeds[i][d];
+     }
      std::vector<int> flat_local_outlet_seeds(local_outlet_seeds.size() * AMREX_SPACEDIM);
-     for (size_t i = 0; i < local_outlet_seeds.size(); ++i) { /* Flatten */ for (int d=0; d<AMREX_SPACEDIM; ++d) flat_local_outlet_seeds[i*AMREX_SPACEDIM+d]=local_outlet_seeds[i][d]; }
+     // Flatten local_outlet_seeds
+     for (size_t i = 0; i < local_outlet_seeds.size(); ++i) {
+         for (int d=0; d<AMREX_SPACEDIM; ++d) flat_local_outlet_seeds[i*AMREX_SPACEDIM+d]=local_outlet_seeds[i][d];
+     }
      MPI_Comm comm = amrex::ParallelDescriptor::Communicator();
      int mpi_size = amrex::ParallelDescriptor::NProcs();
      int my_rank = amrex::ParallelDescriptor::MyProc();
@@ -444,17 +449,28 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
      std::vector<int> displacements_outlet(mpi_size, 0);
      int total_inlet_seeds = recv_counts_inlet[0];
      int total_outlet_seeds = recv_counts_outlet[0];
-     for (int i = 1; i < mpi_size; ++i) { /* Calculate displacements and totals */ displacements_inlet[i]=displacements_inlet[i-1]+recv_counts_inlet[i-1]; displacements_outlet[i]=displacements_outlet[i-1]+recv_counts_outlet[i-1]; total_inlet_seeds+=recv_counts_inlet[i]; total_outlet_seeds+=recv_counts_outlet[i]; }
+     for (int i = 1; i < mpi_size; ++i) {
+         displacements_inlet[i]=displacements_inlet[i-1]+recv_counts_inlet[i-1];
+         displacements_outlet[i]=displacements_outlet[i-1]+recv_counts_outlet[i-1];
+         total_inlet_seeds+=recv_counts_inlet[i];
+         total_outlet_seeds+=recv_counts_outlet[i];
+     }
      std::vector<int> flat_inlet_seeds_gathered(total_inlet_seeds);
      std::vector<int> flat_outlet_seeds_gathered(total_outlet_seeds);
      MPI_Allgatherv(flat_local_inlet_seeds.data(), local_inlet_count, MPI_INT, flat_inlet_seeds_gathered.data(), recv_counts_inlet.data(), displacements_inlet.data(), MPI_INT, comm);
      MPI_Allgatherv(flat_local_outlet_seeds.data(), local_outlet_count, MPI_INT, flat_outlet_seeds_gathered.data(), recv_counts_outlet.data(), displacements_outlet.data(), MPI_INT, comm);
      amrex::Vector<amrex::IntVect> inlet_seeds;
      inlet_seeds.reserve(total_inlet_seeds / AMREX_SPACEDIM);
-     for (size_t i = 0; i < flat_inlet_seeds_gathered.size(); i += AMREX_SPACEDIM) { /* Unflatten */ inlet_seeds.emplace_back(flat_inlet_seeds_gathered[i], flat_inlet_seeds_gathered[i+1], flat_inlet_seeds_gathered[i+2]); }
+     // Unflatten inlet seeds
+     for (size_t i = 0; i < flat_inlet_seeds_gathered.size(); i += AMREX_SPACEDIM) {
+         inlet_seeds.emplace_back(flat_inlet_seeds_gathered[i], flat_inlet_seeds_gathered[i+1], flat_inlet_seeds_gathered[i+2]);
+     }
      amrex::Vector<amrex::IntVect> outlet_seeds;
      outlet_seeds.reserve(total_outlet_seeds / AMREX_SPACEDIM);
-     for (size_t i = 0; i < flat_outlet_seeds_gathered.size(); i += AMREX_SPACEDIM) { /* Unflatten */ outlet_seeds.emplace_back(flat_outlet_seeds_gathered[i], flat_outlet_seeds_gathered[i+1], flat_outlet_seeds_gathered[i+2]); }
+     // Unflatten outlet seeds
+     for (size_t i = 0; i < flat_outlet_seeds_gathered.size(); i += AMREX_SPACEDIM) {
+         outlet_seeds.emplace_back(flat_outlet_seeds_gathered[i], flat_outlet_seeds_gathered[i+1], flat_outlet_seeds_gathered[i+2]);
+     }
      // --- End Seed Gathering ---
 
      std::sort(inlet_seeds.begin(), inlet_seeds.end());
@@ -511,8 +527,8 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
         if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Writing debug active mask plotfile..." << std::endl;
         std::string mask_plotfile = m_resultspath + "/debug_active_mask";
         amrex::MultiFab mf_mask_plot(m_ba, m_dm, 1, 0);
-        // --- CORRECTED Function Name ---
-        amrex::convert(mf_mask_plot, m_mf_active_mask, 0, 0, 1, 0); // Copy int mask to real MF
+        // --- CORRECTED Function Name (convert -> Copy) ---
+        amrex::Copy(mf_mask_plot, m_mf_active_mask, 0, 0, 1, 0); // Copy int mask to real MF
         amrex::Vector<std::string> mask_vn = {"active_mask"};
         amrex::WriteSingleLevelPlotfile(mask_plotfile, mf_mask_plot, mask_vn, m_geom, 0.0, 0);
      }
@@ -627,7 +643,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN();
 
     // --- PCG Solver ---
-    if (m_solvertype == SolverType::PCG) { /* As before */
+    if (m_solvertype == SolverType::PCG) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE PCG Solver with Tuned PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructPCGSetTol(solver, m_eps); HYPRE_StructPCGSetMaxIter(solver, m_maxiter);
@@ -649,7 +665,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructPCGDestroy(solver); if (precond) HYPRE_StructPFMGDestroy(precond);
     }
     // --- GMRES Solver ---
-    else if (m_solvertype == SolverType::GMRES) { /* As before */
+    else if (m_solvertype == SolverType::GMRES) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE GMRES Solver with Default PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructGMRESSetTol(solver, m_eps); HYPRE_StructGMRESSetMaxIter(solver, m_maxiter);
@@ -668,7 +684,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructGMRESDestroy(solver); if (precond) HYPRE_StructPFMGDestroy(precond);
     }
     // --- FlexGMRES Solver ---
-    else if (m_solvertype == SolverType::FlexGMRES) { /* As before */
+    else if (m_solvertype == SolverType::FlexGMRES) {
          if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with Tuned PFMG Preconditioner..." << std::endl;
         ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructFlexGMRESSetTol(solver, m_eps); HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter);
@@ -689,7 +705,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructFlexGMRESDestroy(solver); if (precond) HYPRE_StructPFMGDestroy(precond);
     }
     // --- BiCGSTAB Solver ---
-    else if (m_solvertype == SolverType::BiCGSTAB) { /* As before */
+    else if (m_solvertype == SolverType::BiCGSTAB) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver with Jacobi Preconditioner..." << std::endl;
         ierr = HYPRE_StructBiCGSTABCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructBiCGSTABSetTol(solver, m_eps); HYPRE_StructBiCGSTABSetMaxIter(solver, m_maxiter);
@@ -709,7 +725,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructBiCGSTABDestroy(solver); if (precond) HYPRE_StructJacobiDestroy(precond);
     }
     // --- Jacobi Solver ---
-    else if (m_solvertype == SolverType::Jacobi) { /* As before */
+    else if (m_solvertype == SolverType::Jacobi) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE Jacobi Solver (NO preconditioner)..." << std::endl;
         precond = NULL; ierr = HYPRE_StructJacobiCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructJacobiSetTol(solver, m_eps); HYPRE_StructJacobiSetMaxIter(solver, m_maxiter);
@@ -723,7 +739,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructJacobiDestroy(solver);
     }
     // --- SMG SOLVER CASE ---
-    else if (m_solvertype == SolverType::SMG) { /* As before */
+    else if (m_solvertype == SolverType::SMG) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE SMG Solver..." << std::endl;
         precond = NULL; ierr = HYPRE_StructSMGCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructSMGSetTol(solver, m_eps); HYPRE_StructSMGSetMaxIter(solver, m_maxiter);
@@ -739,7 +755,7 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructSMGDestroy(solver);
     }
      // --- PFMG SOLVER CASE ---
-    else if (m_solvertype == SolverType::PFMG) { /* As before */
+    else if (m_solvertype == SolverType::PFMG) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE PFMG Solver..." << std::endl;
         precond = NULL; ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
         HYPRE_StructPFMGSetTol(solver, m_eps); HYPRE_StructPFMGSetMaxIter(solver, m_maxiter);
@@ -755,7 +771,7 @@ bool OpenImpala::TortuosityHypre::solve() {
     }
     // --- Unknown Solver ---
     else {
-        std::string solverName = "Unknown"; // Add logic to get name from enum if available
+        std::string solverName = "Unknown";
         amrex::Abort("Unsupported solver type requested in TortuosityHypre::solve: " + std::to_string(static_cast<int>(m_solvertype)));
     }
 
@@ -800,15 +816,15 @@ bool OpenImpala::TortuosityHypre::solve() {
         } // End MFIter
 
         amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0);
-        // --- CORRECTED Function Name ---
-        amrex::convert(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0);
+        // --- CORRECTED Function Name (convert -> Copy) ---
+        amrex::Copy(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0);
         amrex::MultiFab mf_phase_temp(m_ba, m_dm, 1, 0);
-        // --- CORRECTED Function Name ---
-        amrex::convert(mf_phase_temp, m_mf_phase, 0, 0, 1, 0);
+        // --- CORRECTED Function Name (convert -> Copy) ---
+        amrex::Copy(mf_phase_temp, m_mf_phase, 0, 0, 1, 0);
 
-        amrex::Copy(mf_plot, mf_soln_temp,    0, 0, 1, 0);
-        amrex::Copy(mf_plot, mf_phase_temp,   0, 1, 1, 0);
-        amrex::Copy(mf_plot, mf_mask_temp,    0, 2, 1, 0);
+        amrex::Copy(mf_plot, mf_soln_temp,    0, 0, 1, 0); // Solution potential to comp 0
+        amrex::Copy(mf_plot, mf_phase_temp,   0, 1, 1, 0); // Phase ID to comp 1
+        amrex::Copy(mf_plot, mf_mask_temp,    0, 2, 1, 0); // Active Mask to comp 2
 
         std::string plotfilename = m_resultspath + "/tortuosity_solution_" + std::to_string(static_cast<int>(m_dir));
         amrex::Vector<std::string> varnames = {"solution_potential", "phase_id", "active_mask"};
@@ -827,7 +843,7 @@ bool OpenImpala::TortuosityHypre::solve() {
 // --- Calculate Tortuosity Value (Calls Solve if needed) ---
 amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 {
-    if (m_first_call || refresh) { /* As before */
+    if (m_first_call || refresh) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "Calculating Tortuosity (solve required)..." << std::endl; }
         bool converged = solve();
         if (!converged) {
@@ -837,15 +853,20 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
         }
         amrex::Real flux_in = 0.0, flux_out = 0.0;
         global_fluxes(flux_in, flux_out);
-        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { /* Print fluxes */ amrex::Print() << "  Calculated Fluxes: In = " << flux_in << ", Out = " << flux_out << std::endl; if (std::abs(flux_in + flux_out) > 1e-6 * (std::abs(flux_in) + std::abs(flux_out)) && std::abs(flux_in) > tiny_flux_threshold) { amrex::Warning("Flux conservation check failed"); } }
+        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+             amrex::Print() << "  Calculated Fluxes: In = " << flux_in << ", Out = " << flux_out << std::endl;
+             if (std::abs(flux_in + flux_out) > 1e-6 * (std::abs(flux_in) + std::abs(flux_out)) && std::abs(flux_in) > tiny_flux_threshold) {
+                  amrex::Warning("Flux conservation check failed: |flux_in + flux_out| / (|flux_in|+|flux_out|) > 1e-6");
+             }
+        }
         amrex::Real vf_for_calc = m_vf; amrex::Real L = m_geom.ProbLength(static_cast<int>(m_dir));
         amrex::Real A = 1.0; if (AMREX_SPACEDIM == 3) { if (m_dir == OpenImpala::Direction::X) A = m_geom.ProbLength(1) * m_geom.ProbLength(2); else if (m_dir == OpenImpala::Direction::Y) A = m_geom.ProbLength(0) * m_geom.ProbLength(2); else A = m_geom.ProbLength(0) * m_geom.ProbLength(1); } else if (AMREX_SPACEDIM == 2) { if (m_dir == OpenImpala::Direction::X) A = m_geom.ProbLength(1); else A = m_geom.ProbLength(0); }
         amrex::Real gradPhi = (m_vhi - m_vlo) / L; amrex::Real Deff = 0.0;
-        if (std::abs(flux_in) < tiny_flux_threshold) { /* Handle near-zero flux */ if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Input flux is near zero. Tortuosity set to Inf (or NaN if VF=0)." << std::endl; } m_value = (vf_for_calc > 0.0) ? std::numeric_limits<amrex::Real>::infinity() : std::numeric_limits<amrex::Real>::quiet_NaN(); }
-        else if (vf_for_calc <= 0.0) { /* Handle zero VF */ if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Volume fraction is zero. Tortuosity set to NaN." << std::endl; } m_value = std::numeric_limits<amrex::Real>::quiet_NaN(); }
-        else if (std::abs(gradPhi) < tiny_flux_threshold) { /* Handle zero potential gradient */ if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Potential gradient is zero. Tortuosity set to Inf." << std::endl; } m_value = std::numeric_limits<amrex::Real>::infinity(); }
+        if (std::abs(flux_in) < tiny_flux_threshold) { if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Input flux is near zero (" << flux_in << "). Tortuosity set to Inf (or NaN if VF=0)." << std::endl; } m_value = (vf_for_calc > 0.0) ? std::numeric_limits<amrex::Real>::infinity() : std::numeric_limits<amrex::Real>::quiet_NaN(); }
+        else if (vf_for_calc <= 0.0) { if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Volume fraction is zero. Tortuosity set to NaN." << std::endl; } m_value = std::numeric_limits<amrex::Real>::quiet_NaN(); }
+        else if (std::abs(gradPhi) < tiny_flux_threshold) { if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Potential gradient is zero (vlo=vhi). Tortuosity set to Inf." << std::endl; } m_value = std::numeric_limits<amrex::Real>::infinity(); }
         else { Deff = - (flux_in / A) / gradPhi; m_value = vf_for_calc / Deff; }
-        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { /* Print details */ amrex::Print() << "  Calculation Details: Vf=" << vf_for_calc << ", L=" << L << ", A=" << A << ", gradPhi=" << gradPhi << ", Deff=" << Deff << std::endl; amrex::Print() << "  Calculated Tortuosity: " << m_value << std::endl; }
+        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  Calculation Details: Vf=" << vf_for_calc << ", L=" << L << ", A=" << A << ", gradPhi=" << gradPhi << ", Deff=" << Deff << std::endl; amrex::Print() << "  Calculated Tortuosity: " << m_value << std::endl; }
     }
     return m_value;
 }
@@ -898,7 +919,6 @@ bool OpenImpala::TortuosityHypre::checkMatrixProperties() {
 
         if (!hypre_get_ok) {
              checks_passed_local = false;
-             // --- CORRECTED Namespace ---
              if (m_verbose > 0) amrex::Print() << "CHECK FAILED: HYPRE_GetBoxValues error on rank " << amrex::ParallelDescriptor::MyProc() << " for box " << bx << std::endl;
              continue;
         }
@@ -921,7 +941,7 @@ bool OpenImpala::TortuosityHypre::checkMatrixProperties() {
             // Check 1: NaN / Inf
             bool has_nan_inf = std::isnan(rhs_val) || std::isinf(rhs_val);
             for (int s = 0; s < stencil_size; ++s) { has_nan_inf = has_nan_inf || std::isnan(matrix_buffer[matrix_start_idx + s]) || std::isinf(matrix_buffer[matrix_start_idx + s]); }
-            if (has_nan_inf) { /* Report Error */ if (m_verbose > 0) amrex::Print() << "CHECK FAILED: NaN/Inf found at cell " << current_cell << std::endl; checks_passed_local = false; }
+            if (has_nan_inf) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: NaN/Inf found at cell " << current_cell << std::endl; checks_passed_local = false; }
 
             // Determine Cell Status
             int cell_activity = mask_arr(i, j, k);
@@ -929,10 +949,10 @@ bool OpenImpala::TortuosityHypre::checkMatrixProperties() {
             if (cell_activity == cell_active) { if ((idir == 0 && (i == domain.smallEnd(0) || i == domain.bigEnd(0))) || (idir == 1 && (j == domain.smallEnd(1) || j == domain.bigEnd(1))) || (idir == 2 && (k == domain.smallEnd(2) || k == domain.bigEnd(2)))) { is_dirichlet = true; } }
 
             // Check 2: Diagonal and RHS Value
-            if (cell_activity == cell_inactive) { /* Check Aii=1, b=0 */ if (std::abs(diag_val - 1.0) > tol || std::abs(rhs_val) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Inactive cell check fail at " << current_cell << " (Aii=" << diag_val << ", b=" << rhs_val << ")" << std::endl; checks_passed_local = false; } for (int s=1; s<stencil_size; ++s) { if (std::abs(matrix_buffer[matrix_start_idx + s]) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero off-diag [" << s << "] at inactive cell " << current_cell << " (Aij=" << matrix_buffer[matrix_start_idx + s] << ")" << std::endl; checks_passed_local = false; }} }
-            else if (is_dirichlet) { /* Check Aii=1, b=vlo/vhi */ double expected_rhs = ((idir == 0 && i == domain.smallEnd(0)) || (idir == 1 && j == domain.smallEnd(1)) || (idir == 2 && k == domain.smallEnd(2))) ? m_vlo : m_vhi; if (std::abs(diag_val - 1.0) > tol || std::abs(rhs_val - expected_rhs) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Dirichlet cell check fail at " << current_cell << " (Aii=" << diag_val << ", b=" << rhs_val << ", exp_b=" << expected_rhs << ")" << std::endl; checks_passed_local = false; } for (int s=1; s<stencil_size; ++s) { if (std::abs(matrix_buffer[matrix_start_idx + s]) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero off-diag [" << s << "] at Dirichlet cell " << current_cell << " (Aij=" << matrix_buffer[matrix_start_idx + s] << ")" << std::endl; checks_passed_local = false; }} }
+            if (cell_activity == cell_inactive) { if (std::abs(diag_val - 1.0) > tol || std::abs(rhs_val) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Inactive cell check fail at " << current_cell << " (Aii=" << diag_val << ", b=" << rhs_val << ")" << std::endl; checks_passed_local = false; } for (int s=1; s<stencil_size; ++s) { if (std::abs(matrix_buffer[matrix_start_idx + s]) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero off-diag [" << s << "] at inactive cell " << current_cell << " (Aij=" << matrix_buffer[matrix_start_idx + s] << ")" << std::endl; checks_passed_local = false; }} }
+            else if (is_dirichlet) { double expected_rhs = ((idir == 0 && i == domain.smallEnd(0)) || (idir == 1 && j == domain.smallEnd(1)) || (idir == 2 && k == domain.smallEnd(2))) ? m_vlo : m_vhi; if (std::abs(diag_val - 1.0) > tol || std::abs(rhs_val - expected_rhs) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Dirichlet cell check fail at " << current_cell << " (Aii=" << diag_val << ", b=" << rhs_val << ", exp_b=" << expected_rhs << ")" << std::endl; checks_passed_local = false; } for (int s=1; s<stencil_size; ++s) { if (std::abs(matrix_buffer[matrix_start_idx + s]) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero off-diag [" << s << "] at Dirichlet cell " << current_cell << " (Aij=" << matrix_buffer[matrix_start_idx + s] << ")" << std::endl; checks_passed_local = false; }} }
             else { // Active Interior
-                /* Check Aii>0, b=0 */ if (diag_val <= tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-positive diagonal at active interior cell " << current_cell << " (Aii=" << diag_val << ")" << std::endl; checks_passed_local = false; } if (std::abs(rhs_val) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero RHS at active interior cell " << current_cell << " (b=" << rhs_val << ")" << std::endl; checks_passed_local = false; }
+                 if (diag_val <= tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-positive diagonal at active interior cell " << current_cell << " (Aii=" << diag_val << ")" << std::endl; checks_passed_local = false; } if (std::abs(rhs_val) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero RHS at active interior cell " << current_cell << " (b=" << rhs_val << ")" << std::endl; checks_passed_local = false; }
                 // Check 3: Row Sum = 0
                 double row_sum = 0.0; for (int s = 0; s < stencil_size; ++s) { row_sum += matrix_buffer[matrix_start_idx + s]; } if (std::abs(row_sum) > tol) { if (m_verbose > 0) amrex::Print() << "CHECK FAILED: Non-zero row sum at active interior cell " << current_cell << " (sum=" << row_sum << ")" << std::endl; checks_passed_local = false; }
             }
@@ -979,7 +999,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     #ifdef AMREX_USE_OMP
     #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
     #endif
-    for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) { /* Copy HYPRE x to mf_soln_temp */
+    for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox(); const int npts = static_cast<int>(bx.numPts()); if (npts == 0) continue;
         soln_buffer.resize(npts); auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx); auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
         HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data()); if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed during flux calculation copy!"); }
@@ -1007,8 +1027,8 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         amrex::Box hibox_face = amrex::bdryHi(domain, idir); hibox_face &= tileBox;
         amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
 
-        if (!lobox_face.isEmpty()) { /* Calculate flux_in */ amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) { amrex::IntVect iv(i,j,k); if (mask(iv) == cell_active) { amrex::Real grad = (soln(iv) - soln(iv - shift)) / dx_dir; amrex::Real flux = -grad; local_fxin += flux; } }); }
-        if (!hibox_face.isEmpty()) { /* Calculate flux_out */ amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) { amrex::IntVect iv(i,j,k); if (mask(iv) == cell_active) { amrex::Real grad = (soln(iv + shift) - soln(iv)) / dx_dir; amrex::Real flux = -grad; local_fxout += flux; } }); }
+        if (!lobox_face.isEmpty()) { amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) { amrex::IntVect iv(i,j,k); if (mask(iv) == cell_active) { amrex::Real grad = (soln(iv) - soln(iv - shift)) / dx_dir; amrex::Real flux = -grad; local_fxin += flux; } }); }
+        if (!hibox_face.isEmpty()) { amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) { amrex::IntVect iv(i,j,k); if (mask(iv) == cell_active) { amrex::Real grad = (soln(iv + shift) - soln(iv)) / dx_dir; amrex::Real flux = -grad; local_fxout += flux; } }); }
     } // End MFIter loop
 
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
