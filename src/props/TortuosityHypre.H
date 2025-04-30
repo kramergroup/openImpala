@@ -4,7 +4,6 @@
 #include <string> // Needed for std::string
 #include <vector> // Needed for Vector<IntVect> in helper functions
 #include <limits> // Needed for std::numeric_limits
-// <cmath> is generally needed for implementation (.cpp), not declaration (.h)
 
 #include <AMReX.H>
 #include <AMReX_iMultiFab.H>
@@ -31,7 +30,8 @@ namespace OpenImpala {
  * Solves a diffusion equation (-Div(Grad(phi)) = 0 with Dirichlet BCs)
  * on a masked subset of the domain derived from phase data, using HYPRE's
  * structured-grid solvers (PFMG, SMG, Krylov methods) to find the potential field.
- * Tortuosity is calculated from the resulting flux and volume fraction.
+ * Tortuosity is calculated from the resulting flux and volume fraction,
+ * including checks for solver convergence and flux conservation.
  */
 class TortuosityHypre : public OpenImpala::Tortuosity
 {
@@ -46,7 +46,7 @@ public:
         PCG,        /**< HYPRE_StructPCG */
         BiCGSTAB,   /**< HYPRE_StructBiCGSTAB */
         SMG,        /**< HYPRE_StructSMG */
-        PFMG        /**< HYPRE_StructPFMG */ // <<< ADDED PFMG HERE
+        PFMG        /**< HYPRE_StructPFMG */
     };
 
     /** Construct new Tortuosity solver using HYPRE.
@@ -68,7 +68,7 @@ public:
     TortuosityHypre(const amrex::Geometry& geom,
                     const amrex::BoxArray& ba,
                     const amrex::DistributionMapping& dm,
-                    const amrex::iMultiFab& mf_phase_input, // Renamed arg for clarity
+                    const amrex::iMultiFab& mf_phase_input,
                     const amrex::Real vf,
                     const int phase,
                     const OpenImpala::Direction dir,
@@ -89,11 +89,13 @@ public:
     /** Calculate or retrieve the tortuosity value.
      *
      * Solves the underlying diffusion equation using HYPRE if not already solved
-     * or if refresh is requested. Calculates flux and computes tortuosity.
-     * Returns NaN if the solver fails to converge or if fluxes/VF are invalid.
+     * or if refresh is requested. Checks solver convergence and flux conservation.
+     * Calculates flux and computes tortuosity using the average flux magnitude if checks pass.
+     * Returns NaN if the solver fails to converge, if flux is not conserved,
+     * or if calculation leads to invalid states (e.g., zero VF or Deff).
      *
      * @param refresh If true, forces recalculation by running the solver again. Default false.
-     * @return Tortuosity value (VF / (Deff/D0)), or NaN on failure/non-convergence.
+     * @return Tortuosity value (VF / (Deff/D0)), or NaN on failure.
      */
     amrex::Real value(const bool refresh = false) override;
 
@@ -105,7 +107,16 @@ public:
      * Intended for use in testing/debugging *after* object construction but *before* calling value() or solve().
      * @return True if all checks pass on all ranks, False otherwise.
      */
-    bool checkMatrixProperties(); // <<< ADDED DECLARATION HERE
+    bool checkMatrixProperties();
+
+    // --- ADDED: Public Getters for Status and Results ---
+    bool        getSolverConverged() const { return m_converged; }
+    amrex::Real getFinalRelativeResidualNorm() const { return m_final_res_norm; }
+    int         getSolverIterations() const { return m_num_iterations; }
+    amrex::Real getFluxIn() const { return m_flux_in; }
+    amrex::Real getFluxOut() const { return m_flux_out; }
+    // --- END ADD ---
+
 
     // Static Helper Functions
     static amrex::Array<HYPRE_Int,AMREX_SPACEDIM> loV (const amrex::Box& b);
@@ -124,7 +135,7 @@ private:
     void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // Helper for mask generation
     void getSolution (amrex::MultiFab& soln, int ncomp=0); // Not implemented
     void getCellTypes(amrex::MultiFab& phi, int ncomp=1); // Not implemented
-    void global_fluxes(amrex::Real& fxin, amrex::Real& fxout);
+    void global_fluxes(); // <-- CHANGED SIGNATURE
 
     // --- Member Variables ---
     // Configuration
@@ -153,9 +164,15 @@ private:
     amrex::Real m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
     bool m_first_call = true;
 
-    // Solver Statistics
+    // Solver Statistics and Results
     HYPRE_Int m_num_iterations = -1;
     amrex::Real m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN(); // Use NaN sentinel
+    // --- ADDED: Member variables for status/results ---
+    bool        m_converged = false;    // Stores solver convergence status
+    amrex::Real m_flux_in = 0.0;      // Stores calculated input flux
+    amrex::Real m_flux_out = 0.0;     // Stores calculated output flux
+    // --- END ADD ---
+
 
     // HYPRE Data Structures
     HYPRE_StructGrid m_grid = NULL;
@@ -181,7 +198,7 @@ extern "C" {
         const amrex::Real* dxinv, // 1/dx^2 array
         const amrex::Real* vlo, const amrex::Real* vhi, // BC values
         const int* phase_unused, const int* dir, // Phase ID (unused), Direction
-        const int* debug_print_level // <<< ADD THIS ARGUMENT
+        const int* debug_print_level // Verbosity level passed to Fortran
     );
 
     // Removes isolated spots from phase data (operates on Comp 0)
