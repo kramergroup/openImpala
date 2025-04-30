@@ -803,23 +803,30 @@ amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
         constexpr amrex::Real flux_tol = 1.0e-6; // Relative tolerance for flux conservation
         bool flux_conserved = true; // Assume conserved initially
         amrex::Real rel_diff = 0.0;
-        amrex::Real flux_sum_abs = std::abs(m_flux_in) + std::abs(m_flux_out);
+        amrex::Real flux_mag_in  = std::abs(m_flux_in);
+        amrex::Real flux_mag_out = std::abs(m_flux_out);
+        amrex::Real flux_mag_avg = 0.5 * (flux_mag_in + flux_mag_out);
 
-        if (flux_sum_abs > tiny_flux_threshold) { // Avoid division by zero if both fluxes are tiny
-            rel_diff = std::abs(m_flux_in + m_flux_out) / flux_sum_abs; // Use sum for normalization
+        if (flux_mag_avg > tiny_flux_threshold) { // Avoid division by zero if both fluxes are tiny
+            // *** CORRECTED FORMULA: Compare magnitudes ***
+            rel_diff = std::abs(flux_mag_in - flux_mag_out) / flux_mag_avg;
+            // *** END CORRECTION ***
+
             if (rel_diff > flux_tol) {
                 flux_conserved = false;
             }
         } else {
-            // If both fluxes are near zero, consider it conserved (or non-percolating)
+            // If average flux magnitude is near zero, consider it conserved (or non-percolating)
              flux_conserved = true;
+             rel_diff = 0.0; // Set explicitly to 0 for clarity
         }
 
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "  Flux Conservation Check (|in+out| / (|in|+|out|)):\n";
-            amrex::Print() << "    Flux In  = " << m_flux_in << "\n";
-            amrex::Print() << "    Flux Out = " << m_flux_out << "\n";
-            amrex::Print() << "    Relative Difference = " << rel_diff << " (Tolerance = " << flux_tol << ")\n";
+            // Adjusted print statement to reflect the check being done
+            amrex::Print() << "  Flux Conservation Check (|in|-|out|) / avg(|in|,|out|):\n"; // <<< Adjusted Label
+            amrex::Print() << "    Flux In  = " << std::fixed << std::setprecision(8) << m_flux_in << "\n";
+            amrex::Print() << "    Flux Out = " << std::fixed << std::setprecision(8) << m_flux_out << "\n";
+            amrex::Print() << "    Relative Difference = " << std::scientific << rel_diff << std::defaultfloat << " (Tolerance = " << flux_tol << ")\n"; // <<< Use Scientific for small rel_diff
             if (!flux_conserved) {
                  amrex::Warning("Flux conservation check failed!");
             } else {
