@@ -625,7 +625,8 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
                            mask_ptr, mask_box.loVect(), mask_box.hiVect(), // Mask data + bounds (comp 0)
                            bx.loVect(), bx.hiVect(),                 // Box to compute on
                            domain.loVect(), domain.hiVect(),         // Domain bounds
-                           dxinv_sq.data(), &m_vlo, &m_vhi, &m_phase, &dir_int); // Other params
+                           dxinv_sq.data(), &m_vlo, &m_vhi, &m_phase, &dir_int,
+                           &m_verbose); // Other params
 
 
         bool data_ok = true;
