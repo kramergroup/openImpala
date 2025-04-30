@@ -1019,7 +1019,6 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
     amrex::Abort("TortuosityHypre::getCellTypes not implemented yet!");
 }
 
-
 // --- Calculate Global Fluxes Across Domain Boundaries ---
 void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout)
 {
@@ -1031,7 +1030,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
     // Create a temporary MultiFab to hold the solution, NOW WITH 1 GHOST CELL
     amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 1); // 1 ghost cell
-    mf_soln_temp.setVal(0.0); // Initialize perhaps to NaN or signaling value? Or 0 is fine.
+    mf_soln_temp.setVal(0.0); // Initialize
 
     // --- Copy solution from HYPRE vector m_x to mf_soln_temp (VALID REGION ONLY) ---
     std::vector<double> soln_buffer;
@@ -1069,7 +1068,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     // --- End Solution Copy ---
 
     // *** FILL GHOST CELLS for mf_soln_temp AFTER copying valid data ***
-    // mf_soln_temp.FillBoundary(m_geom.periodicity());
+    mf_soln_temp.FillBoundary(m_geom.periodicity()); // <<< ENSURE THIS IS UNCOMMENTED
 
     // Fill ghost cells for the mask (as before)
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
@@ -1080,6 +1079,12 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     if (dx_dir <= 0.0) amrex::Abort("Zero cell size in flux calculation direction!");
     amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir); // Shift vector for differencing
 
+    // --- Add print before loop ---
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "DEBUG_FLUX: Starting flux calculation loop. idir=" << idir << "\n";
+    }
+    // --- End Add ---
+
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout)
 #endif
@@ -1088,7 +1093,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         const amrex::Box& tileBox = mfi.tilebox(); // Box for calculations on this MPI rank/thread
         // Get const arrays (need boundary cells filled now)
         const auto mask = m_mf_active_mask.const_array(mfi); // Mask includes ghost cells
-        const auto soln = mf_soln_temp.const_array(mfi);     // Solution includes ghost cells
+        const auto soln = mf_soln_temp.const_array(mfi);     // Solution includes ghost cells (because FillBoundary was called)
 
         // Get the intersection of the current tileBox with the domain boundaries
         amrex::Box lobox_face = amrex::bdryLo(domain, idir); lobox_face &= tileBox;
@@ -1112,13 +1117,44 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
         // Flux Out (High Face): Calculate grad AT the face using points i=N and i=N-1. Flux = -grad.
         if (!hibox_face.isEmpty()) {
+            // --- Add this block ---
+            if (amrex::ParallelDescriptor::MyProc() == 0) { // Only print for Rank 0
+                 amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face = " << hibox_face << " on tile " << mfi.tilebox() << "\n";
+            }
+            // --- End Add ---
+
              amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
                  amrex::IntVect iv(i,j,k); // Cell ON the boundary face (e.g., i=99)
                  amrex::IntVect iv_inner = iv - shift; // Cell just inside (e.g., i=98)
+
+                 int mask_val = mask(iv); // Get mask value first
+
+                 // --- Add detailed print ---
+                 if (amrex::ParallelDescriptor::MyProc() == 0) { // Only print for Rank 0
+                     if (mask_val == cell_active) { // Only print interesting cells
+                          amrex::Real soln_iv = soln(iv);
+                          amrex::Real soln_iv_inner = soln(iv_inner);
+                          amrex::Real grad_val = (soln_iv - soln_iv_inner) / dx_dir;
+                          amrex::Real flux_val = -grad_val;
+                          amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face cell " << iv
+                                         << " mask=" << mask_val << " ACTIVE. "
+                                         << " soln(iv)=" << soln_iv
+                                         << " soln(iv_inner)=" << soln_iv_inner
+                                         << " grad=" << grad_val
+                                         << " flux=" << flux_val
+                                         << " accum_local_fxout=" << local_fxout + flux_val << "\n"; // Note: This shows what the accumulation *would* be if this thread was the only one
+                      }
+                      // Optional: print even if inactive to confirm check is working
+                      // else {
+                      //     amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face cell " << iv
+                      //                    << " mask=" << mask_val << " INACTIVE.\n";
+                      // }
+                 }
+                 // --- End Add ---
+
                  // Check if the cell ON the boundary is active
-                 if (mask(iv) == cell_active) {
+                 if (mask_val == cell_active) {
                      // Gradient approximated at the face using backward difference from boundary
-                     // Ensure soln has ghost cells filled to access iv_inner correctly
                      amrex::Real grad = (soln(iv) - soln(iv_inner)) / dx_dir;
                      amrex::Real flux = -grad; // Assumes D=1
                      local_fxout += flux;
@@ -1126,6 +1162,12 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
              });
         }
     } // End MFIter loop
+
+    // --- Add this block ---
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "DEBUG_FLUX Rank 0: Before reduction: local_fxin=" << local_fxin << " local_fxout=" << local_fxout << "\n";
+    }
+    // --- End Add ---
 
     // Reduce fluxes across MPI ranks
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
@@ -1148,5 +1190,4 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
     // Note on Flux Sign Convention remains the same.
 }
-
 } // End namespace OpenImpala
