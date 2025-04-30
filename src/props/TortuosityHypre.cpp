@@ -1023,7 +1023,7 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
 
 
 // --- Calculate Global Fluxes Across Domain Boundaries ---
-// --- UPDATED to store fluxes in members and count active cells ---
+// --- UPDATED with LIMITED DEBUG PRINTING (verbose >= 3, first N cells per tile) ---
 void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
@@ -1033,16 +1033,15 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
     const amrex::Real* dx = m_geom.CellSize();
     const int idir = static_cast<int>(m_dir);
 
-    // Create a temporary MultiFab to hold the solution, WITH 1 GHOST CELL
-    amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 1); // 1 ghost cell
-    mf_soln_temp.setVal(0.0); // Initialize
-
-    // --- Copy solution from HYPRE vector m_x to mf_soln_temp (VALID REGION ONLY) ---
+    // --- SOLUTION COPY AND GHOST CELL FILL (Same as before) ---
+    amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 1);
+    mf_soln_temp.setVal(0.0);
     std::vector<double> soln_buffer;
     #ifdef AMREX_USE_OMP
     #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
     #endif
     for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
+        // ... (Solution copy logic remains the same) ...
         const amrex::Box& bx = mfi.validbox();
         const int npts = static_cast<int>(bx.numPts());
         if (npts == 0) continue;
@@ -1051,110 +1050,139 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
         auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
         HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
         if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed during flux calculation copy!"); }
-
         amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
         long long k_lin_idx = 0;
         amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
             if (k_lin_idx < npts) {
                  soln_arr(ii,jj,kk,0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
-            } else {
-                 amrex::Warning("Buffer read overrun possibility in HYPRE GetBoxValues copy!");
             }
             k_lin_idx++;
         });
          if (k_lin_idx != npts) { amrex::Warning("Point count mismatch during flux calc copy!"); }
     }
-    // --- End Solution Copy ---
-
-    // *** FILL GHOST CELLS for mf_soln_temp AFTER copying valid data ***
-    mf_soln_temp.FillBoundary(m_geom.periodicity()); // <<< KEEP THIS UNCOMMENTED
-
-    // Fill ghost cells for the mask
+    mf_soln_temp.FillBoundary(m_geom.periodicity());
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
+    // --- END SOLUTION COPY ---
+
 
     amrex::Real local_fxin = 0.0;
     amrex::Real local_fxout = 0.0;
-    amrex::Real local_active_cells_in = 0.0;  // Use Real for reduction sum
-    amrex::Real local_active_cells_out = 0.0; // Use Real for reduction sum
+    amrex::Real local_active_cells_in = 0.0;
+    amrex::Real local_active_cells_out = 0.0;
 
     const amrex::Real dx_dir = dx[idir];
     if (dx_dir <= 0.0) amrex::Abort("Zero cell size in flux calculation direction!");
-    amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir); // Shift vector for differencing
+    amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
 
-    if (amrex::ParallelDescriptor::IOProcessor() && m_verbose > 2) {
-        amrex::Print() << "DEBUG_FLUX: Starting MFIter loop for flux calculation. idir=" << idir << "\n";
+    if (amrex::ParallelDescriptor::IOProcessor() && m_verbose >= 3) {
+        amrex::Print() << "\n--- START LIMITED DEBUG_FLUX (global_fluxes, verbose>=3) ---\n";
+        amrex::Print() << "DEBUG_FLUX: Printing details for first few active cells per tile...\n";
     }
+
+    // --- DEFINE HOW MANY CELLS TO PRINT PER TILE ---
+    const int max_debug_prints_per_tile = 5; // <--- Adjust this number as needed
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout, local_active_cells_in, local_active_cells_out)
 #endif
     for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& tileBox = mfi.tilebox();
-        const auto mask = m_mf_active_mask.const_array(mfi);
-        const auto soln = mf_soln_temp.const_array(mfi);
+        // --- Initialize counters for THIS MFIter tile ---
+        int debug_print_count_in = 0;
+        int debug_print_count_out = 0;
+        // ---
 
-        // --- Calculate Low Face Intersection ---
+        const amrex::Box& tileBox = mfi.tilebox();
+        amrex::Array4<const int> const mask = m_mf_active_mask.const_array(mfi);
+        amrex::Array4<const amrex::Real> const soln = mf_soln_temp.const_array(mfi);
+
         amrex::Box lobox_face = amrex::bdryLo(domain, idir);
         lobox_face &= tileBox;
 
-        // --- Manually Construct High Face Box and Calculate Intersection ---
         amrex::Box domain_hi_face = domain;
         domain_hi_face.setSmall(idir, domain.bigEnd(idir));
         domain_hi_face.setBig(idir, domain.bigEnd(idir));
         amrex::Box hibox_face = domain_hi_face & tileBox;
-        // --- End Manual Construction ---
 
         // Flux In (Low Face)
         if (!lobox_face.isEmpty()) {
             amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) {
-                 amrex::IntVect iv(i,j,k);
-                 amrex::IntVect iv_inner = iv + shift;
-                 if (mask(iv) == cell_active) {
-                     local_active_cells_in += 1.0; // Increment active cell count
-                     amrex::Real grad = (soln(iv_inner) - soln(iv)) / dx_dir;
-                     amrex::Real flux = -grad;
-                     local_fxin += flux;
-                 }
+                amrex::IntVect iv(i,j,k);
+                if (mask(iv) == cell_active) {
+                    local_active_cells_in += 1.0;
+                    amrex::IntVect iv_inner = iv + shift;
+                    amrex::Real val_bnd = soln(iv);
+                    amrex::Real val_in  = soln(iv_inner);
+                    amrex::Real grad = (val_in - val_bnd) / dx_dir;
+                    amrex::Real flux = -grad;
+                    local_fxin += flux;
+
+                    // --- LIMITED DEBUG PRINT ---
+                    if (m_verbose >= 3 && debug_print_count_in < max_debug_prints_per_tile) {
+                        amrex::Print() << std::fixed << std::setprecision(8)
+                                       << "  DEBUG_FLUX_IN : Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_in << " Cell=" << iv
+                                       << " Mask=" << mask(iv)
+                                       << " Soln_Bnd=" << val_bnd
+                                       << " Soln_In=" << val_in
+                                       << " Grad=" << grad
+                                       << " FluxContrib=" << flux << "\n";
+                        debug_print_count_in++; // Increment counter only when printing
+                    }
+                    // --- END DEBUG PRINT ---
+                }
             });
         }
 
         // Flux Out (High Face)
         if (!hibox_face.isEmpty()) {
             amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
-                 amrex::IntVect iv(i,j,k);
-                 amrex::IntVect iv_inner = iv - shift;
-                 int mask_val = mask(iv);
-                 if (mask_val == cell_active) {
-                     local_active_cells_out += 1.0; // Increment active cell count
-                     amrex::Real soln_iv = soln(iv);
-                     amrex::Real soln_iv_inner = soln(iv_inner);
-                     amrex::Real grad = (soln_iv - soln_iv_inner) / dx_dir;
-                     amrex::Real flux = -grad;
-                     local_fxout += flux;
-                 }
-             }); // End LoopOnCpu hibox_face
-        } // End if !hibox_face.isEmpty()
+                amrex::IntVect iv(i,j,k);
+                int mask_val = mask(iv);
+                if (mask_val == cell_active) {
+                    local_active_cells_out += 1.0;
+                    amrex::IntVect iv_inner = iv - shift;
+                    amrex::Real val_bnd = soln(iv);
+                    amrex::Real val_in = soln(iv_inner);
+                    amrex::Real grad = (val_bnd - val_in) / dx_dir;
+                    amrex::Real flux = -grad;
+                    local_fxout += flux;
+
+                    // --- LIMITED DEBUG PRINT ---
+                     if (m_verbose >= 3 && debug_print_count_out < max_debug_prints_per_tile) {
+                        amrex::Print() << std::fixed << std::setprecision(8)
+                                       << "  DEBUG_FLUX_OUT: Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_out << " Cell=" << iv
+                                       << " Mask=" << mask_val
+                                       << " Soln_Bnd=" << val_bnd
+                                       << " Soln_In=" << val_in
+                                       << " Grad=" << grad
+                                       << " FluxContrib=" << flux << "\n";
+                        debug_print_count_out++; // Increment counter only when printing
+                    }
+                    // --- END DEBUG PRINT ---
+                }
+            });
+        }
     } // End MFIter loop
 
-    // Reduce fluxes and counts across MPI ranks
+    // --- MPI REDUCTION AND FINAL SCALING (Same as before) ---
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
     amrex::ParallelDescriptor::ReduceRealSum(local_fxout);
     amrex::ParallelDescriptor::ReduceRealSum(local_active_cells_in);
     amrex::ParallelDescriptor::ReduceRealSum(local_active_cells_out);
 
-    // Get global counts (cast to integer type for printing)
     long global_active_in = static_cast<long>(local_active_cells_in);
     long global_active_out = static_cast<long>(local_active_cells_out);
 
-    if (amrex::ParallelDescriptor::IOProcessor() && m_verbose > 1) { // Print counts if verbose >= 2
-        amrex::Print() << "  Active boundary cell counts: In=" << global_active_in << ", Out=" << global_active_out << "\n";
-    }
-    if (amrex::ParallelDescriptor::IOProcessor() && m_verbose > 2) { // Print local fluxes if verbose >= 3
-        amrex::Print() << "DEBUG_FLUX Rank 0: Finished MFIter loop. Before reduction: local_fxin=" << local_fxin << " local_fxout=" << local_fxout << "\n";
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+         if (m_verbose > 1) {
+             amrex::Print() << "  Active boundary cell counts: In=" << global_active_in << ", Out=" << global_active_out << "\n";
+         }
+         if (m_verbose >= 3) {
+            amrex::Print() << "DEBUG_FLUX: After reduction: Summed_fxin=" << local_fxin << " Summed_fxout=" << local_fxout << "\n";
+            amrex::Print() << "--- END LIMITED DEBUG_FLUX (global_fluxes, verbose>=3) ---\n\n";
+         }
     }
 
-    // Calculate face area element for scaling
     amrex::Real face_area_element = 1.0;
     if (AMREX_SPACEDIM == 3) {
         if (idir == 0) { face_area_element = dx[1] * dx[2]; }
@@ -1165,10 +1193,9 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
         else { face_area_element = dx[0]; }
     }
 
-    // Store final scaled fluxes in member variables
     m_flux_in = local_fxin * face_area_element;
     m_flux_out = local_fxout * face_area_element;
-
+    // --- END FINAL SCALING ---
 }
 
 
