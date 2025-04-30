@@ -1023,7 +1023,7 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
 
 
 // --- Calculate Global Fluxes Across Domain Boundaries ---
-// --- UPDATED with LIMITED DEBUG PRINTING (verbose >= 3, first N cells per tile) ---
+// --- UPDATED with check for ACTIVE INNER CELL and limited debug printing ---
 void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
@@ -1041,7 +1041,6 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
     #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
     #endif
     for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
-        // ... (Solution copy logic remains the same) ...
         const amrex::Box& bx = mfi.validbox();
         const int npts = static_cast<int>(bx.numPts());
         if (npts == 0) continue;
@@ -1079,18 +1078,15 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
         amrex::Print() << "DEBUG_FLUX: Printing details for first few active cells per tile...\n";
     }
 
-    // --- DEFINE HOW MANY CELLS TO PRINT PER TILE ---
-    const int max_debug_prints_per_tile = 5; // <--- Adjust this number as needed
+    const int max_debug_prints_per_tile = 5;
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout, local_active_cells_in, local_active_cells_out)
 #endif
     for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        // --- Initialize counters for THIS MFIter tile ---
         int debug_print_count_in = 0;
         int debug_print_count_out = 0;
-        // ---
 
         const amrex::Box& tileBox = mfi.tilebox();
         amrex::Array4<const int> const mask = m_mf_active_mask.const_array(mfi);
@@ -1108,27 +1104,38 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
         if (!lobox_face.isEmpty()) {
             amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) {
                 amrex::IntVect iv(i,j,k);
-                if (mask(iv) == cell_active) {
-                    local_active_cells_in += 1.0;
+                if (mask(iv) == cell_active) { // Check mask at the boundary cell
+                    local_active_cells_in += 1.0; // Increment active count regardless of inner cell
                     amrex::IntVect iv_inner = iv + shift;
-                    amrex::Real val_bnd = soln(iv);
-                    amrex::Real val_in  = soln(iv_inner);
-                    amrex::Real grad = (val_in - val_bnd) / dx_dir;
-                    amrex::Real flux = -grad;
-                    local_fxin += flux;
+                    // *** ADDED CHECK: Only calculate flux if inner cell is also active ***
+                    if (mask(iv_inner) == cell_active) {
+                        amrex::Real val_bnd = soln(iv);
+                        amrex::Real val_in  = soln(iv_inner);
+                        amrex::Real grad = (val_in - val_bnd) / dx_dir;
+                        amrex::Real flux = -grad;
+                        local_fxin += flux;
 
-                    // --- LIMITED DEBUG PRINT ---
-                    if (m_verbose >= 3 && debug_print_count_in < max_debug_prints_per_tile) {
-                        amrex::Print() << std::fixed << std::setprecision(8)
-                                       << "  DEBUG_FLUX_IN : Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_in << " Cell=" << iv
-                                       << " Mask=" << mask(iv)
-                                       << " Soln_Bnd=" << val_bnd
-                                       << " Soln_In=" << val_in
-                                       << " Grad=" << grad
-                                       << " FluxContrib=" << flux << "\n";
-                        debug_print_count_in++; // Increment counter only when printing
+                        // --- LIMITED DEBUG PRINT ---
+                        if (m_verbose >= 3 && debug_print_count_in < max_debug_prints_per_tile) {
+                            amrex::Print() << std::fixed << std::setprecision(8)
+                                           << "  DEBUG_FLUX_IN : Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_in << " Cell=" << iv
+                                           << " Mask(iv)=" << mask(iv) << " Mask(in)=" << mask(iv_inner) // Show both masks
+                                           << " Soln_Bnd=" << val_bnd
+                                           << " Soln_In=" << val_in
+                                           << " Grad=" << grad
+                                           << " FluxContrib=" << flux << "\n";
+                            debug_print_count_in++;
+                        }
+                        // --- END DEBUG PRINT ---
+                    } else { // Inner cell is inactive - flux across this specific face segment is zero
+                         if (m_verbose >= 3 && debug_print_count_in < max_debug_prints_per_tile) {
+                             amrex::Print() << std::fixed << std::setprecision(8)
+                                            << "  DEBUG_FLUX_IN : Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_in << " Cell=" << iv
+                                            << " Mask(iv)=" << mask(iv) << " Mask(in)=" << mask(iv_inner) // Show both masks
+                                            << " -> SKIPPED (Inner Inactive)\n";
+                            debug_print_count_in++;
+                         }
                     }
-                    // --- END DEBUG PRINT ---
                 }
             });
         }
@@ -1137,28 +1144,39 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
         if (!hibox_face.isEmpty()) {
             amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
                 amrex::IntVect iv(i,j,k);
-                int mask_val = mask(iv);
+                int mask_val = mask(iv); // Check mask at the boundary cell
                 if (mask_val == cell_active) {
-                    local_active_cells_out += 1.0;
+                    local_active_cells_out += 1.0; // Increment active count regardless of inner cell
                     amrex::IntVect iv_inner = iv - shift;
-                    amrex::Real val_bnd = soln(iv);
-                    amrex::Real val_in = soln(iv_inner);
-                    amrex::Real grad = (val_bnd - val_in) / dx_dir;
-                    amrex::Real flux = -grad;
-                    local_fxout += flux;
+                     // *** ADDED CHECK: Only calculate flux if inner cell is also active ***
+                    if (mask(iv_inner) == cell_active) {
+                        amrex::Real val_bnd = soln(iv);
+                        amrex::Real val_in = soln(iv_inner);
+                        amrex::Real grad = (val_bnd - val_in) / dx_dir;
+                        amrex::Real flux = -grad;
+                        local_fxout += flux;
 
-                    // --- LIMITED DEBUG PRINT ---
-                     if (m_verbose >= 3 && debug_print_count_out < max_debug_prints_per_tile) {
-                        amrex::Print() << std::fixed << std::setprecision(8)
-                                       << "  DEBUG_FLUX_OUT: Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_out << " Cell=" << iv
-                                       << " Mask=" << mask_val
-                                       << " Soln_Bnd=" << val_bnd
-                                       << " Soln_In=" << val_in
-                                       << " Grad=" << grad
-                                       << " FluxContrib=" << flux << "\n";
-                        debug_print_count_out++; // Increment counter only when printing
+                        // --- LIMITED DEBUG PRINT ---
+                         if (m_verbose >= 3 && debug_print_count_out < max_debug_prints_per_tile) {
+                            amrex::Print() << std::fixed << std::setprecision(8)
+                                           << "  DEBUG_FLUX_OUT: Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_out << " Cell=" << iv
+                                           << " Mask(iv)=" << mask_val << " Mask(in)=" << mask(iv_inner) // Show both masks
+                                           << " Soln_Bnd=" << val_bnd
+                                           << " Soln_In=" << val_in
+                                           << " Grad=" << grad
+                                           << " FluxContrib=" << flux << "\n";
+                            debug_print_count_out++;
+                        }
+                        // --- END DEBUG PRINT ---
+                    } else { // Inner cell is inactive - flux across this specific face segment is zero
+                         if (m_verbose >= 3 && debug_print_count_out < max_debug_prints_per_tile) {
+                             amrex::Print() << std::fixed << std::setprecision(8)
+                                            << "  DEBUG_FLUX_OUT: Tile=" << mfi.tileIndex() << " Count=" << debug_print_count_out << " Cell=" << iv
+                                            << " Mask(iv)=" << mask_val << " Mask(in)=" << mask(iv_inner) // Show both masks
+                                            << " -> SKIPPED (Inner Inactive)\n";
+                            debug_print_count_out++;
+                         }
                     }
-                    // --- END DEBUG PRINT ---
                 }
             });
         }
@@ -1197,6 +1215,5 @@ void OpenImpala::TortuosityHypre::global_fluxes() // No arguments needed
     m_flux_out = local_fxout * face_area_element;
     // --- END FINAL SCALING ---
 }
-
 
 } // End namespace OpenImpala
