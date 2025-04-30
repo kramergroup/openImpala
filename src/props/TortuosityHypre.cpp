@@ -1037,8 +1037,6 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     #ifdef AMREX_USE_OMP
     #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
     #endif
-    // Iterate using Tiling=false might be slightly safer when directly copying from external buffer? Check AMReX docs.
-    // Or iterate over valid boxes only. Let's stick to the previous MFIter for now.
     for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) { // Using false for tiling on copy MFIter
         const amrex::Box& bx = mfi.validbox(); // Get the valid box for this FAB
         const int npts = static_cast<int>(bx.numPts());
@@ -1054,8 +1052,6 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         long long k_lin_idx = 0;
         // Loop only over the valid box `bx` for copying
         amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
-            // Note: This direct indexing into soln_buffer relies on bx iteration order matching HYPRE's layout.
-            // This is generally true for AMReX CPU loops and standard HYPRE StructVector ordering.
             if (k_lin_idx < npts) {
                  soln_arr(ii,jj,kk,0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
             } else {
@@ -1068,7 +1064,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     // --- End Solution Copy ---
 
     // *** FILL GHOST CELLS for mf_soln_temp AFTER copying valid data ***
-    mf_soln_temp.FillBoundary(m_geom.periodicity()); // <<< ENSURE THIS IS UNCOMMENTED
+    mf_soln_temp.FillBoundary(m_geom.periodicity()); // <<< KEEP THIS UNCOMMENTED
 
     // Fill ghost cells for the mask (as before)
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
@@ -1079,11 +1075,11 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     if (dx_dir <= 0.0) amrex::Abort("Zero cell size in flux calculation direction!");
     amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir); // Shift vector for differencing
 
-    // --- Add print before loop ---
+    // --- Print before loop ---
     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "DEBUG_FLUX: Starting flux calculation loop. idir=" << idir << "\n";
     }
-    // --- End Add ---
+    // --- End Print ---
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout)
@@ -1091,9 +1087,9 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
         const amrex::Box& tileBox = mfi.tilebox(); // Box for calculations on this MPI rank/thread
-        // Get const arrays (need boundary cells filled now)
+        // Get const arrays
         const auto mask = m_mf_active_mask.const_array(mfi); // Mask includes ghost cells
-        const auto soln = mf_soln_temp.const_array(mfi);     // Solution includes ghost cells (because FillBoundary was called)
+        const auto soln = mf_soln_temp.const_array(mfi);     // Solution includes ghost cells
 
         // Get the intersection of the current tileBox with the domain boundaries
         amrex::Box lobox_face = amrex::bdryLo(domain, idir); lobox_face &= tileBox;
@@ -1102,14 +1098,11 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         // Flux In (Low Face): Calculate grad AT the face using points i=0 and i=1. Flux = -grad.
         if (!lobox_face.isEmpty()) {
             amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) {
-                amrex::IntVect iv(i,j,k); // Cell ON the boundary face (e.g., i=0)
-                amrex::IntVect iv_inner = iv + shift; // Cell just inside (e.g., i=1)
-                // Check if the cell ON the boundary is active
-                // (If inactive, flux through it should be zero anyway)
+                amrex::IntVect iv(i,j,k);
+                amrex::IntVect iv_inner = iv + shift;
                 if (mask(iv) == cell_active) {
-                    // Gradient approximated at the face using forward difference from boundary
                     amrex::Real grad = (soln(iv_inner) - soln(iv)) / dx_dir;
-                    amrex::Real flux = -grad; // Assumes D=1
+                    amrex::Real flux = -grad;
                     local_fxin += flux;
                 }
             });
@@ -1117,11 +1110,10 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
         // Flux Out (High Face): Calculate grad AT the face using points i=N and i=N-1. Flux = -grad.
         if (!hibox_face.isEmpty()) {
-            // --- Add this block ---
-            if (amrex::ParallelDescriptor::MyProc() == 0) { // Only print for Rank 0
-                 amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face = " << hibox_face << " on tile " << mfi.tilebox() << "\n";
-            }
-            // --- End Add ---
+            // Optional: Print the box being processed by Rank 0
+            // if (amrex::ParallelDescriptor::MyProc() == 0) {
+            //      amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face = " << hibox_face << " on tile " << mfi.tilebox() << "\n";
+            // }
 
              amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
                  amrex::IntVect iv(i,j,k); // Cell ON the boundary face (e.g., i=99)
@@ -1129,32 +1121,27 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
                  int mask_val = mask(iv); // Get mask value first
 
-                 // --- Add detailed print ---
+                 // --- Modified detailed print ---
                  if (amrex::ParallelDescriptor::MyProc() == 0) { // Only print for Rank 0
-                     if (mask_val == cell_active) { // Only print interesting cells
-                          amrex::Real soln_iv = soln(iv);
-                          amrex::Real soln_iv_inner = soln(iv_inner);
-                          amrex::Real grad_val = (soln_iv - soln_iv_inner) / dx_dir;
-                          amrex::Real flux_val = -grad_val;
-                          amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face cell " << iv
-                                         << " mask=" << mask_val << " ACTIVE. "
-                                         << " soln(iv)=" << soln_iv
-                                         << " soln(iv_inner)=" << soln_iv_inner
-                                         << " grad=" << grad_val
-                                         << " flux=" << flux_val
-                                         << " accum_local_fxout=" << local_fxout + flux_val << "\n"; // Note: This shows what the accumulation *would* be if this thread was the only one
-                      }
-                      // Optional: print even if inactive to confirm check is working
-                      // else {
-                      //     amrex::Print() << "DEBUG_FLUX Rank 0: hibox_face cell " << iv
-                      //                    << " mask=" << mask_val << " INACTIVE.\n";
+                      // Print EVERY cell checked on hibox_face by Rank 0
+                      amrex::Real soln_iv = soln(iv);
+                      amrex::Real soln_iv_inner = soln(iv_inner);
+                      amrex::Print() << "DEBUG_FLUX Rank 0: Checking hibox_face cell " << iv
+                                     << " mask=" << mask_val
+                                     << " soln(iv)=" << soln_iv
+                                     << " soln(iv_inner)=" << soln_iv_inner << "\n";
+
+                      // Optional: Add back the flux calculation print if the cell is active
+                      // if (mask_val == cell_active) {
+                      //      amrex::Real grad_val = (soln_iv - soln_iv_inner) / dx_dir;
+                      //      amrex::Real flux_val = -grad_val;
+                      //      amrex::Print() << "        ACTIVE: grad=" << grad_val << " flux=" << flux_val << "\n";
                       // }
                  }
-                 // --- End Add ---
+                 // --- End Modified ---
 
-                 // Check if the cell ON the boundary is active
+                 // Original logic for calculation:
                  if (mask_val == cell_active) {
-                     // Gradient approximated at the face using backward difference from boundary
                      amrex::Real grad = (soln(iv) - soln(iv_inner)) / dx_dir;
                      amrex::Real flux = -grad; // Assumes D=1
                      local_fxout += flux;
@@ -1163,11 +1150,11 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         }
     } // End MFIter loop
 
-    // --- Add this block ---
+    // --- Print before reduction ---
     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "DEBUG_FLUX Rank 0: Before reduction: local_fxin=" << local_fxin << " local_fxout=" << local_fxout << "\n";
     }
-    // --- End Add ---
+    // --- End Print ---
 
     // Reduce fluxes across MPI ranks
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
@@ -1190,4 +1177,5 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 
     // Note on Flux Sign Convention remains the same.
 }
+
 } // End namespace OpenImpala
