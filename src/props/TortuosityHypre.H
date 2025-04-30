@@ -30,7 +30,7 @@ namespace OpenImpala {
  * Solves a diffusion equation (-Div(Grad(phi)) = 0 with Dirichlet BCs)
  * on a masked subset of the domain derived from phase data, using HYPRE's
  * structured-grid solvers (PFMG, SMG, Krylov methods) to find the potential field.
- * Tortuosity is calculated from the resulting flux and volume fraction,
+ * Tortuosity is calculated from the resulting flux and **active** volume fraction, // <-- Doc update
  * including checks for solver convergence and flux conservation.
  */
 class TortuosityHypre : public OpenImpala::Tortuosity
@@ -55,7 +55,7 @@ public:
      * @param ba AMReX BoxArray defining the distribution of grid patches.
      * @param dm AMReX DistributionMapping defining processor assignments.
      * @param mf_phase_input Input iMultiFab containing phase IDs (expects 1 component, >=1 ghost cell).
-     * @param vf Volume fraction of the phase of interest (used in tortuosity calculation).
+     * @param vf Volume fraction of the phase of interest (*total* VF, passed for potential reference). // <-- Doc update
      * @param phase Phase ID to calculate tortuosity for.
      * @param dir Direction across which to apply potential difference (X, Y, or Z).
      * @param solvertype Solver type to use (from SolverType enum).
@@ -90,12 +90,13 @@ public:
      *
      * Solves the underlying diffusion equation using HYPRE if not already solved
      * or if refresh is requested. Checks solver convergence and flux conservation.
-     * Calculates flux and computes tortuosity using the average flux magnitude if checks pass.
+     * Calculates flux and computes tortuosity using the average flux magnitude
+     * and the *active* volume fraction if checks pass.                    // <-- Doc update
      * Returns NaN if the solver fails to converge, if flux is not conserved,
-     * or if calculation leads to invalid states (e.g., zero VF or Deff).
+     * or if calculation leads to invalid states (e.g., zero active VF or Deff).
      *
      * @param refresh If true, forces recalculation by running the solver again. Default false.
-     * @return Tortuosity value (VF / (Deff/D0)), or NaN on failure.
+     * @return Tortuosity value (ActiveVF / (Deff/D0)), or NaN on failure. // <-- Doc update
      */
     amrex::Real value(const bool refresh = false) override;
 
@@ -109,12 +110,14 @@ public:
      */
     bool checkMatrixProperties();
 
-    // --- ADDED: Public Getters for Status and Results ---
+    // --- Public Getters for Status and Results ---
     bool        getSolverConverged() const { return m_converged; }
     amrex::Real getFinalRelativeResidualNorm() const { return m_final_res_norm; }
     int         getSolverIterations() const { return m_num_iterations; }
     amrex::Real getFluxIn() const { return m_flux_in; }
     amrex::Real getFluxOut() const { return m_flux_out; }
+    // --- ADDED Getter for Active VF ---
+    amrex::Real getActiveVolumeFraction() const { return m_active_vf; }
     // --- END ADD ---
 
 
@@ -129,13 +132,13 @@ private:
     bool solve();
     void setupGrids();
     void setupStencil();
-    void setupMatrixEquation(); // Calls modified Fortran routine
+    void setupMatrixEquation();
     void preconditionPhaseFab();
-    void generateActivityMask(const amrex::iMultiFab& phaseFab, int phaseID, OpenImpala::Direction dir); // Uses flood fill
-    void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints); // Helper for mask generation
+    void generateActivityMask(const amrex::iMultiFab& phaseFab, int phaseID, OpenImpala::Direction dir);
+    void parallelFloodFill(amrex::iMultiFab& reachabilityMask, const amrex::iMultiFab& phaseFab, int phaseID, const amrex::Vector<amrex::IntVect>& seedPoints);
     void getSolution (amrex::MultiFab& soln, int ncomp=0); // Not implemented
     void getCellTypes(amrex::MultiFab& phi, int ncomp=1); // Not implemented
-    void global_fluxes(); // <-- CHANGED SIGNATURE
+    void global_fluxes();
 
     // --- Member Variables ---
     // Configuration
@@ -145,20 +148,19 @@ private:
     const OpenImpala::Direction m_dir;
     const amrex::Real m_vlo;
     const amrex::Real m_vhi;
-    amrex::Real m_eps; // Initialized via ParmParse
-    int m_maxiter;     // Initialized via ParmParse
+    amrex::Real m_eps;
+    int m_maxiter;
     int m_verbose;
-    amrex::Real m_vf;
+    const amrex::Real m_vf; // Original total VF (kept for reference if needed)
     bool m_write_plotfile;
 
     // AMReX Data
     const amrex::Geometry& m_geom;
     const amrex::BoxArray& m_ba;
     const amrex::DistributionMapping& m_dm;
-    // m_mf_phase is now an owned copy, initialized in constructor
     amrex::iMultiFab m_mf_phase;
-    amrex::MultiFab m_mf_phi;           // Solution field (potential, phase, mask) - potentially remove if only plotfile needed
-    amrex::iMultiFab m_mf_active_mask;  // Mask for active/percolating cells (owned)
+    amrex::MultiFab m_mf_phi;
+    amrex::iMultiFab m_mf_active_mask;
 
     // State
     amrex::Real m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
@@ -166,11 +168,12 @@ private:
 
     // Solver Statistics and Results
     HYPRE_Int m_num_iterations = -1;
-    amrex::Real m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN(); // Use NaN sentinel
-    // --- ADDED: Member variables for status/results ---
-    bool        m_converged = false;    // Stores solver convergence status
-    amrex::Real m_flux_in = 0.0;      // Stores calculated input flux
-    amrex::Real m_flux_out = 0.0;     // Stores calculated output flux
+    amrex::Real m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN();
+    bool        m_converged = false;
+    amrex::Real m_flux_in = 0.0;
+    amrex::Real m_flux_out = 0.0;
+    // --- ADDED: Active Volume Fraction ---
+    amrex::Real m_active_vf = 0.0; // Volume fraction of the percolating phase
     // --- END ADD ---
 
 
@@ -183,37 +186,30 @@ private:
 };
 
 
-// --- Updated Fortran Interface Declarations ---
-// Place this outside the class, potentially within the namespace or globally
-// Ensure these match the declarations used for binding in your build system
+// --- Fortran Interface Declarations ---
+// (Remain the same as in your provided file)
 extern "C" {
-    // Fills matrix/rhs/xinit based on phase (optional), mask, and BCs
     void tortuosity_fillmtx(
         amrex::Real* a, amrex::Real* rhs, amrex::Real* xinit,
         const int* nval,
-        const int* p, const int* p_lo, const int* p_hi,           // Phase data (Comp 0)
-        const int* active_mask, const int* mask_lo, const int* mask_hi, // Mask data (Comp 0)
-        const int* bxlo, const int* bxhi, // Box to compute coeffs over
-        const int* domlo, const int* domhi, // Domain bounds
-        const amrex::Real* dxinv, // 1/dx^2 array
-        const amrex::Real* vlo, const amrex::Real* vhi, // BC values
-        const int* phase_unused, const int* dir, // Phase ID (unused), Direction
-        const int* debug_print_level // Verbosity level passed to Fortran
+        const int* p, const int* p_lo, const int* p_hi,
+        const int* active_mask, const int* mask_lo, const int* mask_hi,
+        const int* bxlo, const int* bxhi,
+        const int* domlo, const int* domhi,
+        const amrex::Real* dxinv,
+        const amrex::Real* vlo, const amrex::Real* vhi,
+        const int* phase_unused, const int* dir,
+        const int* debug_print_level
     );
 
-    // Removes isolated spots from phase data (operates on Comp 0)
     void tortuosity_remspot(
-        int* q, const int* q_lo, const int* q_hi, // Data + bounds (incl ghosts)
-        const int* ncomp, // Number of components in q
-        const int* bxlo, const int* bxhi, // Box to iterate over
-        const int* domlo, const int* domhi // Domain bounds
+        int* q, const int* q_lo, const int* q_hi,
+        const int* ncomp,
+        const int* bxlo, const int* bxhi,
+        const int* domlo, const int* domhi
     );
 
-    // Add declarations for other Fortran routines called from C++ if needed
-    // (These are not called from the C++ provided, but might exist)
-    // void tortuosity_filct(...);
-    // void tortuosity_filbc(...);
-    // void tortuosity_filic(...);
+    // Add others if needed...
 }
 
 
