@@ -1020,7 +1020,7 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
 }
 
 // --- Calculate Global Fluxes Across Domain Boundaries ---
-void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout)
+void TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& fxout)
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
     fxin = 0.0; fxout = 0.0;
@@ -1037,8 +1037,8 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     #ifdef AMREX_USE_OMP
     #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
     #endif
-    for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
-        const amrex::Box& bx = mfi.validbox();
+    for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) { // Using false for tiling on copy MFIter
+        const amrex::Box& bx = mfi.validbox(); // Get the valid box for this FAB
         const int npts = static_cast<int>(bx.numPts());
         if (npts == 0) continue;
         soln_buffer.resize(npts);
@@ -1047,8 +1047,10 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
         if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed during flux calculation copy!"); }
 
+        // Get Array4 for the current Fab (non-const this time)
         amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
         long long k_lin_idx = 0;
+        // Loop only over the valid box `bx` for copying
         amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
             if (k_lin_idx < npts) {
                  soln_arr(ii,jj,kk,0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
@@ -1061,38 +1063,54 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     }
     // --- End Solution Copy ---
 
+    // *** FILL GHOST CELLS for mf_soln_temp AFTER copying valid data ***
     mf_soln_temp.FillBoundary(m_geom.periodicity()); // <<< KEEP THIS UNCOMMENTED
+
+    // Fill ghost cells for the mask (as before)
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
 
     amrex::Real local_fxin = 0.0;
     amrex::Real local_fxout = 0.0;
     const amrex::Real dx_dir = dx[idir];
     if (dx_dir <= 0.0) amrex::Abort("Zero cell size in flux calculation direction!");
-    amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
+    amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir); // Shift vector for differencing
 
+    // --- Print before MFIter loop ---
     if (amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "DEBUG_FLUX: Starting MFIter loop for flux calculation. idir=" << idir << "\n";
+        amrex::Print() << "DEBUG_FLUX: Starting MFIter loop (Tiling explicitly disabled). idir=" << idir << "\n";
     }
+    // --- End Print ---
+
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout)
 #endif
-    for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    // *** MODIFICATION: Use false for tiling argument ***
+    for (amrex::MFIter mfi(m_mf_active_mask, false); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& tileBox = mfi.tilebox();
+        // *** MODIFICATION: Use validbox() instead of tilebox() when tiling is off ***
+        const amrex::Box& vbx = mfi.validbox();
         const auto mask = m_mf_active_mask.const_array(mfi);
         const auto soln = mf_soln_temp.const_array(mfi);
 
-        amrex::Box lobox_face = amrex::bdryLo(domain, idir); lobox_face &= tileBox;
-        amrex::Box hibox_face = amrex::bdryHi(domain, idir); hibox_face &= tileBox;
+        amrex::Box lobox_face = amrex::bdryLo(domain, idir); lobox_face &= vbx; // Intersect with valid box
+        amrex::Box hibox_face = amrex::bdryHi(domain, idir); hibox_face &= vbx; // Intersect with valid box
 
-        // Flux In (Low Face)
+        // --- Add print BEFORE the hibox_face check ---
+        if (amrex::ParallelDescriptor::MyProc() == 0) {
+            // Print info for ALL boxes processed by Rank 0
+            amrex::Print() << "DEBUG_FLUX Rank 0: Processing MFIter validbox = " << vbx << "\n";
+            amrex::Print() << "    Calculated hibox_face = " << hibox_face << " (isEmpty=" << hibox_face.isEmpty() << ")" << "\n";
+        }
+        // --- End Add ---
+
+
+        // Flux In (Low Face) - Use vbx
         if (!lobox_face.isEmpty()) {
             amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) {
-                // ... (Input flux calculation as before) ...
                  amrex::IntVect iv(i,j,k);
                  amrex::IntVect iv_inner = iv + shift;
-                 if (mask(iv) == cell_active) {
+                 if (mask(iv) == cell_active) { // Assuming cell_active is defined (e.g., = 1)
                      amrex::Real grad = (soln(iv_inner) - soln(iv)) / dx_dir;
                      amrex::Real flux = -grad;
                      local_fxin += flux;
@@ -1100,54 +1118,57 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
             });
         }
 
-        // Flux Out (High Face)
-        if (!hibox_face.isEmpty()) {
-            // --- Add print BEFORE LoopOnCpu ---
+        // Flux Out (High Face) - Use vbx
+        if (!hibox_face.isEmpty()) { // Check if the calculated intersection is non-empty
+            // --- Add print CONFIRMING entry into this block ---
             if (amrex::ParallelDescriptor::MyProc() == 0) {
-                 amrex::Print() << "DEBUG_FLUX Rank 0: Entering hibox_face loop. hibox_face = " << hibox_face << "\n";
+                 amrex::Print() << "    >>> Entering hibox_face loop...\n"; // Confirm the 'if' is entered
             }
             // --- End Add ---
 
-             amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
+            amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
                  // --- Add print as FIRST line inside lambda ---
                  if (amrex::ParallelDescriptor::MyProc() == 0) {
-                     amrex::Print() << "DEBUG_FLUX Rank 0: INSIDE hibox_face LoopOnCpu for cell (" << i << "," << j << "," << k << ")\n";
+                     amrex::Print() << "        INSIDE hibox_face LoopOnCpu for cell (" << i << "," << j << "," << k << ")\n";
                  }
                  // --- End Add ---
 
-                 amrex::IntVect iv(i,j,k);
-                 amrex::IntVect iv_inner = iv - shift;
-                 int mask_val = mask(iv);
+                 amrex::IntVect iv(i,j,k); // Cell ON the boundary face (e.g., i=99)
+                 amrex::IntVect iv_inner = iv - shift; // Cell just inside (e.g., i=98)
+                 int mask_val = mask(iv); // Get mask value first
                  amrex::Real soln_iv = soln(iv);       // Read values even if inactive for debug print
                  amrex::Real soln_iv_inner = soln(iv_inner);
 
                  // --- Print cell details (Rank 0 only) ---
                  if (amrex::ParallelDescriptor::MyProc() == 0) {
-                      amrex::Print() << "    Cell " << iv << ": mask=" << mask_val
+                      amrex::Print() << "            Cell " << iv << ": mask=" << mask_val
                                      << ", soln(iv)=" << soln_iv
                                      << ", soln(iv_inner)=" << soln_iv_inner << "\n";
                  }
                  // --- End Print ---
 
-                 // Original calculation logic
-                 if (mask_val == cell_active) {
+                 // Original calculation logic:
+                 if (mask_val == cell_active) { // Assuming cell_active is defined (e.g., = 1)
                      amrex::Real grad = (soln_iv - soln_iv_inner) / dx_dir; // Use already read values
-                     amrex::Real flux = -grad;
+                     amrex::Real flux = -grad; // Assumes D=1
                      local_fxout += flux;
                  }
              }); // End LoopOnCpu hibox_face
         } // End if !hibox_face.isEmpty()
     } // End MFIter loop
 
+    // --- Print before reduction ---
     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "DEBUG_FLUX Rank 0: Finished MFIter loop. Before reduction: local_fxin=" << local_fxin << " local_fxout=" << local_fxout << "\n";
     }
+    // --- End Print ---
+
 
     // Reduce fluxes across MPI ranks
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
     amrex::ParallelDescriptor::ReduceRealSum(local_fxout);
 
-    // ... (rest of the function: calculate face_area_element, scale fluxes) ...
+    // Calculate face area element for scaling
     amrex::Real face_area_element = 1.0;
     if (AMREX_SPACEDIM == 3) {
         if (idir == 0) { face_area_element = dx[1] * dx[2]; }
@@ -1157,8 +1178,11 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
         if (idir == 0) { face_area_element = dx[1]; }
         else { face_area_element = dx[0]; }
     }
+
+    // Scale fluxes by face area
     fxin = local_fxin * face_area_element;
     fxout = local_fxout * face_area_element;
-}
 
+    // Note on Flux Sign Convention remains the same.
+}
 } // End namespace OpenImpala
