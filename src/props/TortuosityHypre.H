@@ -181,6 +181,7 @@ extern "C" {
         const amrex::Real* dxinv, // 1/dx^2 array
         const amrex::Real* vlo, const amrex::Real* vhi, // BC values
         const int* phase_unused, const int* dir // Phase ID (unused), Direction
+        const int* debug_print_level // <<< ADD THIS ARGUMENT
     );
 
     // Removes isolated spots from phase data (operates on Comp 0)
