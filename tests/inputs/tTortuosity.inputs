@@ -18,7 +18,7 @@ hypre.eps = 1e-10        # Solver relative tolerance
 
 # --- Test Verbosity ---
 # High verbosity for detailed HYPRE/solver output during debugging.
-verbose = 3
+verbose = 2
 
 # Optional output file (usually not needed for automated tests)
 # output_file = tort.txt
