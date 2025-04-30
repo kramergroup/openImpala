@@ -1069,7 +1069,7 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     // --- End Solution Copy ---
 
     // *** FILL GHOST CELLS for mf_soln_temp AFTER copying valid data ***
-    mf_soln_temp.FillBoundary(m_geom.periodicity());
+    // mf_soln_temp.FillBoundary(m_geom.periodicity());
 
     // Fill ghost cells for the mask (as before)
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
