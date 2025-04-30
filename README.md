@@ -6,7 +6,7 @@
 [![DOI](https://img.shields.io/badge/DOI-10.1016/j.softx.2021.100729-blue)](https://doi.org/10.1016/j.softx.2021.100729)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/kramergroup/openImpala)](https://github.com/kramergroup/openImpala/releases/latest)
 [![GitHub contributors](https://img.shields.io/github/contributors/kramergroup/openImpala)](https://github.com/kramergroup/openImpala/graphs/contributors)
-[![Pipeline Status](https://gitlab.com/JleHoux/openImpala/badges/master/pipeline.svg)](https://gitlab.com/JleHoux/openImpala/commits/master)
+[![Build and Test Status](https://github.com/kramergroup/openImpala/actions/workflows/build-test.yml/badge.svg?branch=main)](https://github.com/kramergroup/openImpala/actions/workflows/build-test.yml)
 
 OpenImpala is a high-performance computing framework for image-based modelling, built upon the [AMReX library](https://github.com/AMReX-Codes/amrex) for massive parallelism using MPI. It tackles the challenge posed by large 3D imaging datasets (often billions of voxels) common in materials science and tomography.
 
