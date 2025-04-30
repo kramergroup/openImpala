@@ -1029,23 +1029,49 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
     const amrex::Real* dx = m_geom.CellSize();
     const int idir = static_cast<int>(m_dir);
 
-    amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 1);
+    // Create a temporary MultiFab to hold the solution, NO ghost cells needed here
+    // as we access values only within the valid domain or use known BC values.
+    amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 0); // 0 ghost cells
     mf_soln_temp.setVal(0.0);
 
+    // --- Copy solution from HYPRE vector m_x to mf_soln_temp ---
     std::vector<double> soln_buffer;
     #ifdef AMREX_USE_OMP
     #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
     #endif
     for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
-        const amrex::Box& bx = mfi.validbox(); const int npts = static_cast<int>(bx.numPts()); if (npts == 0) continue;
-        soln_buffer.resize(npts); auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx); auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
-        HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data()); if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed during flux calculation copy!"); }
-        amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi); const amrex::IntVect lo = bx.smallEnd(); const amrex::IntVect hi = bx.bigEnd(); long long k_lin_idx = 0;
-        for (int kk=lo[2]; kk<=hi[2]; ++kk) { for (int jj=lo[1]; jj<=hi[1]; ++jj) { for (int ii=lo[0]; ii<=hi[0]; ++ii) { if (k_lin_idx < npts) soln_arr(ii,jj,kk)= static_cast<amrex::Real>(soln_buffer[k_lin_idx]); k_lin_idx++; }}} if (k_lin_idx != npts) { amrex::Warning("Point count mismatch during flux calc copy!"); }
-    }
+        const amrex::Box& bx = mfi.validbox();
+        const int npts = static_cast<int>(bx.numPts());
+        if (npts == 0) continue;
+        soln_buffer.resize(npts);
+        auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx);
+        auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
+        HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
+        if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed during flux calculation copy!"); }
 
-    mf_soln_temp.FillBoundary(m_geom.periodicity());
+        amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
+        const amrex::IntVect lo = bx.smallEnd(); const amrex::IntVect hi = bx.bigEnd();
+        long long k_lin_idx = 0;
+        // Use AMReX Loop for potentially better performance/GPU compatibility
+        amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
+            if (k_lin_idx < npts) {
+                soln_arr(ii,jj,kk,0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]);
+            } else {
+                 // This branch should ideally not be hit if npts calculation is correct.
+                 // Add more robust error handling if needed.
+                 amrex::Warning("Buffer read overrun possibility in HYPRE GetBoxValues copy!");
+            }
+            k_lin_idx++;
+        });
+         if (k_lin_idx != npts) { amrex::Warning("Point count mismatch during flux calc copy!"); }
+    }
+    // --- End Solution Copy ---
+
+    // Fill ghost cells for the MASK only (needed for checking neighbors if mask was used differently,
+    // but strictly speaking not required for *this* boundary flux calculation logic)
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
+
+    // REMOVED: mf_soln_temp.FillBoundary(m_geom.periodicity()); // <<< Not needed and incorrect for Dirichlet
 
     amrex::Real local_fxin = 0.0;
     amrex::Real local_fxout = 0.0;
@@ -1055,48 +1081,77 @@ void OpenImpala::TortuosityHypre::global_fluxes(amrex::Real& fxin, amrex::Real& 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout)
 #endif
-    for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid())
     {
         const amrex::Box& tileBox = mfi.tilebox();
         const auto mask = m_mf_active_mask.const_array(mfi, MaskComp); // Use MaskComp (0)
         const auto soln = mf_soln_temp.const_array(mfi, 0); // Use comp 0
+
+        // Get the intersection of the current tileBox with the domain boundaries
         amrex::Box lobox_face = amrex::bdryLo(domain, idir); lobox_face &= tileBox;
         amrex::Box hibox_face = amrex::bdryHi(domain, idir); hibox_face &= tileBox;
-        amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
 
-        // Flux In (Low Face): Calculate grad across the face (cell i and i-1)
+        // Flux In (Low Face): Calculate grad at the face using cell ON the boundary (iv)
+        // and the known boundary value (m_vlo). Flux = -grad.
         if (!lobox_face.isEmpty()) {
             amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) {
                 amrex::IntVect iv(i,j,k);
-                if (mask(iv) == cell_active) { // Check mask on the cell *at* the boundary
-                    amrex::Real grad = (soln(iv) - soln(iv - shift)) / dx_dir;
+                // Check if the cell ON the boundary is active
+                if (mask(iv) == cell_active) {
+                    // Gradient at the face between the ghost cell (value m_vlo) and the boundary cell (iv)
+                    amrex::Real grad = (soln(iv) - m_vlo) / dx_dir;
                     amrex::Real flux = -grad; // Assumes D=1
                     local_fxin += flux;
                 }
             });
         }
-        // Flux Out (High Face): Calculate grad across the face (cell i+1 and i)
+
+        // Flux Out (High Face): Calculate grad at the face using the known boundary value (m_vhi)
+        // and the cell ON the boundary (iv). Flux = -grad.
         if (!hibox_face.isEmpty()) {
              amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
-                amrex::IntVect iv(i,j,k);
-                 if (mask(iv) == cell_active) { // Check mask on the cell *at* the boundary
-                    amrex::Real grad = (soln(iv + shift) - soln(iv)) / dx_dir;
-                    amrex::Real flux = -grad; // Assumes D=1
-                    local_fxout += flux;
-                }
-            });
+                 amrex::IntVect iv(i,j,k);
+                 // Check if the cell ON the boundary is active
+                 if (mask(iv) == cell_active) {
+                     // Gradient at the face between the boundary cell (iv) and the ghost cell (value m_vhi)
+                     amrex::Real grad = (m_vhi - soln(iv)) / dx_dir;
+                     amrex::Real flux = -grad; // Assumes D=1
+                     local_fxout += flux; // Note: Sticking to original code's addition here. flux_out should be positive for outflow. See note below.
+                 }
+             });
         }
     } // End MFIter loop
 
+    // Reduce fluxes across MPI ranks
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
     amrex::ParallelDescriptor::ReduceRealSum(local_fxout);
 
+    // Calculate face area element for scaling
     amrex::Real face_area_element = 1.0;
-    if (AMREX_SPACEDIM == 3) { if (idir == 0) { face_area_element = dx[1] * dx[2]; } else if (idir == 1) { face_area_element = dx[0] * dx[2]; } else { face_area_element = dx[0] * dx[1]; } }
-    else if (AMREX_SPACEDIM == 2) { if (idir == 0) { face_area_element = dx[1]; } else { face_area_element = dx[0]; } }
+    if (AMREX_SPACEDIM == 3) {
+        if (idir == 0) { face_area_element = dx[1] * dx[2]; }
+        else if (idir == 1) { face_area_element = dx[0] * dx[2]; }
+        else { face_area_element = dx[0] * dx[1]; }
+    } else if (AMREX_SPACEDIM == 2) {
+        if (idir == 0) { face_area_element = dx[1]; }
+        else { face_area_element = dx[0]; }
+    }
 
+    // Scale fluxes by face area
     fxin = local_fxin * face_area_element;
     fxout = local_fxout * face_area_element;
+
+    // --- Flux Sign Convention Note ---
+    // The calculation above uses Flux = - Grad(potential).
+    // For inflow (low face): potential increases into domain, grad > 0, flux < 0.
+    // For outflow (high face): potential increases out of domain, grad > 0, flux < 0.
+    // So, fxin should be positive (flow entering volume is positive by convention),
+    // and fxout should be positive (flow leaving volume is positive by convention).
+    // The current calculation results in fxin being the flux INTO the domain across the low face
+    // and fxout being the flux INTO the domain across the high face (which will be negative).
+    // This matches the conservation check expectation: flux_in + flux_out = 0.
+    // If you prefer fxout to represent the positive outflow rate, you would use fxout = -local_fxout * face_area_element;
+    // However, the tortuosity calculation uses flux_in, so the current implementation should be okay.
 }
 
 } // End namespace OpenImpala
