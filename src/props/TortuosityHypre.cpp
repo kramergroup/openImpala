@@ -704,27 +704,43 @@ bool OpenImpala::TortuosityHypre::solve() {
         HYPRE_StructGMRESGetNumIterations(solver, &m_num_iterations); HYPRE_StructGMRESGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
         HYPRE_StructGMRESDestroy(solver); if (precond) HYPRE_StructPFMGDestroy(precond);
     }
-    // --- FlexGMRES Solver ---
-    else if (m_solvertype == SolverType::FlexGMRES) {
-         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with Tuned PFMG Preconditioner..." << std::endl;
-        ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
-        HYPRE_StructFlexGMRESSetTol(solver, m_eps); HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter);
-        HYPRE_StructFlexGMRESSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
-        precond = NULL; ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond); HYPRE_CHECK(ierr);
-        HYPRE_StructPFMGSetTol(precond, 0.0); HYPRE_StructPFMGSetMaxIter(precond, 1);
-        HYPRE_StructPFMGSetRelaxType(precond, 6); HYPRE_StructPFMGSetNumPreRelax(precond, 2); HYPRE_StructPFMGSetNumPostRelax(precond, 2);
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "    PFMG Preconditioner created." << std::endl; }
-        HYPRE_StructFlexGMRESSetPrecond(solver, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond);
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "    FlexGMRES Preconditioner set." << std::endl; }
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  Running HYPRE_StructFlexGMRESSetup..." << std::endl; }
-        ierr = HYPRE_StructFlexGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  Running HYPRE_StructFlexGMRESSolve..." << std::endl; }
-        ierr = HYPRE_StructFlexGMRESSolve(solver, m_A, m_b, m_x);
-        if (ierr == HYPRE_ERROR_CONV && m_verbose >= 0) { amrex::Warning("HYPRE FlexGMRES solver did not converge!"); }
-        else if (ierr != 0) { amrex::Warning("HYPRE FlexGMRES solver returned error code: " + std::to_string(ierr)); }
-        HYPRE_StructFlexGMRESGetNumIterations(solver, &m_num_iterations); HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
-        HYPRE_StructFlexGMRESDestroy(solver); if (precond) HYPRE_StructPFMGDestroy(precond);
-    }
+// --- FlexGMRES Solver ---
+else if (m_solvertype == SolverType::FlexGMRES) {
+    // <-- Changed comment below
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE FlexGMRES Solver with SMG Preconditioner..." << std::endl;
+    ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver); HYPRE_CHECK(ierr);
+    HYPRE_StructFlexGMRESSetTol(solver, m_eps);
+    HYPRE_StructFlexGMRESSetMaxIter(solver, m_maxiter);
+    HYPRE_StructFlexGMRESSetPrintLevel(solver, m_verbose > 1 ? 3 : 0);
+
+    // --- Create and Set SMG Preconditioner ---
+    precond = NULL;
+    ierr = HYPRE_StructSMGCreate(MPI_COMM_WORLD, &precond); HYPRE_CHECK(ierr); // <-- Create SMG
+    // For SMG preconditioner, usually use 1 iteration (maxiter=1) and zero tolerance (tol=0.0)
+    HYPRE_StructSMGSetTol(precond, 0.0);
+    HYPRE_StructSMGSetMaxIter(precond, 1); // Perform one SMG cycle per preconditioning step
+    HYPRE_StructSMGSetNumPreRelax(precond, 1); // Set relaxation sweeps (1 is often good for preconditioning)
+    HYPRE_StructSMGSetNumPostRelax(precond, 1);
+    // Keep SMG preconditioner quiet unless debugging it
+    HYPRE_StructSMGSetPrintLevel(precond, 0);
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "    SMG Preconditioner created." << std::endl; }
+
+    // <-- Use SMG Solve/Setup functions
+    HYPRE_StructFlexGMRESSetPrecond(solver, HYPRE_StructSMGSolve, HYPRE_StructSMGSetup, precond);
+    // --- End SMG Setup ---
+
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "    FlexGMRES Preconditioner set." << std::endl; }
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  Running HYPRE_StructFlexGMRESSetup..." << std::endl; }
+    ierr = HYPRE_StructFlexGMRESSetup(solver, m_A, m_b, m_x); HYPRE_CHECK(ierr);
+    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  Running HYPRE_StructFlexGMRESSolve..." << std::endl; }
+    ierr = HYPRE_StructFlexGMRESSolve(solver, m_A, m_b, m_x);
+    if (ierr == HYPRE_ERROR_CONV && m_verbose >= 0) { amrex::Warning("HYPRE FlexGMRES solver did not converge!"); }
+    else if (ierr != 0) { amrex::Warning("HYPRE FlexGMRES solver returned error code: " + std::to_string(ierr)); }
+    HYPRE_StructFlexGMRESGetNumIterations(solver, &m_num_iterations);
+    HYPRE_StructFlexGMRESGetFinalRelativeResidualNorm(solver, &m_final_res_norm);
+    HYPRE_StructFlexGMRESDestroy(solver);
+    if (precond) HYPRE_StructSMGDestroy(precond); // <-- Use SMGDestroy
+}
     // --- BiCGSTAB Solver ---
     else if (m_solvertype == SolverType::BiCGSTAB) {
         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "  Setting up HYPRE BiCGSTAB Solver with Jacobi Preconditioner..." << std::endl;
