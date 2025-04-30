@@ -63,7 +63,7 @@ void tortuosity_fillmtx (
     const amrex_real* vlo,
     const amrex_real* vhi,
     const int* phase_unused, // <<< Renamed
-    const int* dir
+    const int* dir,
     const int* debug_print_level // <<< ADDED THIS LINE
 );
 
