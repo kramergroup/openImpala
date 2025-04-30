@@ -23,6 +23,8 @@ verbose = 2
 # Optional output file (usually not needed for automated tests)
 # output_file = tort.txt
 
+tortuosity.remspot_passes = 0 
+
 # Expected values for verification (Optional - set if known for this specific test setup)
 # If uncommented, ensures the calculated value matches expectation.
 # expected_vf = 0.382848 # Value from previous log run
