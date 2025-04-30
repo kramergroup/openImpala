@@ -14,7 +14,7 @@ solver = FlexGMRES     # Set solver to test BiCGSTAB + PFMG combination
 # Allow sufficient iterations for the potentially more effective PFMG preconditioner.
 # Tolerance remains reasonably loose for testing speed.
 hypre.maxiter = 1000     # Max solver iterations
-hypre.eps = 1e-6        # Solver relative tolerance
+hypre.eps = 1e-10        # Solver relative tolerance
 
 # --- Test Verbosity ---
 # High verbosity for detailed HYPRE/solver output during debugging.
