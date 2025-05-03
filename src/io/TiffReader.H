@@ -173,6 +173,9 @@ public:
     /** @brief Get samples per pixel (e.g., 1 for grayscale, 3 for RGB). Requires metadata to be read. */
     int samplesPerPixel() const;
 
+    /** @brief Get TIFF FillOrder tag value (e.g., 1=MSB->LSB, 2=LSB->MSB). Requires metadata to be read. */
+    uint16_t getFillOrder() const { return m_fill_order; } // <<< NEW GETTER ADDED HERE <<<
+
     /** @brief Check if metadata has been successfully read and broadcast. */
     bool isRead() const { return m_is_read; }
 
@@ -180,18 +183,18 @@ public:
 private:
     // --- Member Variables ---
     // Source Info
-    std::string m_filename;         /**< Filename (single stack) */
-    std::string m_base_pattern;     /**< Base pattern for sequence */
-    std::string m_suffix;           /**< Suffix for sequence */
-    int m_start_index = 0;          /**< Starting index for sequence */
-    int m_digits = 1;               /**< Number of digits for sequence padding */
-    bool m_is_sequence = false;     /**< Flag indicating if source is a sequence */
+    std::string m_filename;       /**< Filename (single stack) */
+    std::string m_base_pattern;   /**< Base pattern for sequence */
+    std::string m_suffix;         /**< Suffix for sequence */
+    int m_start_index = 0;        /**< Starting index for sequence */
+    int m_digits = 1;             /**< Number of digits for sequence padding */
+    bool m_is_sequence = false;   /**< Flag indicating if source is a sequence */
 
     // Domain/Metadata Info (Read by Rank 0, Broadcast to all)
-    int m_width = 0;                /**< Width of the domain (X) */
-    int m_height = 0;               /**< Height of the domain (Y) */
-    int m_depth = 0;                /**< Depth of the domain (Z) */
-    bool m_is_read = false;         /**< Flag indicating if metadata has been successfully read and broadcast */
+    int m_width = 0;              /**< Width of the domain (X) */
+    int m_height = 0;             /**< Height of the domain (Y) */
+    int m_depth = 0;              /**< Depth of the domain (Z) */
+    bool m_is_read = false;       /**< Flag indicating if metadata has been successfully read and broadcast */
 
     // TIFF Format Info (Read by Rank 0, Broadcast to all)
     uint16_t m_bits_per_sample = 0; /**< TIFFTAG_BITSPERSAMPLE */
