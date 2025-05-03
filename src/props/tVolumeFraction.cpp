@@ -175,7 +175,7 @@ int main (int argc, char* argv[])
              }
             // *** ADDED: Print FillOrder ***
             if (amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << " TiffReader FillOrder used: " << reader_ptr->fillOrder() << " (1=MSB2LSB, 2=LSB2MSB)\n";
+                 amrex::Print() << " TiffReader FillOrder used: " << reader_ptr->getFillOrder() << " (1=MSB2LSB, 2=LSB2MSB)\n";
             }
             // *** END ADDED ***
 
