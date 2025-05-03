@@ -1,0 +1,57 @@
+#==============================================================================
+# Input file for tVolumeFraction test
+#
+# Tests the VolumeFraction class by reading a TIFF file, thresholding it,
+# calculating volume fractions, and comparing against optional expected values
+# or direct summation. Includes options for diagnostic output.
+#==============================================================================
+
+# Path to the input image file used to define the geometry/phases.
+# Ensure this is the correct 1-bit TIFF file being investigated.
+tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
+
+# --- Phase Definition Parameters ---
+
+# Integer ID assigned to voxels with raw values <= threshold
+phase0_id = 0
+
+# Integer ID assigned to voxels with raw values > threshold
+phase1_id = 1
+
+# Component index within the iMultiFab where phase data is stored
+comp = 0
+
+# Threshold value applied to the raw data read from the TIFF file
+threshold = 0.5
+
+# --- AMReX Grid Setup ---
+
+# Maximum grid size used when creating the BoxArray for the iMultiFab
+box_size = 32
+
+# --- Test Behavior Controls ---
+
+# Verbosity level:
+# 0: Minimal output (Pass/Fail only)
+# 1: Standard test progress and results output
+# 2: More detailed internal steps
+# 3+: Enable detailed TiffReader boundary debugging output (if compiled in)
+verbose = 3 # Set high to enable boundary debug prints from TiffReader
+
+# Enable/disable the check that prints boundary corner values after thresholding
+# Options: true / false / 1 / 0
+check_boundary_voxels = true
+
+# Tolerance used when comparing calculated vs expected volume fractions (if provided)
+# Also used for comparing VolumeFraction class against direct summation.
+tolerance = 1e-9
+
+# --- Optional Verification Values ---
+# Set expected values if you want the test to PASS/FAIL based on them.
+# Use negative values (e.g., -1.0) to skip the check against these specific numbers.
+# Currently set to skip, as the focus is on observing the calculated values.
+expected_vf0 = -1.0  # Expected volume fraction for phase 0 (e.g., 0.617725 if checking against current C++ result)
+expected_vf1 = -1.0  # Expected volume fraction for phase 1 (e.g., 0.382275)
+
+# Note: Parameters like 'direction', 'solver', 'hypre.*', 'tortuosity.*' are
+#       not used by this specific test program (tVolumeFraction).
