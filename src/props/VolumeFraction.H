@@ -53,21 +53,29 @@ namespace OpenImpala // Add appropriate namespace
         // --- Computation Method ---
 
         /**
-         * @brief Computes the volume fraction of the specified phase.
+         * @brief Computes the count of the specified phase and the total cell count.
          *
          * Iterates over the valid cells of the stored iMultiFab, counts cells matching
-         * the specified phase ID, and divides by the total number of valid cells.
+         * the specified phase ID, and counts the total number of valid cells.
          * Performs parallel reduction across MPI ranks unless 'local' is true.
          * This operation can be costly depending on the grid size.
          *
-         * @param local If true, compute and return the volume fraction using only data
-         * local to the current MPI rank (skips MPI reduction).
-         * If false (default), compute the global volume fraction across all ranks.
-         *
-         * @return Volume fraction (local or global) of the phase. Returns 0.0 if the
-         * total volume (number of valid cells) is zero.
+         * @param[out] phase_count The number of cells belonging to the specified phase (local or global).
+         * @param[out] total_count The total number of cells considered (local or global).
+         * @param[in] local If true, compute counts using only data local to the current MPI rank
+         * (skips MPI reduction). If false (default), compute the global counts
+         * across all ranks.
          */
-        amrex::Real value(bool local = false) const;
+        void value(long long& phase_count, long long& total_count, bool local = false) const;
+
+        // --- Optional: Convenience method to get VF directly ---
+        /*
+        amrex::Real value_vf(bool local = false) const {
+           long long pc, tc;
+           value(pc, tc, local); // Call the method that returns counts
+           return (tc > 0) ? static_cast<amrex::Real>(pc) / tc : 0.0;
+        }
+        */
 
       private:
         /** @brief Reference to the MultiFab with phase information (lifetime managed externally!). */
