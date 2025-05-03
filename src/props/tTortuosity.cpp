@@ -238,7 +238,7 @@ int main (int argc, char* argv[])
             if (verbose >= 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculating Volume Fraction...\n";
             try {
                 OpenImpala::VolumeFraction vf_calc(mf_phase_with_ghost, phase_id);
-                actual_vf = vf_calc.value(false);
+                actual_vf = vf_calc.value_vf(false);
                 if(amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Calculated Volume Fraction (Phase " << phase_id << "): " << actual_vf << "\n";
                 if (expected_vf >= 0.0) {
                      if (std::abs(actual_vf - expected_vf) > vf_tolerance) {
