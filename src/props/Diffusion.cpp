@@ -295,7 +295,7 @@ int main(int argc, char* argv[])
         // --- Calculate Volume Fraction ---
         if (verbose > 0) amrex::Print() << " Calculating Volume Fraction for Phase ID: " << phase_id << "\n";
         OpenImpala::VolumeFraction vf(mf_phase, phase_id, 0); // Assume phase data in component 0
-        amrex::Real actual_vf = vf.value(false); // Global calculation
+        amrex::Real actual_vf = vf.value_vf(false); // Global calculation
         if (amrex::ParallelDescriptor::IOProcessor()) { // Print only once
             amrex::Print() << "  Volume Fraction = " << std::fixed << std::setprecision(6) << actual_vf << "\n";
         }
