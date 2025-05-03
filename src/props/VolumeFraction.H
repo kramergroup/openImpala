@@ -69,13 +69,11 @@ namespace OpenImpala // Add appropriate namespace
         void value(long long& phase_count, long long& total_count, bool local = false) const;
 
         // --- Optional: Convenience method to get VF directly ---
-        /*
         amrex::Real value_vf(bool local = false) const {
            long long pc, tc;
            value(pc, tc, local); // Call the method that returns counts
            return (tc > 0) ? static_cast<amrex::Real>(pc) / tc : 0.0;
         }
-        */
 
       private:
         /** @brief Reference to the MultiFab with phase information (lifetime managed externally!). */
