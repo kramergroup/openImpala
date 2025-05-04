@@ -134,6 +134,8 @@ int main (int argc, char* argv[])
             pp.query("check_boundary_voxels", check_boundary_voxels); // Query the new flag
         }
 
+        amrex::SetVerbose(verbose); // <<<====== ADD THIS LINE
+
         // Check if input file exists
         {
             std::ifstream test_ifs(tifffile);
