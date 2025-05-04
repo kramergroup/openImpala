@@ -172,8 +172,6 @@ int TiffReader::depth() const { return m_depth; }
 int TiffReader::bitsPerSample() const { return m_bits_per_sample; }
 int TiffReader::sampleFormat() const { return m_sample_format; }
 int TiffReader::samplesPerPixel() const { return m_samples_per_pixel; }
-bool TiffReader::isRead() const { return m_is_read; }
-uint16_t TiffReader::getFillOrder() const { return m_fill_order; } // Added getter
 
 amrex::Box TiffReader::box() const {
     if (!m_is_read) { return amrex::Box(); } // Return empty box if not read
