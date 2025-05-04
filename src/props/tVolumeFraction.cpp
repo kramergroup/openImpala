@@ -11,16 +11,17 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
-#include <stdexcept>    // For std::runtime_error
-#include <fstream>      // For std::ifstream check
-#include <iomanip>      // For std::setprecision, std::setw, std::setfill
-#include <cmath>        // For std::abs
-#include <limits>       // For std::numeric_limits
-#include <memory>       // For std::unique_ptr
+#include <stdexcept>      // For std::runtime_error
+#include <fstream>        // For std::ifstream check
+#include <iomanip>        // For std::setprecision, std::setw, std::setfill
+#include <cmath>          // For std::abs
+#include <limits>         // For std::numeric_limits
+#include <memory>         // For std::unique_ptr
+#include <iostream>       // <<< ADDED for std::flush >>>
 
 #include <AMReX.H>
-#include <AMReX_ParmParse.H>        // For reading parameters
-#include <AMReX_Utility.H>          // For amrex::UtilCreateDirectory (optional for output)
+#include <AMReX_ParmParse.H>         // For reading parameters
+#include <AMReX_Utility.H>           // For amrex::UtilCreateDirectory (optional for output)
 #include <AMReX_Array.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Box.H>
@@ -29,11 +30,11 @@
 #include <AMReX_iMultiFab.H>
 #include <AMReX_MultiFabUtil.H>    // For amrex::Loop, Array4
 #include <AMReX_ParallelDescriptor.H> // For IOProcessor, Barrier, Reduce*
-#include <AMReX_ParallelReduce.H>   // For ParallelAllReduce
-// #include <AMReX_Reduce.H>           // <<< REMOVED: Not using Reduce::Sum anymore >>>
-#include <AMReX_Random.H>           // For potential synthetic data later
-#include <AMReX_MFIter.H>           // Include MFIter explicitly
-#include <AMReX_GpuQualifiers.H>  // <<< ADDED for AMREX_GPU_DEVICE >>>
+#include <AMReX_ParallelReduce.H>    // For ParallelAllReduce
+// #include <AMReX_Reduce.H>            // <<< REMOVED: Not using Reduce::Sum anymore >>>
+#include <AMReX_Random.H>            // For potential synthetic data later
+#include <AMReX_MFIter.H>            // Include MFIter explicitly
+#include <AMReX_GpuQualifiers.H>   // <<< ADDED for AMREX_GPU_DEVICE >>>
 
 
 // --- Default Test Parameters ---
@@ -62,7 +63,7 @@ namespace // Anonymous namespace for internal helpers
     // Helper function to calculate VF directly using AMReX loops and reductions
     // --- MODIFIED to return counts ---
     void calculate_counts_direct(const amrex::iMultiFab& mf, int phase_id, int comp,
-                                  long long& phase_count, long long& total_count)
+                                 long long& phase_count, long long& total_count)
     {
         long long local_phase_count = 0;
         long long local_total_count = 0;
@@ -143,17 +144,18 @@ int main (int argc, char* argv[])
 
         if (verbose > 0) {
             amrex::Print() << "\n--- VolumeFraction Test Configuration ---\n";
-            amrex::Print() << " TIF File:             " << tifffile << "\n";
-            amrex::Print() << " Phase IDs:            " << phase0_id << " (<= T), " << phase1_id << " (> T)\n";
-            amrex::Print() << " Phase Component:      " << phase_comp << "\n";
-            amrex::Print() << " Threshold Value:      " << threshold_val << "\n";
-            amrex::Print() << " Box Size:             " << box_size << "\n";
-            amrex::Print() << " Verbose:              " << verbose << "\n";
-            amrex::Print() << " Tolerance:            " << tolerance << "\n";
-            amrex::Print() << " Check Boundary Voxels:" << (check_boundary_voxels ? "Yes" : "No") << "\n";
-            if (expected_vf0 >= 0.0) amrex::Print() << " Expected VF[" << phase0_id << "]:     " << expected_vf0 << "\n";
-            if (expected_vf1 >= 0.0) amrex::Print() << " Expected VF[" << phase1_id << "]:     " << expected_vf1 << "\n";
+            amrex::Print() << " TIF File:              " << tifffile << "\n";
+            amrex::Print() << " Phase IDs:             " << phase0_id << " (<= T), " << phase1_id << " (> T)\n";
+            amrex::Print() << " Phase Component:       " << phase_comp << "\n";
+            amrex::Print() << " Threshold Value:       " << threshold_val << "\n";
+            amrex::Print() << " Box Size:              " << box_size << "\n";
+            amrex::Print() << " Verbose:               " << verbose << "\n";
+            amrex::Print() << " Tolerance:             " << tolerance << "\n";
+            amrex::Print() << " Check Boundary Voxels: " << (check_boundary_voxels ? "Yes" : "No") << "\n";
+            if (expected_vf0 >= 0.0) amrex::Print() << " Expected VF[" << phase0_id << "]:        " << expected_vf0 << "\n";
+            if (expected_vf1 >= 0.0) amrex::Print() << " Expected VF[" << phase1_id << "]:        " << expected_vf1 << "\n";
             amrex::Print() << "--------------------------------------\n\n";
+            amrex::OutStream() << std::flush; // Flush config output
         }
 
         // Define AMReX objects
@@ -166,7 +168,10 @@ int main (int argc, char* argv[])
         // --- Read TIFF and Setup Grids/Geometry ---
         try {
             std::unique_ptr<OpenImpala::TiffReader> reader_ptr;
-            if (verbose > 0) amrex::Print() << " Reading file " << tifffile << "...\n";
+            if (verbose > 0) {
+                amrex::Print() << " Reading file " << tifffile << "...\n";
+                amrex::OutStream() << std::flush;
+            }
             reader_ptr = std::make_unique<OpenImpala::TiffReader>(tifffile); // Assumes constructor throws on fail
 
             // Basic check on reader state
@@ -176,6 +181,7 @@ int main (int argc, char* argv[])
             // *** ADDED: Print FillOrder ***
             if (amrex::ParallelDescriptor::IOProcessor()) {
                  amrex::Print() << " TiffReader FillOrder used: " << reader_ptr->getFillOrder() << " (1=MSB2LSB, 2=LSB2MSB)\n";
+                 amrex::OutStream() << std::flush;
             }
             // *** END ADDED ***
 
@@ -202,7 +208,10 @@ int main (int argc, char* argv[])
             mf_phase.setVal(-1); // Initialize to dummy value
 
             // Threshold image data into mf_phase using phase1_id and phase0_id
-            if (verbose > 0) amrex::Print() << " Thresholding data (Phase " << phase1_id << " if > " << threshold_val << ")...\n";
+            if (verbose > 0) {
+                amrex::Print() << " Thresholding data (Phase " << phase1_id << " if > " << threshold_val << ")...\n";
+                amrex::OutStream() << std::flush;
+            }
             reader_ptr->threshold(threshold_val, phase1_id, phase0_id, mf_phase); // Use flexible overload
 
             // Check threshold result basic validity
@@ -212,8 +221,12 @@ int main (int argc, char* argv[])
                  amrex::Print() << "Warning: Thresholded data min/max (" << min_val << "/" << max_val
                                 << ") not the expected {" << phase0_id << ", " << phase1_id
                                 << "}. Check threshold value or sample data.\n";
+                 amrex::OutStream() << std::flush;
             } else {
-                 if (verbose > 0) amrex::Print() << "  Threshold output range {" << min_val << ", " << max_val << "} looks plausible.\n";
+                 if (verbose > 0) {
+                     amrex::Print() << "  Threshold output range {" << min_val << ", " << max_val << "} looks plausible.\n";
+                     amrex::OutStream() << std::flush;
+                 }
             }
 
             // No FillBoundary needed for mf_phase with 0 ghost cells
@@ -222,21 +235,32 @@ int main (int argc, char* argv[])
             amrex::Abort("Error during TiffReader processing or grid setup: " + std::string(e.what()));
         }
 
-        // --- *** NEW: Check Boundary Voxel Values *** ---
-        if (check_boundary_voxels && amrex::ParallelDescriptor::IOProcessor()) // Run only on Rank 0
+        // --- *** MODIFIED: Check Boundary Voxel Values with Debug Prints *** ---
+        if (amrex::ParallelDescriptor::IOProcessor()) { // Print debug status only on IO rank
+            amrex::Print() << "DEBUG: Before boundary check block. check_boundary_voxels=" << check_boundary_voxels
+                           << ", IOProcessor=" << amrex::ParallelDescriptor::IOProcessor() << "\n";
+            amrex::OutStream() << std::flush;
+        }
+
+        if (check_boundary_voxels && amrex::ParallelDescriptor::IOProcessor()) // Run full check only on Rank 0
         {
+            amrex::Print() << "DEBUG: ENTERING boundary check block.\n";
+            amrex::OutStream() << std::flush;
+
             amrex::Print() << " Checking values of boundary voxels (corners):\n";
+            amrex::OutStream() << std::flush; // Force flush
+
             const amrex::IntVect dom_lo = domain_box.smallEnd();
             const amrex::IntVect dom_hi = domain_box.bigEnd();
             amrex::Vector<amrex::IntVect> corners = {
-                dom_lo,                                                  // (0,0,0)
-                amrex::IntVect(dom_hi[0], dom_lo[1], dom_lo[2]),         // (Xmax, 0, 0)
-                amrex::IntVect(dom_lo[0], dom_hi[1], dom_lo[2]),         // (0, Ymax, 0)
-                amrex::IntVect(dom_lo[0], dom_lo[1], dom_hi[2]),         // (0, 0, Zmax)
-                amrex::IntVect(dom_hi[0], dom_hi[1], dom_lo[2]),         // (Xmax, Ymax, 0)
-                amrex::IntVect(dom_hi[0], dom_lo[1], dom_hi[2]),         // (Xmax, 0, Zmax)
-                amrex::IntVect(dom_lo[0], dom_hi[1], dom_hi[2]),         // (0, Ymax, Zmax)
-                dom_hi                                                   // (Xmax, Ymax, Zmax)
+                dom_lo,                                               // (0,0,0)
+                amrex::IntVect(dom_hi[0], dom_lo[1], dom_lo[2]),      // (Xmax, 0, 0)
+                amrex::IntVect(dom_lo[0], dom_hi[1], dom_lo[2]),      // (0, Ymax, 0)
+                amrex::IntVect(dom_lo[0], dom_lo[1], dom_hi[2]),      // (0, 0, Zmax)
+                amrex::IntVect(dom_hi[0], dom_hi[1], dom_lo[2]),      // (Xmax, Ymax, 0)
+                amrex::IntVect(dom_hi[0], dom_lo[1], dom_hi[2]),      // (Xmax, 0, Zmax)
+                amrex::IntVect(dom_lo[0], dom_hi[1], dom_hi[2]),      // (0, Ymax, Zmax)
+                dom_hi                                                // (Xmax, Ymax, Zmax)
             };
 
             // Need to iterate MFIter to access data, but only check points if they are corners
@@ -248,18 +272,33 @@ int main (int argc, char* argv[])
                  for(const auto& corner : corners) {
                       if (bx.contains(corner)) { // Check if this Fab owns the corner point
                            amrex::Print() << "  Corner " << corner << " value: " << fab_arr(corner) << "\n";
+                           amrex::OutStream() << std::flush; // Force flush
                       }
                  }
             }
             amrex::Print() << "------------------------------------------\n";
+            amrex::OutStream() << std::flush; // Force flush
+        } else if (amrex::ParallelDescriptor::IOProcessor()) { // Print skip message only on IO rank
+             amrex::Print() << "DEBUG: SKIPPING boundary check block (check_boundary_voxels="
+                            << check_boundary_voxels << " or not IOProcessor).\n";
+             amrex::OutStream() << std::flush;
         }
-        // Ensure all ranks wait if check was done
+
+        // Ensure all ranks wait if check was done (or skipped) before proceeding
         amrex::ParallelDescriptor::Barrier("BoundaryCheck");
-        // --- *** END BOUNDARY CHECK *** ---
+
+        if (amrex::ParallelDescriptor::IOProcessor()) { // Print debug status only on IO rank
+            amrex::Print() << "DEBUG: After boundary check block structure.\n";
+            amrex::OutStream() << std::flush;
+        }
+        // --- *** END MODIFIED BOUNDARY CHECK *** ---
 
 
         // --- Test VolumeFraction Class ---
-        if (verbose > 0) amrex::Print() << " Calculating Volume Fractions using VolumeFraction class...\n";
+        if (verbose > 0) {
+            amrex::Print() << " Calculating Volume Fractions using VolumeFraction class...\n";
+            amrex::OutStream() << std::flush;
+        }
 
         // Declare variables to hold counts
         long long phase0_count_global = 0, total_count0_global = 0;
@@ -281,18 +320,29 @@ int main (int argc, char* argv[])
         amrex::Print() << "  VF[" << phase0_id << "] (Global): " << actual_vf0_global << "\n";
         // *** ADDED: Print global counts ***
         amrex::Print() << "   Phase[" << phase0_id << "] Count (Global): " << phase0_count_global << "\n";
-        amrex::Print() << "   Total Count (Global):       " << total_count0_global << "\n";
+        amrex::Print() << "   Total Count (Global):      " << total_count0_global << "\n";
+        amrex::OutStream() << std::flush; // Flush
         // *** END ADDED ***
-        if (verbose > 0) amrex::Print() << "  VF[" << phase0_id << "] (Local Rank 0): " << actual_vf0_local << "\n";
+        if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { // Print local only on Rank 0 for clarity
+            amrex::Print() << "  VF[" << phase0_id << "] (Local Rank 0): " << actual_vf0_local << "\n";
+            amrex::OutStream() << std::flush;
+        }
+
 
         if (expected_vf0 >= 0.0) { // Check global against expected
             if (std::abs(actual_vf0_global - expected_vf0) > tolerance) {
                  amrex::Abort("FAIL: Global Volume Fraction mismatch for phase " + std::to_string(phase0_id));
             }
-             if (verbose > 0) amrex::Print() << "  VF[" << phase0_id << "] Global Check: PASS\n";
+             if (verbose > 0) {
+                 amrex::Print() << "  VF[" << phase0_id << "] Global Check: PASS\n";
+                 amrex::OutStream() << std::flush;
+             }
         }
         if (actual_vf0_local < 0.0 - tolerance || actual_vf0_local > 1.0 + tolerance) { // Check local range with tolerance
-            amrex::Abort("FAIL: Local Volume Fraction for phase " + std::to_string(phase0_id) + " out of range [0, 1].");
+            // This check might fail spuriously on ranks with no cells, do it carefully
+            if (total_count0_local > 0) { // Only check if this rank actually has cells
+                amrex::Abort("FAIL: Local Volume Fraction for phase " + std::to_string(phase0_id) + " out of range [0, 1] on Rank " + std::to_string(amrex::ParallelDescriptor::MyProc()) + ".");
+            }
         }
 
 
@@ -316,42 +366,68 @@ int main (int argc, char* argv[])
         amrex::Print() << "  VF[" << phase1_id << "] (Global): " << actual_vf1_global << "\n";
         // *** ADDED: Print global counts ***
         amrex::Print() << "   Phase[" << phase1_id << "] Count (Global): " << phase1_count_global << "\n";
-        amrex::Print() << "   Total Count (Global):       " << total_count1_global << " (Should match total above)\n";
+        amrex::Print() << "   Total Count (Global):      " << total_count1_global << " (Should match total above)\n";
+        amrex::OutStream() << std::flush; // Flush
         // *** END ADDED ***
 
-         if (verbose > 0) amrex::Print() << "  VF[" << phase1_id << "] (Local Rank 0): " << actual_vf1_local << "\n";
+        if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { // Print local only on Rank 0
+            amrex::Print() << "  VF[" << phase1_id << "] (Local Rank 0): " << actual_vf1_local << "\n";
+            amrex::OutStream() << std::flush;
+        }
+
 
         if (expected_vf1 >= 0.0) { // Check global against expected
-              if (std::abs(actual_vf1_global - expected_vf1) > tolerance) {
-                  amrex::Abort("FAIL: Global Volume Fraction mismatch for phase " + std::to_string(phase1_id));
+             if (std::abs(actual_vf1_global - expected_vf1) > tolerance) {
+                 amrex::Abort("FAIL: Global Volume Fraction mismatch for phase " + std::to_string(phase1_id));
+             }
+              if (verbose > 0) {
+                  amrex::Print() << "  VF[" << phase1_id << "] Global Check: PASS\n";
+                  amrex::OutStream() << std::flush;
               }
-               if (verbose > 0) amrex::Print() << "  VF[" << phase1_id << "] Global Check: PASS\n";
         }
-        if (actual_vf1_local < 0.0 - tolerance || actual_vf1_local > 1.0 + tolerance) { // Check local range with tolerance
-            amrex::Abort("FAIL: Local Volume Fraction for phase " + std::to_string(phase1_id) + " out of range [0, 1].");
+         if (actual_vf1_local < 0.0 - tolerance || actual_vf1_local > 1.0 + tolerance) { // Check local range with tolerance
+             if(total_count1_local > 0) { // Only check if this rank actually has cells
+                amrex::Abort("FAIL: Local Volume Fraction for phase " + std::to_string(phase1_id) + " out of range [0, 1] on Rank " + std::to_string(amrex::ParallelDescriptor::MyProc()) + ".");
+             }
         }
 
         // --- Check Sums ---
-        if (verbose > 0) amrex::Print() << " Checking if volume fractions sum to 1.0...\n";
+        if (verbose > 0) {
+            amrex::Print() << " Checking if volume fractions sum to 1.0...\n";
+            amrex::OutStream() << std::flush;
+        }
         amrex::Real vf_sum_global = actual_vf0_global + actual_vf1_global;
-        amrex::Real vf_sum_local = actual_vf0_local + actual_vf1_local;
+        amrex::Real vf_sum_local = actual_vf0_local + actual_vf1_local; // Note: This is Rank 0's local sum
 
         amrex::Print() << "  Global VF Sum = " << vf_sum_global << "\n";
-         if (verbose > 0) amrex::Print() << "  Local VF Sum (Rank " << amrex::ParallelDescriptor::MyProc() << ") = " << vf_sum_local << "\n";
+        amrex::OutStream() << std::flush;
+
+        if (verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { // Print local sum only on Rank 0
+             amrex::Print() << "  Local VF Sum (Rank 0) = " << vf_sum_local << "\n";
+             amrex::OutStream() << std::flush;
+        }
+
 
         if (std::abs(1.0 - vf_sum_global) > tolerance) {
             amrex::Warning("Global Volume Fractions do not sum to 1.0 within tolerance.");
         } else {
-              if (verbose > 0) amrex::Print() << "  Global Sum Check:     PASS\n";
+             if (verbose > 0) {
+                 amrex::Print() << "  Global Sum Check:       PASS\n";
+                 amrex::OutStream() << std::flush;
+             }
         }
         // Local sum check requires care in parallel if mf_phase has zero cells on some ranks
-        if (mf_phase.boxArray().numPts() > 0 && std::abs(1.0 - vf_sum_local) > tolerance) {
-            amrex::Warning("Local Volume Fractions do not sum to 1.0 on Rank " + std::to_string(amrex::ParallelDescriptor::MyProc()) );
+        if (mf_phase.boxArray().numPts() > 0 && std::abs(1.0 - vf_sum_local) > tolerance && amrex::ParallelDescriptor::IOProcessor()) {
+             // Only warn if Rank 0 (which we printed) doesn't sum, and it has points.
+             amrex::Warning("Local Volume Fractions do not sum to 1.0 on Rank 0.");
         }
 
 
         // --- Compare with Direct AMReX Summation ---
-        if (verbose > 0) amrex::Print() << " Comparing VolumeFraction class against direct AMReX summation...\n";
+        if (verbose > 0) {
+            amrex::Print() << " Comparing VolumeFraction class against direct AMReX summation...\n";
+            amrex::OutStream() << std::flush;
+        }
         long long direct_phase0_count=0, direct_total0_count=0;
         long long direct_phase1_count=0, direct_total1_count=0;
 
@@ -362,12 +438,18 @@ int main (int argc, char* argv[])
         if (direct_phase0_count != phase0_count_global || direct_total0_count != total_count0_global) {
             amrex::Abort("FAIL: VolumeFraction::value() counts differ from direct AMReX Sum counts for phase " + std::to_string(phase0_id));
         } else {
-             if (verbose > 0) amrex::Print() << "  Direct Sum Check[" << phase0_id << "]: PASS\n";
+             if (verbose > 0) {
+                 amrex::Print() << "  Direct Sum Check[" << phase0_id << "]: PASS\n";
+                 amrex::OutStream() << std::flush;
+             }
         }
          if (direct_phase1_count != phase1_count_global || direct_total1_count != total_count1_global) {
-             amrex::Abort("FAIL: VolumeFraction::value() counts differ from direct AMReX Sum counts for phase " + std::to_string(phase1_id));
+              amrex::Abort("FAIL: VolumeFraction::value() counts differ from direct AMReX Sum counts for phase " + std::to_string(phase1_id));
          } else {
-              if (verbose > 0) amrex::Print() << "  Direct Sum Check[" << phase1_id << "]: PASS\n";
+               if (verbose > 0) {
+                   amrex::Print() << "  Direct Sum Check[" << phase1_id << "]: PASS\n";
+                   amrex::OutStream() << std::flush;
+               }
          }
 
 
@@ -377,10 +459,14 @@ int main (int argc, char* argv[])
 
         // --- Final Success ---
         amrex::Print() << "\n tVolumeFraction Test Completed Successfully.\n";
+        amrex::OutStream() << std::flush;
 
         amrex::Real stop_time = amrex::second() - strt_time;
         amrex::ParallelDescriptor::ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber());
-        amrex::Print() << " Run time = " << stop_time << " sec\n";
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << " Run time = " << stop_time << " sec\n";
+            amrex::OutStream() << std::flush;
+        }
 
     } // End AMReX scope block
 
