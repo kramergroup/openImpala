@@ -250,6 +250,7 @@ bool TiffReader::readFile(const std::string& filename)
     }
 
     // *** FIX: Override FillOrder for 1-bit TIFFs if needed ***
+    /*
     if (m_bits_per_sample == 1) {
         if (m_fill_order != FILLORDER_LSB2MSB) { // If not already LSB
             if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -260,6 +261,7 @@ bool TiffReader::readFile(const std::string& filename)
         }
     }
     // *** END FIX ***
+    */
 
     m_is_read = true;
     return true;
@@ -333,6 +335,7 @@ bool TiffReader::readFileSequence(
     }
 
     // *** FIX: Override FillOrder for 1-bit TIFFs if needed ***
+    /*
     if (m_bits_per_sample == 1) {
         if (m_fill_order != FILLORDER_LSB2MSB) { // If not already LSB
             if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -343,6 +346,7 @@ bool TiffReader::readFileSequence(
         }
     }
     // *** END FIX ***
+    */
 
     m_is_read = true;
     return true;
