@@ -101,7 +101,7 @@ TiffReader::TiffReader() :
 {}
 
 TiffReader::TiffReader(const std::string& filename) : TiffReader() {
-    m_filename = filename;
+    m_filename = filename; // Store filename before calling readFile, as readFile might use it (e.g. in error messages on rank 0)
     if (!readFile(filename)) {
         throw std::runtime_error("TiffReader(filename): Failed to read metadata from file: " + filename);
     }
@@ -110,6 +110,7 @@ TiffReader::TiffReader(const std::string& filename) : TiffReader() {
 TiffReader::TiffReader(
     const std::string& base_pattern, int num_files,
     int start_index, int digits, const std::string& suffix) : TiffReader() {
+    // Store these before calling readFileSequence, as it will use them
     m_base_pattern = base_pattern; m_start_index = start_index; m_digits = digits; m_suffix = suffix;
     if (!readFileSequence(base_pattern, num_files, start_index, digits, suffix)) {
          throw std::runtime_error("TiffReader(sequence): Failed to read metadata for sequence: " + base_pattern);
@@ -136,6 +137,8 @@ amrex::Box TiffReader::box() const {
 // readFile Method (Single Stack File)
 //================================================================
 bool TiffReader::readFile(const std::string& filename) {
+    // Ensure member filename is set correctly before this method is called by constructor, or set it here.
+    // If called directly, update member variables.
     m_is_sequence = false; m_filename = filename; m_base_pattern = "";
     int width_r0=0, height_r0=0, depth_r0=0;
     uint16_t bps_r0=0, fmt_r0=SAMPLEFORMAT_UINT, spp_r0=1, fill_order_r0 = FILLORDER_MSB2LSB;
@@ -155,7 +158,7 @@ bool TiffReader::readFile(const std::string& filename) {
         TIFFGetFieldDefaulted(tif.get(), TIFFTAG_PLANARCONFIG, &planar);
         TIFFGetFieldDefaulted(tif.get(), TIFFTAG_FILLORDER, &fill_order_r0);
         
-        if (amrex::Verbose() >= 2) {
+        if (amrex::Verbose() >= 2 && amrex::ParallelDescriptor::IOProcessor()) { // Ensure IOProc check for safety if Verbose isn't global
             amrex::Print() << "TiffReader DEBUG (readFile): FillOrder tag read from file '" << filename << "' is: " << fill_order_r0
                            << " (1=MSB2LSB, 2=LSB2MSB, Standard TIFF Default=" << FILLORDER_MSB2LSB << ")\n";
         }
@@ -176,10 +179,20 @@ bool TiffReader::readFile(const std::string& filename) {
 
     int root = amrex::ParallelDescriptor::IOProcessorNumber();
     std::vector<int> idata = {width_r0, height_r0, depth_r0, static_cast<int>(bps_r0), static_cast<int>(fmt_r0), static_cast<int>(spp_r0), 0 /*is_sequence=false*/, static_cast<int>(fill_order_r0)};
-    amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), root);
+    amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), root, amrex::ParallelDescriptor::Communicator());
     m_width=idata[0]; m_height=idata[1]; m_depth=idata[2]; m_bits_per_sample=(uint16_t)idata[3]; m_sample_format=(uint16_t)idata[4]; m_samples_per_pixel=(uint16_t)idata[5]; m_is_sequence=(bool)idata[6]; m_fill_order=(uint16_t)idata[7];
 
-    amrex::BroadcastString(m_filename, root); // Broadcasts string from root to others
+    // Corrected string broadcast for m_filename
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_filename.length()); // m_filename is already set on IOProc
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root, amrex::ParallelDescriptor::Communicator());
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root, amrex::ParallelDescriptor::Communicator());
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root, amrex::ParallelDescriptor::Communicator());
+        m_filename.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_filename.data()), string_len, root, amrex::ParallelDescriptor::Communicator());
+    }
 
     if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0) {
         amrex::Abort("TiffReader::readFile: Invalid metadata received after broadcast.");
@@ -194,6 +207,7 @@ bool TiffReader::readFile(const std::string& filename) {
 bool TiffReader::readFileSequence(
     const std::string& base_pattern, int num_files,
     int start_index, int digits, const std::string& suffix) {
+    // Ensure member variables are set correctly if this is called directly
     m_is_sequence = true; m_base_pattern = base_pattern; m_start_index = start_index; m_digits = digits; m_suffix = suffix; m_filename = "";
     int width_r0=0, height_r0=0, depth_r0=0;
     uint16_t bps_r0=0, fmt_r0=SAMPLEFORMAT_UINT, spp_r0=1, fill_order_r0 = FILLORDER_MSB2LSB;
@@ -201,7 +215,7 @@ bool TiffReader::readFileSequence(
 
     if (amrex::ParallelDescriptor::IOProcessor()) {
         if (num_files <= 0 || digits <= 0 || base_pattern.empty()) { amrex::Abort("[TiffReader::readFileSequence] Invalid sequence params."); }
-        depth_r0 = num_files;
+        depth_r0 = num_files; // For sequences, depth is num_files
         first_filename_r0 = generateFilename(base_pattern, start_index, digits, suffix);
         TiffPtr tif(TIFFOpen(first_filename_r0.c_str(), "r"), TiffCloser());
         if (!tif) { amrex::Abort("[TiffReader::readFileSequence] Failed to open first sequence file: " + first_filename_r0); }
@@ -216,7 +230,7 @@ bool TiffReader::readFileSequence(
         TIFFGetFieldDefaulted(tif.get(), TIFFTAG_PLANARCONFIG, &planar);
         TIFFGetFieldDefaulted(tif.get(), TIFFTAG_FILLORDER, &fill_order_r0);
 
-        if (amrex::Verbose() >= 2) {
+        if (amrex::Verbose() >= 2 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "TiffReader DEBUG (readFileSequence): FillOrder tag read from file '" << first_filename_r0 << "' is: " << fill_order_r0
                            << " (1=MSB2LSB, 2=LSB2MSB, Standard TIFF Default=" << FILLORDER_MSB2LSB << ")\n";
         }
@@ -233,12 +247,34 @@ bool TiffReader::readFileSequence(
     }
     
     int root = amrex::ParallelDescriptor::IOProcessorNumber();
+    // Broadcast m_start_index, m_digits separately or ensure they are set from constructor before this Bcast
     std::vector<int> idata = {width_r0, height_r0, depth_r0, static_cast<int>(bps_r0), static_cast<int>(fmt_r0), static_cast<int>(spp_r0), 1 /*is_sequence=true*/, m_start_index, m_digits, static_cast<int>(fill_order_r0)};
-    amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), root);
+    amrex::ParallelDescriptor::Bcast(idata.data(), idata.size(), root, amrex::ParallelDescriptor::Communicator());
     m_width=idata[0]; m_height=idata[1]; m_depth=idata[2]; m_bits_per_sample=(uint16_t)idata[3]; m_sample_format=(uint16_t)idata[4]; m_samples_per_pixel=(uint16_t)idata[5]; m_is_sequence=(bool)idata[6]; m_start_index=idata[7]; m_digits=idata[8]; m_fill_order=(uint16_t)idata[9];
     
-    amrex::BroadcastString(m_base_pattern, root);
-    amrex::BroadcastString(m_suffix, root);
+    // Corrected string broadcast for m_base_pattern
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_base_pattern.length()); // m_base_pattern is set on IOProc
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root, amrex::ParallelDescriptor::Communicator());
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_base_pattern.data()), string_len, root, amrex::ParallelDescriptor::Communicator());
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root, amrex::ParallelDescriptor::Communicator());
+        m_base_pattern.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_base_pattern.data()), string_len, root, amrex::ParallelDescriptor::Communicator());
+    }
+
+    // Corrected string broadcast for m_suffix
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        int string_len = static_cast<int>(m_suffix.length()); // m_suffix is set on IOProc
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root, amrex::ParallelDescriptor::Communicator());
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_suffix.data()), string_len, root, amrex::ParallelDescriptor::Communicator());
+    } else {
+        int string_len = 0;
+        amrex::ParallelDescriptor::Bcast(&string_len, 1, root, amrex::ParallelDescriptor::Communicator());
+        m_suffix.resize(string_len);
+        amrex::ParallelDescriptor::Bcast(const_cast<char*>(m_suffix.data()), string_len, root, amrex::ParallelDescriptor::Communicator());
+    }
 
     if (m_width <= 0 || m_height <= 0 || m_depth <= 0 || m_bits_per_sample == 0 || (m_is_sequence && m_base_pattern.empty())) {
         amrex::Abort("TiffReader::readFileSequence: Invalid metadata after broadcast.");
@@ -263,39 +299,7 @@ void TiffReader::readDistributedIntoFab(
     const size_t bytes_per_pixel = bytes_per_sample_calc * m_samples_per_pixel; // Assumes SPP=1
     if (bits_per_sample_val == 0 ) { amrex::Abort("[TiffReader] Bits per sample is zero!"); }
 
-    // For stack files, Rank 0 opens the file. Its handle (shared_tif_stack_raw_ptr)
-    // will be used by threads on Rank 0 within OMP critical sections.
-    // Other ranks do not open the stack file if this model is strictly followed.
-    // However, for simplicity in OMP, we can also let each thread open its own handle.
-    // The current refined approach: IOProcessor opens, pointer used in critical sections.
-    TiffPtr shared_tif_stack_handle_owner = nullptr; // Owner on IOProc
-    TIFF* shared_tif_stack_raw_ptr = nullptr;      // Raw pointer for use in OMP region
-
-    if (!m_is_sequence && amrex::ParallelDescriptor::IOProcessor()) {
-        shared_tif_stack_handle_owner = TiffPtr(TIFFOpen(m_filename.c_str(), "r"), TiffCloser());
-        if (!shared_tif_stack_handle_owner) {
-            amrex::Abort("[TiffReader] IOProcessor failed to open shared stack TIFF file: " + m_filename);
-        }
-        shared_tif_stack_raw_ptr = shared_tif_stack_handle_owner.get();
-    }
-    // Broadcast the address of the raw pointer from IOProcessor to all other ranks.
-    // This allows threads on other ranks to use this pointer within critical sections.
-    // Note: This relies on all ranks having access to the file system path in m_filename
-    // if they were to hypothetically use it, but they won't directly open it.
-    // They will use the shared_tif_stack_raw_ptr obtained from Rank 0.
-    // THIS IS ADVANCED AND POTENTIALLY RISKY IF NOT HANDLED PERFECTLY.
-    // A simpler OMP model for stack files is for OMP MASTER to do all TIFF ops for a slice.
-    // For now, we proceed with shared_tif_stack_raw_ptr used in critical sections by all threads.
-    // This implies shared_tif_stack_raw_ptr value is meaningful across ranks if they were to map it,
-    // but libtiff calls on it are serialized by OMP critical sections, effectively making one thread
-    // at a time across all ranks (for a given critical section name) perform the operation.
-    // This is okay if libtiff itself is not re-entrant for these calls on the same TIFF*.
-    // Let's refine to: Only threads on IOProcessor use shared_tif_stack_raw_ptr. Other ranks would need their own.
-    // For simplicity now: let's make it such that if !m_is_sequence, each thread opens its own TIFF handle.
-    // This was done in the previous version and is safer for OMP without deep libtiff thread-safety knowledge.
-    // Reverting to the "each thread opens its own handle for stack files" for this version for clarity and safety of the fix.
-
-    const int image_width_const = m_width; // Renamed to avoid conflict
+    const int image_width_const = m_width; 
     const int image_height_const = m_height;
     const int image_depth_const = m_depth;
     const uint16_t fill_order_local = m_fill_order;
@@ -305,7 +309,7 @@ void TiffReader::readDistributedIntoFab(
 #endif
     {
         std::vector<unsigned char> temp_buffer;
-        TiffPtr thread_local_tif_handle = nullptr; // Used for sequence OR stack files by each thread
+        TiffPtr thread_local_tif_handle = nullptr; 
 
         for (amrex::MFIter mfi(dest_mf, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
             amrex::Array4<int> fab_arr = dest_mf.array(mfi);
@@ -324,7 +328,7 @@ void TiffReader::readDistributedIntoFab(
                     current_tif_ptr = thread_local_tif_handle.get();
                 } else { // Stack file
                     thread_local_tif_handle = TiffPtr(TIFFOpen(m_filename.c_str(), "r"), TiffCloser());
-                    if (!thread_local_tif_handle) { amrex::Abort("[TiffReader] Stack: Failed to open: " + m_filename); }
+                    if (!thread_local_tif_handle) { amrex::Abort("[TiffReader] Stack: Failed to open: " + m_filename + " in thread."); }
                     current_tif_ptr = thread_local_tif_handle.get();
                     if (TIFFCurrentDirectory(current_tif_ptr) != static_cast<tdir_t>(k_loop_idx)) {
                         if (!TIFFSetDirectory(current_tif_ptr, static_cast<tdir_t>(k_loop_idx))) {
@@ -341,6 +345,8 @@ void TiffReader::readDistributedIntoFab(
                                    << " bytes/scanline. (ImgWidth=" << image_width_const
                                    << ", TheoryMinBytes: " << (image_width_const + 7) / 8 << ")\n";
                     }
+                     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(actual_bytes_per_scanline_for_1bit > 0 || image_width_const == 0, 
+                                                 "actual_bytes_per_scanline_for_1bit is zero for 1-bit image with non-zero width!");
                 }
 
                 bool is_tiled = TIFFIsTiled(current_tif_ptr);
@@ -369,13 +375,13 @@ void TiffReader::readDistributedIntoFab(
                                     double val_dbl=0.0; int bit_v=-1; unsigned char p_byte=0; size_t byte_i=0; int bit_i=0; size_t lin_i_chk=0;
                                     if(bits_per_sample_val==1){
                                         int i_chk=i-chk_ox; int j_chk=j-chk_oy;
-                                        lin_i_chk = (size_t)j_chk*tile_width_int + i_chk;
+                                        lin_i_chk = (size_t)j_chk*tile_width_int + i_chk; // Use tile_width_int for tile calculations
                                         byte_i=lin_i_chk/8; bit_i=lin_i_chk%8;
                                         if(byte_i<(size_t)bytes_rd){ p_byte=temp_buffer[byte_i]; bit_v=(fill_order_local==FILLORDER_MSB2LSB)?(p_byte>>(7-bit_i))&1:(p_byte>>bit_i)&1; val_dbl=(double)bit_v; }
                                         else { val_dbl=0.0; bit_v=-2; }
                                     } else {
                                         int i_chk=i-chk_ox; int j_chk=j-chk_oy;
-                                        size_t off = ((size_t)j_chk*tile_width_int + i_chk)*bytes_per_pixel;
+                                        size_t off = ((size_t)j_chk*tile_width_int + i_chk)*bytes_per_pixel; // Use tile_width_int
                                         if(off+bytes_per_sample_calc <= (size_t)bytes_rd){ val_dbl=interpretBytesAsDouble(temp_buffer.data()+off, bits_per_sample_val, m_sample_format); }
                                         else { val_dbl=0.0; }
                                     }
@@ -411,8 +417,7 @@ void TiffReader::readDistributedIntoFab(
                             amrex::LoopOnCpu(insect, [&](int i, int j, int k_fab){
                                 double val_dbl=0.0; int bit_v=-1; unsigned char p_byte=0; size_t byte_i=0; int bit_i=0;
                                 if(bits_per_sample_val==1){
-                                    int j_in_strip_buf = j - strip_oy_img; // row index within this strip's data buffer
-                                    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(actual_bytes_per_scanline_for_1bit > 0, "actual_bytes_per_scanline_for_1bit is zero in striped 1-bit read!");
+                                    int j_in_strip_buf = j - strip_oy_img; 
                                     size_t scanline_start_off = (size_t)j_in_strip_buf * actual_bytes_per_scanline_for_1bit;
                                     size_t byte_off_in_scanline = (size_t)i / 8;
                                     bit_i = i % 8;
@@ -431,7 +436,7 @@ void TiffReader::readDistributedIntoFab(
                         }
                     }
                 }
-                // thread_local_tif_handle will close automatically when it goes out of scope at end of k_loop_idx iteration (or omp parallel region end)
+                // thread_local_tif_handle (and its TIFF*) will be closed when TiffPtr goes out of scope at the end of this k_loop_idx iteration
             } // End k_loop_idx Z-slices
         } // End MFIter
     } // End OMP parallel region
