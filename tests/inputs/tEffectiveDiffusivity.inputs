@@ -15,7 +15,7 @@ phase_id = 1
 # Threshold value for converting the input TIFF to a binary phase representation.
 # Adjust based on your TIFF's data type and levels.
 # For a 0-255 uint8 image where pores are >127:
-threshold_val = 127.5
+threshold_val = 0.5
 # For a 1-bit image where phase_id=1 is already the pore:
 # threshold_val = 0.5 # (effectively, any non-zero value for phase_id if it's already binary)
 
