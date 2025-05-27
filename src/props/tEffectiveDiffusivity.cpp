@@ -117,7 +117,9 @@ int main (int argc, char* argv[])
                               {AMREX_D_DECL(amrex::Real(domain_box.length(0)),
                                             amrex::Real(domain_box.length(1)),
                                             amrex::Real(domain_box.length(2)))});
-            amrex::Array<int, AMREX_SPACEDIM> is_periodic{AMREX_D_DECL(1, 1, 1)}; // Cell problem is on a periodic cell
+            // amrex::Array<int, AMREX_SPACEDIM> is_periodic{AMREX_D_DECL(1, 1, 1)}; // Original
+amrex::Array<int, AMREX_SPACEDIM> is_periodic{AMREX_D_DECL(0, 0, 0)}; // TEMPORARY: Non-periodic
+geom.define(domain_box, &rb, 0, is_periodic.data());
             geom.define(domain_box, &rb, 0, is_periodic.data());
 
             ba_original.define(domain_box);
