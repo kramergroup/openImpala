@@ -49,6 +49,15 @@ OpenImpala::EffectiveDiffusivityHypre::SolverType stringToSolverType(const std::
 
 int main (int argc, char* argv[])
 {
+        // Initialize HYPRE First
+    int hypre_ierr = HYPRE_Init(); // ADD THIS LINE
+    if (hypre_ierr != 0) {
+        fprintf(stderr, "FATAL ERROR: HYPRE_Init() failed with code %d\n", hypre_ierr);
+        // It's good practice to ensure MPI is finalized if HYPRE_Init fails after MPI_Init
+        // but before amrex::Initialize if HYPRE_Init itself requires MPI.
+        // However, amrex::Initialize should handle MPI_Init.
+        return 1;
+    }
     // Initialize HYPRE First (if not already handled by AMReX with HYPRE enabled)
     // HYPRE_Init(); // AMReX_Initialize should handle this if built with HYPRE support.
 
@@ -237,7 +246,13 @@ geom.define(domain_box, &rb, 0, is_periodic.data());
     } // End of AMReX scope
     amrex::Finalize();
 
-    // HYPRE_Finalize(); // AMReX_Finalize should handle this if built with HYPRE support.
+    // Finalize HYPRE
+    hypre_ierr = HYPRE_Finalize(); // ADD THIS LINE
+    if (hypre_ierr != 0) {
+        fprintf(stderr, "ERROR: HYPRE_Finalize() failed with code %d\n", hypre_ierr);
+        return 1;
+    }
 
     return 0;
+}
 }
