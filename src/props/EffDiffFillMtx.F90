@@ -1,6 +1,7 @@
 module effdiff_fillmtx_module
 
-  use amrex_fort_module, only : amrex_real, amrex_abort, amrex_spacedim
+  use amrex_fort_module, only : amrex_real, amrex_spacedim
+  use amrex_error_module, only : amrex_fi_abort
   implicit none
 
   private ! Default module visibility to private
@@ -29,6 +30,7 @@ module effdiff_fillmtx_module
   real(amrex_real), parameter :: ONE = 1.0_amrex_real
   real(amrex_real), parameter :: ZERO = 0.0_amrex_real
   real(amrex_real), parameter :: HALF = 0.5_amrex_real
+  real(amrex_real), parameter :: TWO = 2.0_amrex_real
 
 contains
 
@@ -62,7 +64,7 @@ contains
     integer, intent(in) :: verbose_level_in
 
     ! --- Local Variables ---
-    integer :: i, j, k, m_idx, stencil_idx_start
+    integer :: i, j, k, m_idx, stencil_idx_start, s_idx
     integer :: len_x_valid, len_y_valid, len_z_valid ! Dimensions of valid_bx
     real(amrex_real) :: dx, dy, dz
     real(amrex_real) :: inv_dx2, inv_dy2, inv_dz2 ! 1/dx^2, etc.
@@ -86,7 +88,7 @@ contains
     dz = cell_sizes_in(3)
 
     if (dx <= SMALL_REAL .or. dy <= SMALL_REAL .or. dz <= SMALL_REAL) then
-      call amrex_abort("effdiff_fillmtx: cell_sizes (dx, dy, dz) must be positive.")
+      call amrex_fi_abort("effdiff_fillmtx: cell_sizes (dx, dy, dz) must be positive.")
     end if
 
     inv_dx2 = ONE / (dx * dx)
@@ -264,7 +266,7 @@ contains
 
     ! Final check on m_idx
     if (m_idx /= npts_valid) then
-      call amrex_abort("effdiff_fillmtx: m_idx /= npts_valid. Indexing error.")
+      call amrex_fi_abort("effdiff_fillmtx: m_idx /= npts_valid. Indexing error.")
     end if
 
   end subroutine effdiff_fillmtx
