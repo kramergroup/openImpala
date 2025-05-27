@@ -412,27 +412,31 @@ bool EffectiveDiffusivityHypre::solve()
     m_final_res_norm = std::numeric_limits<amrex::Real>::quiet_NaN();
     m_converged = false;
 
-    if (m_solvertype == SolverType::FlexGMRES) {
+        if (m_solvertype == SolverType::FlexGMRES) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "  solve: Setting up HYPRE FlexGMRES Solver with SMG Preconditioner..." << std::endl;
+            // amrex::Print() << "  solve: Setting up HYPRE FlexGMRES Solver with SMG Preconditioner..." << std::endl;
+            amrex::Print() << "  solve: Setting up HYPRE FlexGMRES Solver with PFMG Preconditioner..." << std::endl; // CHANGED
         }
         ierr = HYPRE_StructFlexGMRESCreate(MPI_COMM_WORLD, &solver_hypre); HYPRE_CHECK(ierr);
         HYPRE_StructFlexGMRESSetTol(solver_hypre, m_eps);
         HYPRE_StructFlexGMRESSetMaxIter(solver_hypre, m_maxiter);
         HYPRE_StructFlexGMRESSetPrintLevel(solver_hypre, (m_verbose > 2) ? 3 : 0);
 
-        ierr = HYPRE_StructSMGCreate(MPI_COMM_WORLD, &precond); HYPRE_CHECK(ierr);
-        HYPRE_StructSMGSetTol(precond, 0.0);
-        HYPRE_StructSMGSetMaxIter(precond, 1);
-        HYPRE_StructSMGSetNumPreRelax(precond, 1);
-        HYPRE_StructSMGSetNumPostRelax(precond, 1);
-        HYPRE_StructSMGSetPrintLevel(precond, (m_verbose > 3) ? 1 : 0);
-        HYPRE_StructFlexGMRESSetPrecond(solver_hypre, HYPRE_StructSMGSolve, HYPRE_StructSMGSetup, precond);
+        // Setup PFMG preconditioner INSTEAD OF SMG
+        ierr = HYPRE_StructPFMGCreate(MPI_COMM_WORLD, &precond); HYPRE_CHECK(ierr);
+        HYPRE_StructPFMGSetTol(precond, 0.0);      // Preconditioner solves to machine precision or fixed iterations
+        HYPRE_StructPFMGSetMaxIter(precond, 1);    // Typically 1 iteration for PFMG as preconditioner
+        // Set other PFMG options if needed, e.g., relaxation type, num_pre/post_relax
+        HYPRE_StructPFMGSetNumPreRelax(precond, 1); // Example
+        HYPRE_StructPFMGSetNumPostRelax(precond, 1); // Example
+        HYPRE_StructPFMGSetPrintLevel(precond, (m_verbose > 3) ? 1 : 0);
+        // Set FlexGMRES to use PFMG as preconditioner
+        HYPRE_StructFlexGMRESSetPrecond(solver_hypre, HYPRE_StructPFMGSolve, HYPRE_StructPFMGSetup, precond); // CHANGED
 
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "  solve: Running HYPRE_StructFlexGMRESSetup..." << std::endl;
+            amrex::Print() << "  solve: Running HYPRE_StructFlexGMRESSetup (with PFMG precond)..." << std::endl;
         }
-        ierr = HYPRE_StructFlexGMRESSetup(solver_hypre, m_A, m_b, m_x); HYPRE_CHECK(ierr);
+        ierr = HYPRE_StructFlexGMRESSetup(solver_hypre, m_A, m_b, m_x); HYPRE_CHECK(ierr); // This will call PFMGSetup
 
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "  solve: Running HYPRE_StructFlexGMRESSolve..." << std::endl;
@@ -447,12 +451,12 @@ bool EffectiveDiffusivityHypre::solve()
         m_converged = m_converged && (m_final_res_norm >= 0.0) && (m_final_res_norm <= m_eps);
 
         if (ierr == HYPRE_ERROR_CONV && !m_converged && m_verbose >=0) {
-            amrex::Warning("HYPRE FlexGMRES solver did not converge within tolerance!");
-        } else if (ierr !=0 && ierr != HYPRE_ERROR_CONV && m_verbose >=0) { // Added HYPRE_ERROR_CONV check
-             amrex::Warning("HYPRE FlexGMRES solver returned error code: " + std::to_string(ierr));
+            amrex::Warning("HYPRE FlexGMRES solver (with PFMG precond) did not converge within tolerance!");
+        } else if (ierr !=0 && ierr != HYPRE_ERROR_CONV && m_verbose >=0) {
+             amrex::Warning("HYPRE FlexGMRES solver (with PFMG precond) returned error code: " + std::to_string(ierr));
         }
         HYPRE_StructFlexGMRESDestroy(solver_hypre);
-        if (precond) HYPRE_StructSMGDestroy(precond);
+        if (precond) HYPRE_StructPFMGDestroy(precond); // CHANGED from SMGDestroy
     }
     else {
         amrex::Abort("Unsupported solver type requested in EffectiveDiffusivityHypre::solve: "
