@@ -354,7 +354,7 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
             valid_bx.loVect(), valid_bx.hiVect(),
             domain_for_kernel.loVect(), domain_for_kernel.hiVect(),
             m_dx.dataPtr(),
-            ¤t_dir_int,
+            &current_dir_int,
             &m_verbose
         );
 
