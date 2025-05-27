@@ -255,4 +255,3 @@ geom.define(domain_box, &rb, 0, is_periodic.data());
 
     return 0;
 }
-}
