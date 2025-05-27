@@ -357,8 +357,8 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
             mask_ptr, mask_box_bounds.loVect(), mask_box_bounds.hiVect(), // Active mask data and its bounds
             valid_bx.loVect(), valid_bx.hiVect(),      // Region to fill (current valid box)
             domain.loVect(), domain.hiVect(),          // Overall domain bounds
-            m_dx.data(),                               // Cell sizes [dx, dy, dz]
-            ¤t_dir_int,                          // Direction of chi_k being solved
+            m_dx.dataPtr(),                               // Cell sizes [dx, dy, dz]
+            &t_dir_int,                          // Direction of chi_k being solved
             &m_verbose                                 // Verbosity level for Fortran debug
         );
         // Note: The Fortran kernel needs access to neighbor information from active_mask,
@@ -505,7 +505,21 @@ bool EffectiveDiffusivityHypre::solve()
         // Create a temporary MultiFab for plotting, could include mask etc.
         amrex::MultiFab mf_plot(m_ba, m_dm, 2, 0); // Plot chi and active_mask
         amrex::Copy(mf_plot, m_mf_chi, ChiComp, 0, 1, 0);
-        amrex::ConvertFab(mf_plot, m_mf_active_mask, MaskComp, 1, 1, 0); // Copy mask to comp 1
+                // Copy m_mf_active_mask (iMultiFab) to component 1 of mf_plot (MultiFab)
+        #ifdef AMREX_USE_OMP
+        #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+        #endif
+        for (amrex::MFIter mfi(mf_plot, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            const amrex::Box& bx = mfi.tilebox();
+            amrex::Array4<amrex::Real> const plot_arr = mf_plot.array(mfi);
+            amrex::Array4<const int> const mask_arr = m_mf_active_mask.const_array(mfi);
+
+            amrex::LoopOnCpu(bx, [=] (int i, int j, int k) noexcept
+            {
+                plot_arr(i,j,k,1) = static_cast<amrex::Real>(mask_arr(i,j,k,MaskComp));
+            });
+        }
 
         std::string plot_filename_str = "effdiff_chi_dir" + std::to_string(static_cast<int>(m_dir_solve));
         std::string full_plot_path = m_resultspath + "/" + plot_filename_str;
