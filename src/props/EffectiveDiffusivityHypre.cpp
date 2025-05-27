@@ -231,23 +231,41 @@ void EffectiveDiffusivityHypre::setupGrids()
     BL_PROFILE("EffectiveDiffusivityHypre::setupGrids");
     HYPRE_Int ierr = 0;
     ierr = HYPRE_StructGridCreate(MPI_COMM_WORLD, AMREX_SPACEDIM, &m_grid); HYPRE_CHECK(ierr);
+
+    // Get periodicity information from AMReX Geometry
+    const amrex::Box& domain_geom_box = m_geom.Domain(); // Use a different name to avoid conflict later
+    HYPRE_Int periodic_hyp[AMREX_SPACEDIM];
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        if (m_geom.isPeriodic(d)) {
+            periodic_hyp[d] = static_cast<HYPRE_Int>(domain_geom_box.length(d));
+        } else {
+            periodic_hyp[d] = 0; // Not periodic in this direction
+        }
+    }
+
     for (int i = 0; i < m_ba.size(); ++i) {
-        if (m_dm[i] == amrex::ParallelDescriptor::MyProc()) { // Process only local boxes
-            amrex::Box bx = m_ba[i]; // Valid box for this MPI rank
+        if (m_dm[i] == amrex::ParallelDescriptor::MyProc()) {
+            amrex::Box bx = m_ba[i];
             auto lo = EffectiveDiffusivityHypre::loV(bx);
             auto hi = EffectiveDiffusivityHypre::hiV(bx);
             if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "  setupGrids: Rank " << amrex::ParallelDescriptor::MyProc()
-                               << " adding box " << bx << std::endl;
+                 amrex::Print() << "  setupGrids: Rank " << amrex::ParallelDescriptor::MyProc()
+                                << " adding box " << bx << std::endl;
             }
             ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data()); HYPRE_CHECK(ierr);
         }
     }
+
+    // Set periodicity after extents but before assemble
+    // This is crucial for periodic problems.
+    ierr = HYPRE_StructGridSetPeriodic(m_grid, periodic_hyp); HYPRE_CHECK(ierr);
+
     if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  setupGrids: Calling HYPRE_StructGridAssemble..." << std::endl;
     }
-    ierr = HYPRE_StructGridAssemble(m_grid); HYPRE_CHECK(ierr);
+    ierr = HYPRE_StructGridAssemble(m_grid); HYPRE_CHECK(ierr); // <<<< Error was likely here
     AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_grid != NULL, "m_grid is NULL after HYPRE_StructGridAssemble!");
+
     if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  setupGrids: Assemble complete." << std::endl;
     }
@@ -294,6 +312,10 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  setupMatrixEquation: Creating HYPRE Matrix and Vectors..." << std::endl;
     }
+    // Ensure m_grid and m_stencil are valid before creating matrix/vectors
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_grid != NULL, "m_grid is NULL in setupMatrixEquation. Call setupGrids first.");
+    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_stencil != NULL, "m_stencil is NULL in setupMatrixEquation. Call setupStencil first.");
+
     ierr = HYPRE_StructMatrixCreate(MPI_COMM_WORLD, m_grid, m_stencil, &m_A); HYPRE_CHECK(ierr);
     ierr = HYPRE_StructMatrixInitialize(m_A); HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorCreate(MPI_COMM_WORLD, m_grid, &m_b); HYPRE_CHECK(ierr);
