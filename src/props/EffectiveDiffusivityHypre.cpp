@@ -543,6 +543,21 @@ bool EffectiveDiffusivityHypre::solve()
 void EffectiveDiffusivityHypre::getChiSolution(amrex::MultiFab& chi_field)
 {
     BL_PROFILE("EffectiveDiffusivityHypre::getChiSolution");
+
+    if (!m_x) { // If HYPRE solution vector was never created
+        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "  getChiSolution: HYPRE solution vector m_x is NULL. Setting chi_field to 0." << std::endl;
+        }
+        chi_field.setVal(0.0);
+        // Ensure ghost cells are also zeroed if any, or fill boundary if appropriate for a zero field
+        // For a zero field, setVal(0.0) on valid region is often enough, FillBoundary might not be needed
+        // or could be called by the user of chi_field if they expect it.
+        // For safety, explicitly fill if chi_field has ghosts:
+        if (chi_field.nGrow() > 0) {
+             chi_field.FillBoundary(m_geom.periodicity()); // Fill with 0s based on periodicity
+        }
+        return;
+    }
     AMREX_ASSERT(chi_field.nComp() >= numComponentsChi);
     AMREX_ASSERT(chi_field.boxArray() == m_ba);
     AMREX_ASSERT(chi_field.DistributionMap() == m_dm);
