@@ -1,7 +1,7 @@
 module effdiff_fillmtx_module
 
   use amrex_fort_module, only : amrex_real, amrex_spacedim
-  use amrex_error_module, only : amrex_fi_abort
+  use amrex_error_module, only : amrex_abort ! <<< REVERT TO THIS
   implicit none
 
   private ! Default module visibility to private
@@ -31,6 +31,7 @@ module effdiff_fillmtx_module
   real(amrex_real), parameter :: ZERO = 0.0_amrex_real
   real(amrex_real), parameter :: HALF = 0.5_amrex_real
   real(amrex_real), parameter :: TWO = 2.0_amrex_real
+
 
 contains
 
@@ -88,7 +89,7 @@ contains
     dz = cell_sizes_in(3)
 
     if (dx <= SMALL_REAL .or. dy <= SMALL_REAL .or. dz <= SMALL_REAL) then
-      call amrex_fi_abort("effdiff_fillmtx: cell_sizes (dx, dy, dz) must be positive.")
+      call amrex_abort("effdiff_fillmtx: cell_sizes (dx, dy, dz) must be positive.") ! <<< REVERT
     end if
 
     inv_dx2 = ONE / (dx * dx)
@@ -156,12 +157,10 @@ contains
             a_out(stencil_idx_start + STN_MX) = -inv_dx2
             diag_val = diag_val + inv_dx2
           else ! Interface with solid: n̂=(-1,0,0). BC: -dχ/dx = -(-1)*(ê_k)_x => dχ/dx = (ê_k)_x
-            diag_val = diag_val + inv_dx2 ! Contribution from (χ_i - χ_{i-1,ghost})/dx^2 where χ_{i-1,ghost} = χ_i - dx*(ê_k)_x
-                                          ! So -1/dx^2 * (χ_i - dx*(ê_k)_x) contributes +1/dx to RHS
+            diag_val = diag_val + inv_dx2 
             if (dir_k_in == DIR_X) then   ! (ê_k)_x = 1
               flux_bc_contrib_rhs = flux_bc_contrib_rhs + (ONE/dx)
             end if
-            ! No (ê_k)_y or (ê_k)_z component for this face's normal in x-dir
           end if
 
           ! +X face (East)
@@ -169,9 +168,9 @@ contains
             a_out(stencil_idx_start + STN_PX) = -inv_dx2
             diag_val = diag_val + inv_dx2
           else ! Interface with solid: n̂=(1,0,0). BC: dχ/dx = -(1)*(ê_k)_x => dχ/dx = -(ê_k)_x
-            diag_val = diag_val + inv_dx2 ! χ_{i+1,ghost} = χ_i + dx*(-(ê_k)_x)
+            diag_val = diag_val + inv_dx2 
             if (dir_k_in == DIR_X) then   ! (ê_k)_x = 1
-              flux_bc_contrib_rhs = flux_bc_contrib_rhs - (ONE/dx) ! term is -D * grad_normal = -1 * (-(ê_k)_x)
+              flux_bc_contrib_rhs = flux_bc_contrib_rhs - (ONE/dx) 
             end if
           end if
 
@@ -224,9 +223,6 @@ contains
           a_out(stencil_idx_start + STN_C) = diag_val
 
           ! === RHS: -∇_ξ ⋅ (D ê_k) ===
-          ! This is -∂(D)/∂x for ê_x, -∂(D)/∂y for ê_y, -∂(D)/∂z for ê_z
-          ! Using central difference for ∂(D)/∂x: (D_{i+1} - D_{i-1}) / (2dx)
-          ! (where D_i is D at cell i center, which is 0 or 1)
           if (dir_k_in == DIR_X) then
             rhs_term_div_De = -(D_ip1 - D_im1) * inv_2dx
           else if (dir_k_in == DIR_Y) then
@@ -237,8 +233,6 @@ contains
 
           rhs_out(m_idx) = rhs_term_div_De + flux_bc_contrib_rhs
 
-          ! Check for nearly zero diagonal in an active cell (can happen if isolated pore)
-          ! If so, decouple it to prevent solver issues.
           if (abs(diag_val) < SMALL_REAL) then
              if (verbose_level_in > 0) then
                  write(*,'(A,3I5,A,ES12.4)') "effdiff_fillmtx WARNING: Near-zero diagonal in ACTIVE cell (", &
@@ -250,7 +244,6 @@ contains
              xinit_out(m_idx) = ZERO
           end if
 
-          ! --- Debug Printing for this active cell (optional) ---
           if (verbose_level_in >= 3) then
             write(*,'(A,3I5,A,I2)') "DEBUG effdiff_fillmtx: Cell (",i,j,k,") dir_k=", dir_k_in
             write(*,'(A,7ES12.4)') "  Stencil A: ", (a_out(stencil_idx_start+s_idx), s_idx=0,NSTENCIL-1)
@@ -264,9 +257,8 @@ contains
       end do ! j
     end do ! k
 
-    ! Final check on m_idx
     if (m_idx /= npts_valid) then
-      call amrex_fi_abort("effdiff_fillmtx: m_idx /= npts_valid. Indexing error.")
+      call amrex_abort("effdiff_fillmtx: m_idx /= npts_valid. Indexing error.") ! <<< REVERT
     end if
 
   end subroutine effdiff_fillmtx
