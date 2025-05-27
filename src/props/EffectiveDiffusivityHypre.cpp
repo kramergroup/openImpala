@@ -358,7 +358,7 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
             valid_bx.loVect(), valid_bx.hiVect(),      // Region to fill (current valid box)
             domain.loVect(), domain.hiVect(),          // Overall domain bounds
             m_dx.dataPtr(),                               // Cell sizes [dx, dy, dz]
-            &t_dir_int,                          // Direction of chi_k being solved
+            &current_dir_int,                          // Direction of chi_k being solved
             &m_verbose                                 // Verbosity level for Fortran debug
         );
         // Note: The Fortran kernel needs access to neighbor information from active_mask,
