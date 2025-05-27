@@ -1,0 +1,51 @@
+# Input file for tEffectiveDiffusivity test driver
+
+# Path to the input image file.
+# For initial testing, use a small, simple TIFF (e.g., 32x32x32 or 64x64x64)
+# to ensure quick runs and easier debugging of χ_k fields.
+# Replace with the actual path to your test TIFF file.
+tifffile = "data/SampleData_2Phase_stack_3d_1bit.tif" # Example: use a small, known TIFF.
+
+# --- Effective Diffusivity Test Specific Parameters ---
+
+# ID of the phase to consider as the conductive material (D=1, e.g., pores).
+# The other phase will be considered D=0 (e.g., solid).
+phase_id = 1
+
+# Threshold value for converting the input TIFF to a binary phase representation.
+# Adjust based on your TIFF's data type and levels.
+# For a 0-255 uint8 image where pores are >127:
+threshold_val = 127.5
+# For a 1-bit image where phase_id=1 is already the pore:
+# threshold_val = 0.5 # (effectively, any non-zero value for phase_id if it's already binary)
+
+# --- Solver Configuration (for each chi_k solve) ---
+# Solver type (Options: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB, SMG, PFMG)
+solver = "FlexGMRES"
+
+# HYPRE solver controls (prefixed with "hypre.")
+hypre.maxiter = 500      # Max iterations for each chi_k solve
+hypre.eps     = 1.0e-9   # Relative tolerance for each chi_k solve
+
+# --- General AMReX / Test Controls ---
+# AMReX max_grid_size for BoxArray decomposition
+box_size = 32
+
+# Verbosity level for C++ and Fortran output.
+# 0 = minimal, 1 = basic progress, 2 = detailed, 3+ = very detailed (HYPRE/Fortran debug)
+verbose = 2
+
+# Write plotfiles for each solved chi_k field? (0 = No, 1 = Yes)
+# Useful for initial debugging to visualize the corrector functions.
+write_plotfile = 1
+
+# Directory where plotfiles (if enabled) will be saved.
+resultsdir = "./tEffectiveDiffusivity_results"
+
+# --- Expected Values (Not used by tEffectiveDiffusivity.cpp yet) ---
+# The current tEffectiveDiffusivity.cpp only checks for solver convergence.
+# Future tests might compare calculated D_eff components to known values.
+# expected_Dxx = ...
+# expected_Dyy = ...
+# expected_Dzz = ...
+# D_eff_tolerance = 1e-5
