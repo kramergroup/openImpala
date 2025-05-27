@@ -221,39 +221,72 @@ void EffectiveDiffusivityHypre::setupGrids()
     HYPRE_Int ierr = 0;
     ierr = HYPRE_StructGridCreate(MPI_COMM_WORLD, AMREX_SPACEDIM, &m_grid); HYPRE_CHECK(ierr);
 
-    const amrex::Box& domain_geom_box = m_geom.Domain();
-    HYPRE_Int periodic_hyp[AMREX_SPACEDIM];
+    bool any_dim_periodic = false;
     for (int d = 0; d < AMREX_SPACEDIM; ++d) {
         if (m_geom.isPeriodic(d)) {
-            periodic_hyp[d] = static_cast<HYPRE_Int>(domain_geom_box.length(d));
-            if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "  setupGrids: Dim " << d << " is periodic with length " << periodic_hyp[d] << std::endl;
-            }
-        } else {
-            periodic_hyp[d] = 0;
-             if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "  setupGrids: Dim " << d << " is NOT periodic." << std::endl;
-            }
+            any_dim_periodic = true;
+            break;
         }
     }
 
-    for (int i_ba = 0; i_ba < m_ba.size(); ++i_ba) { // Renamed loop var
-        if (m_dm[i_ba] == amrex::ParallelDescriptor::MyProc()) {
-            amrex::Box bx = m_ba[i_ba];
-            auto lo = EffectiveDiffusivityHypre::loV(bx);
-            auto hi = EffectiveDiffusivityHypre::hiV(bx);
-            if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "  setupGrids: Rank " << amrex::ParallelDescriptor::MyProc()
-                                << " adding box " << bx << " [" << lo[0] << ".." << hi[0] << ", ...]" << std::endl;
+    // Only call HYPRE_StructGridSetPeriodic if at least one dimension in m_geom is actually periodic.
+    // For the current test where tEffectiveDiffusivity.cpp sets m_geom to non-periodic,
+    // this block will be skipped.
+    if (any_dim_periodic) {
+        const amrex::Box& domain_geom_box = m_geom.Domain();
+        HYPRE_Int periodic_hyp[AMREX_SPACEDIM];
+        for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+            if (m_geom.isPeriodic(d)) {
+                periodic_hyp[d] = static_cast<HYPRE_Int>(domain_geom_box.length(d));
+                if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+                     amrex::Print() << "  setupGrids: Dim " << d << " is periodic with length " << periodic_hyp[d] << std::endl;
+                }
+            } else {
+                periodic_hyp[d] = 0;
+                 if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+                     amrex::Print() << "  setupGrids: Dim " << d << " is NOT periodic (in AMReX geom)." << std::endl;
+                }
             }
-            ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data()); HYPRE_CHECK(ierr);
+        }
+        // Set periodicity after extents but before assemble ONLY if actually periodic
+        // This call is placed after SetExtents loop based on typical usage.
+        // If the error persists, we might also try commenting this out entirely even for periodic m_geom
+        // and letting the Fortran kernel + AMReX FillBoundary handle periodicity implicitly for HYPRE.
+        // For now, we make this call conditional.
+         for (int i_ba = 0; i_ba < m_ba.size(); ++i_ba) {
+            if (m_dm[i_ba] == amrex::ParallelDescriptor::MyProc()) {
+                amrex::Box bx = m_ba[i_ba];
+                auto lo = EffectiveDiffusivityHypre::loV(bx);
+                auto hi = EffectiveDiffusivityHypre::hiV(bx);
+                if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) {
+                     amrex::Print() << "  setupGrids: Rank " << amrex::ParallelDescriptor::MyProc()
+                                    << " adding box " << bx << std::endl;
+                }
+                ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data()); HYPRE_CHECK(ierr);
+            }
+        }
+        ierr = HYPRE_StructGridSetPeriodic(m_grid, periodic_hyp); HYPRE_CHECK(ierr);
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "  setupGrids: HYPRE_StructGridSetPeriodic called." << std::endl;
+        }
+    } else { // m_geom is fully non-periodic
+         for (int i_ba = 0; i_ba < m_ba.size(); ++i_ba) {
+            if (m_dm[i_ba] == amrex::ParallelDescriptor::MyProc()) {
+                amrex::Box bx = m_ba[i_ba];
+                auto lo = EffectiveDiffusivityHypre::loV(bx);
+                auto hi = EffectiveDiffusivityHypre::hiV(bx);
+                if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) {
+                     amrex::Print() << "  setupGrids (Non-Periodic AMReX Geom): Rank " << amrex::ParallelDescriptor::MyProc()
+                                    << " adding box " << bx << std::endl;
+                }
+                ierr = HYPRE_StructGridSetExtents(m_grid, lo.data(), hi.data()); HYPRE_CHECK(ierr);
+            }
+        }
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "  setupGrids: SKIPPING HYPRE_StructGridSetPeriodic (AMReX geom is non-periodic)." << std::endl;
         }
     }
 
-    ierr = HYPRE_StructGridSetPeriodic(m_grid, periodic_hyp); HYPRE_CHECK(ierr);
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  setupGrids: HYPRE_StructGridSetPeriodic called." << std::endl;
-    }
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  setupGrids: Calling HYPRE_StructGridAssemble..." << std::endl;
