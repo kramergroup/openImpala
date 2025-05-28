@@ -31,7 +31,7 @@
 #include <AMReX_Print.H>
 #include <AMReX_RealBox.H>
 #include <AMReX_Utility.H>
-#include <AMReX_MFUtil.H> // For amrex::Average and potentially amrex::ComputeGradient
+#include <AMReX_MultiFabUtil.H> // For amrex::Average and potentially amrex::ComputeGradient
 
 // OpenImpala includes
 #include "../io/DatReader.H"
