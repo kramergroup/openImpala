@@ -4,7 +4,7 @@
 # For initial testing, use a small, simple TIFF (e.g., 32x32x32 or 64x64x64)
 # to ensure quick runs and easier debugging of χ_k fields.
 # Replace with the actual path to your test TIFF file.
-tifffile = "data/SampleData_2Phase_squared.tif" # Example: use a small, known TIFF.
+tifffile = "data/SampleData_2Phase_stack_3d_1bit.tif" # Example: use a small, known TIFF.
 
 # --- Effective Diffusivity Test Specific Parameters ---
 
