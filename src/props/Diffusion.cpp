@@ -105,7 +105,7 @@ namespace
             }
         }
 
-        const amrex::Real* dx_arr = geom.CellSizeArr().data(); // Use AMReX GpuArray if on GPU
+        const amrex::Real* dx_arr = geom.CellSize(); 
 
         // Temporary MultiFabs for gradients (each with AMREX_SPACEDIM components)
         // Gradients should be cell-centered. Chi fields have 1 ghost cell.
@@ -120,11 +120,11 @@ namespace
         // Compute gradients for each chi field.
         // amrex::ComputeGradient takes mf_out, mf_in, in_comp, out_comp_start, num_grad_comp, geom
         // We want all gradient components (d/dx, d/dy, d/dz) for each chi.
-        amrex::ComputeGradient(grad_chi_x, mf_chi_x, 0, 0, AMREX_SPACEDIM, geom);
-        amrex::ComputeGradient(grad_chi_y, mf_chi_y, 0, 0, AMREX_SPACEDIM, geom);
-        if (AMREX_SPACEDIM == 3) {
-            amrex::ComputeGradient(grad_chi_z, mf_chi_z, 0, 0, AMREX_SPACEDIM, geom);
-        }
+       amrex::computeGradient(grad_chi_x, mf_chi_x, 0, 0, AMREX_SPACEDIM, geom); // New
+       amrex::computeGradient(grad_chi_y, mf_chi_y, 0, 0, AMREX_SPACEDIM, geom); // New
+if (AMREX_SPACEDIM == 3) {
+    amrex::computeGradient(grad_chi_z, mf_chi_z, 0, 0, AMREX_SPACEDIM, geom); // New
+}
 
         // Accumulators for sum ( Integrand_Tensor_Component_lm ) over PORE cells
         amrex::Real sum_integrand_tensor_comp[AMREX_SPACEDIM][AMREX_SPACEDIM];
@@ -146,7 +146,7 @@ namespace
             amrex::Array4<const amrex::Real> const gcy_arr = grad_chi_y.const_array(mfi);
             amrex::Array4<const amrex::Real> const gcz_arr = (AMREX_SPACEDIM == 3) ? grad_chi_z.const_array(mfi) : grad_chi_x.const_array(mfi); // Dummy if 2D
 
-            amrex::LoopOnCpu(bx, [=] (int i, int j, int k) noexcept
+            amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp] (int i, int j, int k) noexcept // New
             {
                 if (mask_arr(i,j,k,0) == 1) { // If D_material = 1 in this cell (pore)
                     // Integrand for D_eff_lm is ( (d(chi_x)/dl * (e_x)_m) + ... + delta_lm )
@@ -499,7 +499,7 @@ int main(int argc, char* argv[])
         }
 
         amrex::Real stop_time = amrex::second() - strt_time;
-        amrex::ParallelDescriptor.ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber());
+        amrex::ParallelDescriptor::ReduceRealMax(stop_time, amrex::ParallelDescriptor::IOProcessorNumber()); // New
         if (amrex::ParallelDescriptor::IOProcessor()) {
              amrex::Print() << std::endl << "Total run time (seconds) = " << stop_time << std::endl;
         }
