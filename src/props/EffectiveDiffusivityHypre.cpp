@@ -322,6 +322,8 @@ void EffectiveDiffusivityHypre::setupStencil()
 }
 
 // --- setupMatrixEquation ---
+// In EffectiveDiffusivityHypre.cpp
+
 void EffectiveDiffusivityHypre::setupMatrixEquation()
 {
     BL_PROFILE("EffectiveDiffusivityHypre::setupMatrixEquation");
@@ -345,30 +347,21 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
     ierr = HYPRE_StructVectorInitialize(m_b); HYPRE_CHECK(ierr);
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorInitialize (b): OK" << std::endl;
 
-    // It's good practice to set constant values *after* initialize, if needed.
-    // For this problem, RHS (b) is not initially constant zero everywhere due to the source term.
-    // The Fortran kernel will set appropriate values.
-    // ierr = HYPRE_StructVectorSetConstantValues(m_b, 0.0); HYPRE_CHECK(ierr);
-
     ierr = HYPRE_StructVectorCreate(MPI_COMM_WORLD, m_grid, &m_x); HYPRE_CHECK(ierr);
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorCreate (x): OK" << std::endl;
 
     ierr = HYPRE_StructVectorInitialize(m_x); HYPRE_CHECK(ierr);
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorInitialize (x): OK" << std::endl;
 
-    // Initial guess for x (chi_k) will be set by Fortran, or defaults to 0 if SetConstantValues is used.
-    // ierr = HYPRE_StructVectorSetConstantValues(m_x, 0.0); HYPRE_CHECK(ierr);
-
     // --- Prepare for Fortran call and SetBoxValues ---
     const amrex::Box& domain_for_kernel = m_geom.Domain();
-    int stencil_indices_hypre[stencil_size]; // stencil_size should be 7 for the actual problem
+    int stencil_indices_hypre[stencil_size]; // stencil_size should be 7
     for(int i_loop=0; i_loop<stencil_size; ++i_loop) {
-        stencil_indices_hypre[i_loop] = i_loop; // 0-based indices for HYPRE
+        stencil_indices_hypre[i_loop] = i_loop;
     }
     const int current_dir_int = static_cast<int>(m_dir_solve);
 
-    // Ensure active mask has filled ghost cells, as Fortran kernel accesses neighbors
-    if (m_mf_active_mask.nGrow() > 0) { // This check is good
+    if (m_mf_active_mask.nGrow() > 0) {
         m_mf_active_mask.FillBoundary(m_geom.periodicity());
     }
 
@@ -386,7 +379,7 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
 #endif
     for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& valid_bx = mfi.validbox(); // Fortran fills for this valid region
+        const amrex::Box& valid_bx = mfi.validbox();
         const int npts_valid = static_cast<int>(valid_bx.numPts());
         if (npts_valid == 0) continue;
 
@@ -406,7 +399,7 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
             valid_bx.loVect(), valid_bx.hiVect(),
             domain_for_kernel.loVect(), domain_for_kernel.hiVect(),
             m_dx.dataPtr(),
-            &current_dir_int,
+            ¤t_dir_int,
             &m_verbose
         );
 
@@ -424,18 +417,28 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
         HYPRE_CHECK(ierr);
     }
 
-    // ----- ASSEMBLE CALLS STILL COMMENTED OUT FOR THIS TEST STEP -----
+    // --- Assemble Matrix ONLY ---
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-       amrex::Print() << "  setupMatrixEquation: SKIPPING Assembling HYPRE Matrix and Vectors (Testing SetBoxValues)." << std::endl;
+       amrex::Print() << "  setupMatrixEquation: Attempting HYPRE_StructMatrixAssemble(m_A)..." << std::endl;
     }
+    ierr = HYPRE_StructMatrixAssemble(m_A); HYPRE_CHECK(ierr); // <<< THIS IS NOW UNCOMMENTED
+    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+       amrex::Print() << "    HYPRE_StructMatrixAssemble(m_A): OK" << std::endl;
+    }
+
+    // ----- VECTOR ASSEMBLES STILL COMMENTED OUT FOR THIS TEST STEP -----
     /*
-    ierr = HYPRE_StructMatrixAssemble(m_A); HYPRE_CHECK(ierr);
+    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+       amrex::Print() << "  setupMatrixEquation: Attempting Vector Assembles..." << std::endl;
+    }
     ierr = HYPRE_StructVectorAssemble(m_b); HYPRE_CHECK(ierr);
+    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorAssemble(m_b): OK" << std::endl;
     ierr = HYPRE_StructVectorAssemble(m_x); HYPRE_CHECK(ierr);
+    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorAssemble(m_x): OK" << std::endl;
     */
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  setupMatrixEquation: Setup complete (Fortran call and SetBoxValues done, Assembles SKIPPED)." << std::endl;
+        amrex::Print() << "  setupMatrixEquation: Setup complete (Matrix Assembled, Vector Assembles SKIPPED)." << std::endl;
     }
 }
 
