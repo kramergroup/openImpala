@@ -417,28 +417,26 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
         HYPRE_CHECK(ierr);
     }
 
-    // --- Assemble Matrix ONLY ---
+    // --- Assemble Matrix AND Vectors ---
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
        amrex::Print() << "  setupMatrixEquation: Attempting HYPRE_StructMatrixAssemble(m_A)..." << std::endl;
     }
-    ierr = HYPRE_StructMatrixAssemble(m_A); HYPRE_CHECK(ierr); // <<< THIS IS NOW UNCOMMENTED
+    ierr = HYPRE_StructMatrixAssemble(m_A); HYPRE_CHECK(ierr);
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
        amrex::Print() << "    HYPRE_StructMatrixAssemble(m_A): OK" << std::endl;
     }
 
-    // ----- VECTOR ASSEMBLES STILL COMMENTED OUT FOR THIS TEST STEP -----
-    /*
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
        amrex::Print() << "  setupMatrixEquation: Attempting Vector Assembles..." << std::endl;
     }
-    ierr = HYPRE_StructVectorAssemble(m_b); HYPRE_CHECK(ierr);
+    ierr = HYPRE_StructVectorAssemble(m_b); HYPRE_CHECK(ierr); // <<< UNCOMMENTED
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorAssemble(m_b): OK" << std::endl;
-    ierr = HYPRE_StructVectorAssemble(m_x); HYPRE_CHECK(ierr);
+    ierr = HYPRE_StructVectorAssemble(m_x); HYPRE_CHECK(ierr); // <<< UNCOMMENTED
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorAssemble(m_x): OK" << std::endl;
-    */
+
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  setupMatrixEquation: Setup complete (Matrix Assembled, Vector Assembles SKIPPED)." << std::endl;
+        amrex::Print() << "  setupMatrixEquation: Setup complete (All Assembles Done)." << std::endl;
     }
 }
 
