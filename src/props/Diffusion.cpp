@@ -235,6 +235,7 @@ void calculate_Deff_tensor_homogenization(
          amrex::Print() << "  [calculate_Deff_tensor_homogenization] N_total_cells_in_REV: " << N_total_cells_in_REV << std::endl;
     }
 }
+}
 
 
 int main(int argc, char* argv[])
