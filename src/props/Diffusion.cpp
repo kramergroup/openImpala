@@ -10,7 +10,6 @@
  */
 
 #include "../io/TiffReader.H"
-#include "../io/TiffStackReader.H" // Keep if TiffStackReader is distinct
 #include "../io/DatReader.H"
 #include "../io/HDF5Reader.H"
 // #include "../io/RawReader.H" // Uncomment if RawReader is used
