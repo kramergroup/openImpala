@@ -118,12 +118,22 @@ namespace
         }
 
         // Compute gradients for each chi field.
-        // amrex::ComputeGradient takes mf_out, mf_in, in_comp, out_comp_start, num_grad_comp, geom
-        // We want all gradient components (d/dx, d/dy, d/dz) for each chi.
-       amrex::computeGradient(grad_chi_x, mf_chi_x, 0, 0, AMREX_SPACEDIM, geom); // New
-       amrex::computeGradient(grad_chi_y, mf_chi_y, 0, 0, AMREX_SPACEDIM, geom); // New
+// We want all gradient components (d/dx, d/dy, d/dz) for each chi_k (which has 1 component).
+// The output grad_chi_k will have AMREX_SPACEDIM components.
+// Signature: computeGradient(MultiFab& grad, const MultiFab& S, int S_comp, int grad_comp, int ncomp_S, const Geometry& geom)
+// Here ncomp_S refers to the number of components in S (mf_chi_x) for which we are computing gradients.
+// Since mf_chi_x has 1 component, ncomp_S should be 1.
+// The output grad_chi_x will have AMREX_SPACEDIM components for this single component of S.
+
+const int S_comp = 0;       // Starting component of the source MultiFab (mf_chi_x, etc.)
+const int grad_comp = 0;    // Starting component of the destination gradient MultiFab (grad_chi_x, etc.)
+const int ncomp_S = 1;      // Number of components in the source MultiFab (mf_chi_x) to process.
+                            // computeGradient will produce AMREX_SPACEDIM gradient components for each of these ncomp_S.
+
+amrex::computeGradient(grad_chi_x, mf_chi_x, S_comp, grad_comp, ncomp_S, geom);
+amrex::computeGradient(grad_chi_y, mf_chi_y, S_comp, grad_comp, ncomp_S, geom);
 if (AMREX_SPACEDIM == 3) {
-    amrex::computeGradient(grad_chi_z, mf_chi_z, 0, 0, AMREX_SPACEDIM, geom); // New
+    amrex::computeGradient(grad_chi_z, mf_chi_z, S_comp, grad_comp, ncomp_S, geom);
 }
 
         // Accumulators for sum ( Integrand_Tensor_Component_lm ) over PORE cells
