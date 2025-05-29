@@ -89,129 +89,152 @@ namespace
 
     // Function to calculate D_eff tensor for homogenization method
     // Ideally, this would be in EffectiveDiffusivityUtils.cpp/H
-    void calculate_Deff_tensor_homogenization(
-        amrex::Real Deff_tensor[AMREX_SPACEDIM][AMREX_SPACEDIM],
-        const amrex::MultiFab& mf_chi_x,
-        const amrex::MultiFab& mf_chi_y,
-        const amrex::MultiFab& mf_chi_z, // Will be empty/ignored in 2D
-        const amrex::iMultiFab& active_mask, // Mask where D_material = 1
-        const amrex::Geometry& geom,
-        int verbose_level)
-    {
-        BL_PROFILE("calculate_Deff_tensor_homogenization");
-        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-            for (int j = 0; j < AMREX_SPACEDIM; ++j) {
-                Deff_tensor[i][j] = 0.0;
-            }
-        }
-
-        const amrex::Real* dx_arr = geom.CellSize(); 
-
-        // Temporary MultiFabs for gradients (each with AMREX_SPACEDIM components)
-        // Gradients should be cell-centered. Chi fields have 1 ghost cell.
-        // Ensure chi fields have up-to-date periodic ghost cells. This should be done by getChiSolution.
-        amrex::MultiFab grad_chi_x(mf_chi_x.boxArray(), mf_chi_x.DistributionMap(), AMREX_SPACEDIM, 0);
-        amrex::MultiFab grad_chi_y(mf_chi_y.boxArray(), mf_chi_y.DistributionMap(), AMREX_SPACEDIM, 0);
-        amrex::MultiFab grad_chi_z;
-        if (AMREX_SPACEDIM == 3) {
-            grad_chi_z.define(mf_chi_z.boxArray(), mf_chi_z.DistributionMap(), AMREX_SPACEDIM, 0);
-        }
-
-        // Compute gradients for each chi field.
-// We want all gradient components (d/dx, d/dy, d/dz) for each chi_k (which has 1 component).
-// The output grad_chi_k will have AMREX_SPACEDIM components.
-// Signature: computeGradient(MultiFab& grad, const MultiFab& S, int S_comp, int grad_comp, int ncomp_S, const Geometry& geom)
-// Here ncomp_S refers to the number of components in S (mf_chi_x) for which we are computing gradients.
-// Since mf_chi_x has 1 component, ncomp_S should be 1.
-// The output grad_chi_x will have AMREX_SPACEDIM components for this single component of S.
-
-const int S_comp = 0;       // Starting component of the source MultiFab (mf_chi_x, etc.)
-const int grad_comp = 0;    // Starting component of the destination gradient MultiFab (grad_chi_x, etc.)
-const int ncomp_S = 1;      // Number of components in the source MultiFab (mf_chi_x) to process.
-                            // computeGradient will produce AMREX_SPACEDIM gradient components for each of these ncomp_S.
-
-amrex::computeGradient(grad_chi_x, mf_chi_x, S_comp, grad_comp, ncomp_S, geom);
-amrex::computeGradient(grad_chi_y, mf_chi_y, S_comp, grad_comp, ncomp_S, geom);
-if (AMREX_SPACEDIM == 3) {
-    amrex::computeGradient(grad_chi_z, mf_chi_z, S_comp, grad_comp, ncomp_S, geom);
-}
-
-        // Accumulators for sum ( Integrand_Tensor_Component_lm ) over PORE cells
-        amrex::Real sum_integrand_tensor_comp[AMREX_SPACEDIM][AMREX_SPACEDIM];
-        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-            for (int j = 0; j < AMREX_SPACEDIM; ++j) {
-                sum_integrand_tensor_comp[i][j] = 0.0;
-            }
-        }
-
-    #ifdef AMREX_USE_OMP
-    #pragma omp parallel reduction(+:sum_integrand_tensor_comp)
-    #endif
-        for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box& bx = mfi.validbox(); // Sum only over valid cells
-            amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
-
-            amrex::Array4<const amrex::Real> const gcx_arr = grad_chi_x.const_array(mfi);
-            amrex::Array4<const amrex::Real> const gcy_arr = grad_chi_y.const_array(mfi);
-            amrex::Array4<const amrex::Real> const gcz_arr = (AMREX_SPACEDIM == 3) ? grad_chi_z.const_array(mfi) : grad_chi_x.const_array(mfi); // Dummy if 2D
-
-            amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp] (int i, int j, int k) noexcept // New
-            {
-                if (mask_arr(i,j,k,0) == 1) { // If D_material = 1 in this cell (pore)
-                    // Integrand for D_eff_lm is ( (d(chi_x)/dl * (e_x)_m) + ... + delta_lm )
-                    // where l is row index (0=x, 1=y, 2=z), m is col index
-
-                    // D_eff_xx: (d(chi_x)/dx + 1)
-                    sum_integrand_tensor_comp[0][0] += (gcx_arr(i,j,k,0) + 1.0);
-                    // D_eff_xy: (d(chi_y)/dx)
-                    sum_integrand_tensor_comp[0][1] += gcy_arr(i,j,k,0);
-                    // D_eff_yx: (d(chi_x)/dy)
-                    sum_integrand_tensor_comp[1][0] += gcx_arr(i,j,k,1);
-                    // D_eff_yy: (d(chi_y)/dy + 1)
-                    sum_integrand_tensor_comp[1][1] += (gcy_arr(i,j,k,1) + 1.0);
-
-                    if (AMREX_SPACEDIM == 3) {
-                        // D_eff_xz: (d(chi_z)/dx)
-                        sum_integrand_tensor_comp[0][2] += gcz_arr(i,j,k,0);
-                        // D_eff_zx: (d(chi_x)/dz)
-                        sum_integrand_tensor_comp[2][0] += gcx_arr(i,j,k,2);
-                        // D_eff_yz: (d(chi_z)/dy)
-                        sum_integrand_tensor_comp[1][2] += gcz_arr(i,j,k,1);
-                        // D_eff_zy: (d(chi_y)/dz)
-                        sum_integrand_tensor_comp[2][1] += gcy_arr(i,j,k,2);
-                        // D_eff_zz: (d(chi_z)/dz + 1)
-                        sum_integrand_tensor_comp[2][2] += (gcz_arr(i,j,k,2) + 1.0);
-                    }
-                }
-            });
-        }
-
-        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-            for (int j = 0; j < AMREX_SPACEDIM; ++j) {
-                amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp[i][j]);
-            }
-        }
-
-        amrex::Long N_total_cells_in_REV = geom.Domain().numPts();
-        if (N_total_cells_in_REV > 0) {
-            for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-                for (int j = 0; j < AMREX_SPACEDIM; ++j) {
-                    Deff_tensor[i][j] = sum_integrand_tensor_comp[i][j] / static_cast<amrex::Real>(N_total_cells_in_REV);
-                }
-            }
-        } else {
-             if (amrex::ParallelDescriptor::IOProcessor() && verbose_level > 0) {
-                amrex::Warning("Total cells in REV is zero, D_eff cannot be calculated.");
-             }
-        }
-        if (verbose_level > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  Raw summed integrand (D_xx example): " << sum_integrand_tensor_comp[0][0] << std::endl;
-             amrex::Print() << "  N_total_cells_in_REV: " << N_total_cells_in_REV << std::endl;
+    // Function to calculate D_eff tensor for homogenization method
+void calculate_Deff_tensor_homogenization(
+    amrex::Real Deff_tensor[AMREX_SPACEDIM][AMREX_SPACEDIM],
+    const amrex::MultiFab& mf_chi_x_in, // Renamed to avoid confusion
+    const amrex::MultiFab& mf_chi_y_in,
+    const amrex::MultiFab& mf_chi_z_in, // Will be empty/ignored in 2D
+    const amrex::iMultiFab& active_mask, // Mask where D_material = 1
+    const amrex::Geometry& geom,
+    int verbose_level)
+{
+    BL_PROFILE("calculate_Deff_tensor_homogenization");
+    for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+        for (int j = 0; j < AMREX_SPACEDIM; ++j) {
+            Deff_tensor[i][j] = 0.0;
         }
     }
 
-} // End anonymous namespace
+    // Ensure input chi MultiFabs have filled ghost cells, especially for periodic.
+    // This should have been done after they were solved.
+    // For safety, make a copy and fill if not already done, or assert.
+    // Assuming mf_chi_x_in, etc., already have their boundaries (ghost cells) filled correctly.
+    AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1);
+    AMREX_ASSERT(mf_chi_y_in.nGrow() >= 1);
+    if (AMREX_SPACEDIM == 3) {
+        AMREX_ASSERT(mf_chi_z_in.nGrow() >= 1);
+    }
+
+
+    const amrex::Real* dx_arr = geom.CellSize();
+    amrex::Real inv_dx[AMREX_SPACEDIM];
+    for (int i=0; i<AMREX_SPACEDIM; ++i) {
+        inv_dx[i] = 1.0 / dx_arr[i];
+    }
+    amrex::Real inv_2dx[AMREX_SPACEDIM];
+    for (int i=0; i<AMREX_SPACEDIM; ++i) {
+        inv_2dx[i] = 1.0 / (2.0 * dx_arr[i]);
+    }
+
+
+    // Accumulators for sum ( Integrand_Tensor_Component_lm ) over PORE cells
+    amrex::Real sum_integrand_tensor_comp[AMREX_SPACEDIM][AMREX_SPACEDIM];
+    for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+        for (int j = 0; j < AMREX_SPACEDIM; ++j) {
+            sum_integrand_tensor_comp[i][j] = 0.0;
+        }
+    }
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel reduction(+:sum_integrand_tensor_comp)
+#endif
+    for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.validbox(); // Operate on valid cells
+        amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
+
+        // Get Array4 for the input chi fields
+        amrex::Array4<const amrex::Real> const chi_x_arr = mf_chi_x_in.const_array(mfi);
+        amrex::Array4<const amrex::Real> const chi_y_arr = mf_chi_y_in.const_array(mfi);
+        amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3) ?
+                                                           mf_chi_z_in.const_array(mfi) :
+                                                           mf_chi_x_in.const_array(mfi); // Dummy for 2D
+
+        amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp] (int i, int j, int k) noexcept
+        {
+            if (mask_arr(i,j,k,0) == 1) { // If D_material = 1 in this cell (pore)
+
+                // Manual calculation of gradients using centered differences
+                // (Requires chi fields to have at least 1 ghost cell filled)
+                amrex::Real grad_chi_x[AMREX_SPACEDIM];
+                amrex::Real grad_chi_y[AMREX_SPACEDIM];
+                amrex::Real grad_chi_z[AMREX_SPACEDIM];
+
+                // Gradient of chi_x
+                grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0]; // d(chi_x)/dx
+                grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1]; // d(chi_x)/dy
+                if (AMREX_SPACEDIM == 3) {
+                    grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2]; // d(chi_x)/dz
+                }
+
+                // Gradient of chi_y
+                grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0]; // d(chi_y)/dx
+                grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1]; // d(chi_y)/dy
+                if (AMREX_SPACEDIM == 3) {
+                    grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2]; // d(chi_y)/dz
+                }
+
+                if (AMREX_SPACEDIM == 3) {
+                    // Gradient of chi_z
+                    grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0]; // d(chi_z)/dx
+                    grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1]; // d(chi_z)/dy
+                    grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2]; // d(chi_z)/dz
+                }
+
+
+                // Integrand for D_eff_lm is ( (d(chi_M)/d(xi_L)) + delta_lm )
+                // L is row index (0=x, 1=y, 2=z), M is col index
+
+                // D_eff_xx (L=0, M=0): (d(chi_x)/dx + 1)
+                sum_integrand_tensor_comp[0][0] += (grad_chi_x[0] + 1.0);
+                // D_eff_xy (L=0, M=1): (d(chi_y)/dx)
+                sum_integrand_tensor_comp[0][1] += grad_chi_y[0];
+                // D_eff_yx (L=1, M=0): (d(chi_x)/dy)
+                sum_integrand_tensor_comp[1][0] += grad_chi_x[1];
+                // D_eff_yy (L=1, M=1): (d(chi_y)/dy + 1)
+                sum_integrand_tensor_comp[1][1] += (grad_chi_y[1] + 1.0);
+
+                if (AMREX_SPACEDIM == 3) {
+                    // D_eff_xz (L=0, M=2): (d(chi_z)/dx)
+                    sum_integrand_tensor_comp[0][2] += grad_chi_z[0];
+                    // D_eff_zx (L=2, M=0): (d(chi_x)/dz)
+                    sum_integrand_tensor_comp[2][0] += grad_chi_x[2];
+                    // D_eff_yz (L=1, M=2): (d(chi_z)/dy)
+                    sum_integrand_tensor_comp[1][2] += grad_chi_z[1];
+                    // D_eff_zy (L=2, M=1): (d(chi_y)/dz)
+                    sum_integrand_tensor_comp[2][1] += grad_chi_y[2];
+                    // D_eff_zz (L=2, M=2): (d(chi_z)/dz + 1)
+                    sum_integrand_tensor_comp[2][2] += (grad_chi_z[2] + 1.0);
+                }
+            }
+        });
+    }
+
+    // Parallel reduction and normalization (remains the same)
+    for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+        for (int j = 0; j < AMREX_SPACEDIM; ++j) {
+            amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp[i][j]);
+        }
+    }
+
+    amrex::Long N_total_cells_in_REV = geom.Domain().numPts();
+    if (N_total_cells_in_REV > 0) {
+        for (int l_idx = 0; l_idx < AMREX_SPACEDIM; ++l_idx) { // row index
+            for (int m_idx = 0; m_idx < AMREX_SPACEDIM; ++m_idx) { // col index
+                Deff_tensor[l_idx][m_idx] = sum_integrand_tensor_comp[l_idx][m_idx] / static_cast<amrex::Real>(N_total_cells_in_REV);
+            }
+        }
+    } else {
+         if (amrex::ParallelDescriptor::IOProcessor() && verbose_level > 0) {
+            amrex::Warning("Total cells in REV is zero, D_eff cannot be calculated.");
+         }
+    }
+    if (verbose_level > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+         amrex::Print() << "  [calculate_Deff_tensor_homogenization] Raw summed integrand (D_xx example after reduction): " << sum_integrand_tensor_comp[0][0] << std::endl;
+         amrex::Print() << "  [calculate_Deff_tensor_homogenization] N_total_cells_in_REV: " << N_total_cells_in_REV << std::endl;
+    }
+}
 
 
 int main(int argc, char* argv[])
