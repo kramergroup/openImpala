@@ -36,7 +36,7 @@ box_size = 32
 # 1: Standard test progress and results output
 # 2: More detailed internal steps
 # 3+: Enable detailed TiffReader boundary debugging output (if compiled in)
-verbose = 3 # Set high to enable boundary debug prints from TiffReader
+verbose = 2 # Set high to enable boundary debug prints from TiffReader
 
 # Enable/disable the check that prints boundary corner values after thresholding
 # Options: true / false / 1 / 0
