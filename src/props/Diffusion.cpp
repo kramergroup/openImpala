@@ -349,7 +349,7 @@ int main (int argc, char* argv[])
                         }
                         
                         amrex::Box bx_rev_global_const = amrex::Box(seed_lo_global, seed_lo_global + amrex::IntVect(current_rev_size_target - 1));
-                        amrex::Box bx_rev_global = bx_rev_global_const; // Make a non-const copy
+                        amrex::Box bx_rev_global = bx_rev_global_const; 
                         bx_rev_global &= domain_box_full; 
 
                         if (bx_rev_global.isEmpty() || bx_rev_global.longside() < 8) { 
@@ -368,7 +368,8 @@ int main (int argc, char* argv[])
                         }
                         
                         amrex::Box domain_rev_relative_temp = bx_rev_global; 
-                        amrex::Box domain_rev_relative = domain_rev_relative_temp.shift(-bx_rev_global.smallEnd());
+                        amrex::Box domain_rev_relative = domain_rev_relative_temp; // Make a copy
+                        domain_rev_relative.shift(-bx_rev_global.smallEnd()); // Shift the copy
                         
                         amrex::Geometry geom_rev;
                         amrex::RealBox rb_rev({AMREX_D_DECL(0.0,0.0,0.0)},
@@ -378,25 +379,45 @@ int main (int argc, char* argv[])
                         amrex::Array<int,AMREX_SPACEDIM> is_periodic_rev = {AMREX_D_DECL(1,1,1)}; 
                         geom_rev.define(domain_rev_relative, &rb_rev, 0, is_periodic_rev.data()); 
 
-                        amrex::BoxArray ba_rev(domain_rev_relative); 
-                        ba_rev.maxSize(main_box_size); 
-                        amrex::DistributionMapping dm_rev(ba_rev);
-
-                        amrex::iMultiFab mf_phase_rev(ba_rev, dm_rev, 1, 1); 
+                        amrex::BoxArray ba_rev_relative(domain_rev_relative); 
+                        ba_rev_relative.maxSize(main_box_size); 
+                        amrex::DistributionMapping dm_rev_relative(ba_rev_relative);
+                        amrex::iMultiFab mf_phase_rev(ba_rev_relative, dm_rev_relative, 1, 1); 
                         
-                        // Efficiently copy the subvolume for the REV
-                        // The mf_phase_full is already defined on ba_full, dm_full
-                        // We need to copy the region bx_rev_global from mf_phase_full
-                        // into mf_phase_rev, which is defined on domain_rev_relative.
-                        mf_phase_rev.setVal(0); // Initialize destination
-                        mf_phase_rev.ParallelCopy(mf_phase_full, bx_rev_global.smallEnd(), domain_rev_relative.smallEnd(), 0, 0, 1, mf_phase_full.nGrowVect(), mf_phase_rev.nGrowVect());
-                        mf_phase_rev.FillBoundary(geom_rev.periodicity());
+                        amrex::BoxArray ba_temp_global(bx_rev_global);
+                        amrex::DistributionMapping dm_temp_global(ba_temp_global); 
+                        amrex::iMultiFab mf_temp_global(ba_temp_global, dm_temp_global, 1, 0); 
+                        mf_temp_global.ParallelCopy(mf_phase_full, 0, 0, 1, amrex::IntVect::TheZeroVector(), amrex::IntVect::TheZeroVector(), geom_full.periodicity());
+                        
+                        mf_phase_rev.setVal(0); 
+                        for(amrex::MFIter mfi_dest(mf_phase_rev); mfi_dest.isValid(); ++mfi_dest) {
+                            amrex::IArrayBox& dest_fab = mf_phase_rev[mfi_dest];
+                            const amrex::Box& dest_fab_box_local = dest_fab.box(); 
+
+                            amrex::Box temp_dest_box_global = dest_fab_box_local; // Non-const copy
+                            amrex::Box required_src_box_global = temp_dest_box_global.shift(bx_rev_global.smallEnd());
+                            
+                            for (amrex::MFIter mfi_src(mf_temp_global); mfi_src.isValid(); ++mfi_src) { // Should be 1 FAB for np=1
+                                const amrex::IArrayBox& src_fab = mf_temp_global[mfi_src];
+                                const amrex::Box& src_fab_box_global_const = src_fab.box(); 
+                                amrex::Box src_fab_box_global = src_fab_box_global_const; // Non-const copy
+                                
+                                amrex::Box copy_region_global = required_src_box_global & src_fab_box_global;
+
+                                if (!copy_region_global.isEmpty()) {
+                                    amrex::Box temp_copy_region_dest_local = copy_region_global; // Non-const copy
+                                    amrex::Box copy_region_dest_local = temp_copy_region_dest_local.shift(-bx_rev_global.smallEnd());
+                                    dest_fab.copy(src_fab, copy_region_global, 0, copy_region_dest_local, 0, 1);
+                                }
+                            }
+                        }
+                        mf_phase_rev.FillBoundary(geom_rev.periodicity()); 
 
 
-                        amrex::MultiFab mf_chi_x_rev(ba_rev, dm_rev, 1, 1);
-                        amrex::MultiFab mf_chi_y_rev(ba_rev, dm_rev, 1, 1);
+                        amrex::MultiFab mf_chi_x_rev(ba_rev_relative, dm_rev_relative, 1, 1);
+                        amrex::MultiFab mf_chi_y_rev(ba_rev_relative, dm_rev_relative, 1, 1);
                         amrex::MultiFab mf_chi_z_rev;
-                        if (AMREX_SPACEDIM==3) mf_chi_z_rev.define(ba_rev, dm_rev, 1, 1);
+                        if (AMREX_SPACEDIM==3) mf_chi_z_rev.define(ba_rev_relative, dm_rev_relative, 1, 1);
 
                         bool all_chi_rev_converged = true;
                         std::vector<OpenImpala::Direction> rev_solve_dirs = {OpenImpala::Direction::X, OpenImpala::Direction::Y};
@@ -417,7 +438,7 @@ int main (int argc, char* argv[])
                             std::unique_ptr<OpenImpala::EffectiveDiffusivityHypre> rev_chi_solver;
                             try {
                                  rev_chi_solver = std::make_unique<OpenImpala::EffectiveDiffusivityHypre>(
-                                    geom_rev, ba_rev, dm_rev, mf_phase_rev,
+                                    geom_rev, ba_rev_relative, dm_rev_relative, mf_phase_rev, // use ba_rev_relative and dm_rev_relative
                                     main_phase_id_analysis, dir_k_solve, rev_solver_type_enum,
                                     chi_plot_rev_full_path.string(), rev_verbose_level, (rev_write_plotfiles !=0)
                                 );
@@ -439,7 +460,7 @@ int main (int argc, char* argv[])
                         for(int r=0; r<AMREX_SPACEDIM; ++r) for(int c=0; c<AMREX_SPACEDIM; ++c) Deff_tensor_rev[r][c] = std::numeric_limits<amrex::Real>::quiet_NaN();
 
                         if (all_chi_rev_converged) {
-                            amrex::iMultiFab active_mask_rev(ba_rev, dm_rev, 1, 0); 
+                            amrex::iMultiFab active_mask_rev(ba_rev_relative, dm_rev_relative, 1, 0); // use ba_rev_relative
                             #ifdef AMREX_USE_OMP
                             #pragma omp parallel if(amrex::Gpu::notInLaunchRegion())
                             #endif
