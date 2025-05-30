@@ -61,7 +61,7 @@ namespace {
     const amrex::Geometry& geom,
     int verbose_level)
 {
-    BL_PROFILE("calculate_Deff_tensor_homogenization_test_sign_corrected");
+    BL_PROFILE("calculate_Deff_tensor_homogenization_reverted_omp"); 
     for (int i = 0; i < AMREX_SPACEDIM; ++i) {
         for (int j = 0; j < AMREX_SPACEDIM; ++j) {
             Deff_tensor[i][j] = 0.0;
@@ -70,7 +70,7 @@ namespace {
     AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1);
     AMREX_ASSERT(mf_chi_y_in.nGrow() >= 1);
     if (AMREX_SPACEDIM == 3) {
-        AMREX_ASSERT(mf_chi_z_in.isDefined() && mf_chi_z_in.nGrow() >= 1);
+        AMREX_ASSERT(mf_chi_z_in.isDefined() && mf_chi_z_in.nGrow() >= 1); 
     }
 
     const amrex::Real* dx_arr = geom.CellSize();
@@ -79,73 +79,66 @@ namespace {
         inv_2dx[i] = 1.0 / (2.0 * dx_arr[i]);
     }
 
-    amrex::Gpu::DeviceVector<amrex::Real> sum_integrand_tensor_comp_dv(AMREX_SPACEDIM*AMREX_SPACEDIM, 0.0);
-    amrex::Real* sum_integrand_tensor_comp = sum_integrand_tensor_comp_dv.dataPtr();
-
+    amrex::Real sum_integrand_tensor_comp_local[AMREX_SPACEDIM][AMREX_SPACEDIM];
+    for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+        for (int j = 0; j < AMREX_SPACEDIM; ++j) {
+            sum_integrand_tensor_comp_local[i][j] = 0.0;
+        }
+    }
 
 #ifdef AMREX_USE_OMP
-#pragma omp parallel
+#pragma omp parallel reduction(+:sum_integrand_tensor_comp_local)
 #endif
     for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& bx = mfi.tilebox(); // Iterate over tilebox (valid cells of active_mask)
+        const amrex::Box& bx = mfi.tilebox(); 
         amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
         amrex::Array4<const amrex::Real> const chi_x_arr = mf_chi_x_in.const_array(mfi);
         amrex::Array4<const amrex::Real> const chi_y_arr = mf_chi_y_in.const_array(mfi);
-        amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3 && mf_chi_z_in.isDefined()) ?
+        amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3 && mf_chi_z_in.isDefined()) ? 
                                                            mf_chi_z_in.const_array(mfi) :
-                                                           mf_chi_x_in.const_array(mfi); // Dummy for 2D
+                                                           mf_chi_x_in.const_array(mfi); 
 
-        amrex::ParallelReduce::Sum(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) -> amrex::GpuTuple<amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real>
+        amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp_local] (int i, int j, int k) noexcept
         {
-            amrex::GpuTuple<amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real> R = {0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0};
-            if (mask_arr(i,j,k,0) == 1) {
+            if (mask_arr(i,j,k,0) == 1) { 
                 amrex::Real grad_chi_x[AMREX_SPACEDIM] = {0.0};
                 amrex::Real grad_chi_y[AMREX_SPACEDIM] = {0.0};
                 amrex::Real grad_chi_z[AMREX_SPACEDIM] = {0.0};
 
-                grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0];
-                grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1];
-                if (AMREX_SPACEDIM == 3) grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2];
+                grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0]; 
+                grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1]; 
+                if (AMREX_SPACEDIM == 3) grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2]; 
 
-                grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0];
-                grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1];
-                if (AMREX_SPACEDIM == 3) grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2];
+                grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0]; 
+                grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1]; 
+                if (AMREX_SPACEDIM == 3) grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2]; 
 
                 if (AMREX_SPACEDIM == 3) {
-                    grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0];
-                    grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1];
-                    grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2];
+                    grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0]; 
+                    grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1]; 
+                    grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2]; 
                 }
-                
-                // Store into the GpuTuple for reduction
-                amrex::get<0>(R) += (1.0 - grad_chi_x[0]); // D_xx
-                amrex::get<1>(R) += (    - grad_chi_y[0]); // D_xy
-                amrex::get<3>(R) += (    - grad_chi_x[1]); // D_yx
-                amrex::get<4>(R) += (1.0 - grad_chi_y[1]); // D_yy
+
+                sum_integrand_tensor_comp_local[0][0] += (1.0 - grad_chi_x[0]); 
+                sum_integrand_tensor_comp_local[0][1] += (    - grad_chi_y[0]); 
+                sum_integrand_tensor_comp_local[1][0] += (    - grad_chi_x[1]); 
+                sum_integrand_tensor_comp_local[1][1] += (1.0 - grad_chi_y[1]); 
+
                 if (AMREX_SPACEDIM == 3) {
-                    amrex::get<2>(R) += (    - grad_chi_z[0]); // D_xz
-                    amrex::get<5>(R) += (    - grad_chi_z[1]); // D_yz
-                    amrex::get<6>(R) += (    - grad_chi_x[2]); // D_zx
-                    amrex::get<7>(R) += (    - grad_chi_y[2]); // D_zy
-                    amrex::get<8>(R) += (1.0 - grad_chi_z[2]); // D_zz
+                    sum_integrand_tensor_comp_local[0][2] += (    - grad_chi_z[0]); 
+                    sum_integrand_tensor_comp_local[2][0] += (    - grad_chi_x[2]); 
+                    sum_integrand_tensor_comp_local[1][2] += (    - grad_chi_z[1]); 
+                    sum_integrand_tensor_comp_local[2][1] += (    - grad_chi_y[2]); 
+                    sum_integrand_tensor_comp_local[2][2] += (1.0 - grad_chi_z[2]); 
                 }
             }
-            return R;
-        },
-        amrex::GpuTuple<amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real, amrex::Real>{
-             sum_integrand_tensor_comp[0*AMREX_SPACEDIM+0], sum_integrand_tensor_comp[0*AMREX_SPACEDIM+1], sum_integrand_tensor_comp[0*AMREX_SPACEDIM+2],
-             sum_integrand_tensor_comp[1*AMREX_SPACEDIM+0], sum_integrand_tensor_comp[1*AMREX_SPACEDIM+1], sum_integrand_tensor_comp[1*AMREX_SPACEDIM+2],
-             sum_integrand_tensor_comp[2*AMREX_SPACEDIM+0], sum_integrand_tensor_comp[2*AMREX_SPACEDIM+1], sum_integrand_tensor_comp[2*AMREX_SPACEDIM+2]
-        }
-        );
+        });
     }
     
-    amrex::Gpu::copy(amrex::Gpu::deviceToHost, sum_integrand_tensor_comp_dv.begin(), sum_integrand_tensor_comp_dv.end(), sum_integrand_tensor_comp);
-
     for (int r = 0; r < AMREX_SPACEDIM; ++r) {
         for (int c = 0; c < AMREX_SPACEDIM; ++c) {
-             amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp[r*AMREX_SPACEDIM+c]);
+            amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp_local[r][c]);
         }
     }
 
@@ -153,7 +146,7 @@ namespace {
     if (N_total_cells_in_domain > 0) {
         for (int l_idx = 0; l_idx < AMREX_SPACEDIM; ++l_idx) {
             for (int m_idx = 0; m_idx < AMREX_SPACEDIM; ++m_idx) {
-                Deff_tensor[l_idx][m_idx] = sum_integrand_tensor_comp[l_idx*AMREX_SPACEDIM+m_idx] / static_cast<amrex::Real>(N_total_cells_in_domain);
+                Deff_tensor[l_idx][m_idx] = sum_integrand_tensor_comp_local[l_idx][m_idx] / static_cast<amrex::Real>(N_total_cells_in_domain);
             }
         }
     } else {
@@ -161,8 +154,9 @@ namespace {
             amrex::Warning("Total cells in domain is zero, D_eff cannot be calculated.");
          }
     }
+
      if (verbose_level > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-         amrex::Print() << "  [TestCalcDeff SIGN CORRECTED] Raw summed (1-dchi_x_dx): " << sum_integrand_tensor_comp[0*AMREX_SPACEDIM+0]
+         amrex::Print() << "  [TestCalcDeff SIGN CORRECTED] Raw summed (1-dchi_x_dx): " << sum_integrand_tensor_comp_local[0][0]
                         << ", N_total_cells: " << N_total_cells_in_domain << std::endl;
     }
 }
@@ -218,16 +212,16 @@ int main (int argc, char* argv[])
 
         // --- Setup for FillBoundary Test (using original periodic geom) ---
         amrex::Geometry geom_orig_periodic; 
-        amrex::BoxArray ba_fb_test;       // Use distinct name
-        amrex::DistributionMapping dm_fb_test; // Use distinct name
+        amrex::BoxArray ba_fb_test;       
+        amrex::DistributionMapping dm_fb_test; 
 
-        OpenImpala::TiffReader reader_fb_test(tifffile); // Reader for this test
+        OpenImpala::TiffReader reader_fb_test(tifffile); 
         const amrex::Box domain_box_fb_test = reader_fb_test.box();
         amrex::RealBox rb_fb_test({AMREX_D_DECL(0.0, 0.0, 0.0)},
                                   {AMREX_D_DECL(amrex::Real(domain_box_fb_test.length(0)),
                                                 amrex::Real(domain_box_fb_test.length(1)),
                                                 amrex::Real(domain_box_fb_test.length(2)))});
-        amrex::Array<int, AMREX_SPACEDIM> is_periodic_fb_test{AMREX_D_DECL(1, 1, 1)}; // Fully periodic for this test
+        amrex::Array<int, AMREX_SPACEDIM> is_periodic_fb_test{AMREX_D_DECL(1, 1, 1)}; 
         geom_orig_periodic.define(domain_box_fb_test, &rb_fb_test, 0, is_periodic_fb_test.data());
 
         ba_fb_test.define(domain_box_fb_test);
@@ -255,7 +249,7 @@ int main (int argc, char* argv[])
             amrex::Print() << "DEBUG FillBoundary Test: Expected sum of valid cells = " << expected_sum_fb_test << std::endl;
         }
 
-        long sum_before_fb = mf_fb_test.sum(0,true); // comp 0, local sum
+        long sum_before_fb = mf_fb_test.sum(0,true); 
         amrex::ParallelDescriptor::ReduceLongSum(sum_before_fb);
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "DEBUG FillBoundary Test: Sum of valid cells BEFORE FillBoundary (using mf.sum())= " << sum_before_fb << std::endl;
@@ -263,7 +257,7 @@ int main (int argc, char* argv[])
 
         mf_fb_test.FillBoundary(geom_orig_periodic.periodicity());
 
-        long sum_after_fb = mf_fb_test.sum(0,true); // comp 0, local sum
+        long sum_after_fb = mf_fb_test.sum(0,true); 
         amrex::ParallelDescriptor::ReduceLongSum(sum_after_fb);
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "DEBUG FillBoundary Test: Sum of valid cells AFTER FillBoundary (using mf.sum())= " << sum_after_fb << std::endl;
@@ -286,7 +280,7 @@ int main (int argc, char* argv[])
 
         try {
             if (verbose >= 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << " Reading metadata from " << tifffile << "...\n";
-            OpenImpala::TiffReader reader_main(tifffile); // Use a new reader instance for clarity
+            OpenImpala::TiffReader reader_main(tifffile); 
             if (!reader_main.isRead()) { throw std::runtime_error("TiffReader failed to read metadata."); }
             const amrex::Box domain_box_main = reader_main.box();
             if (domain_box_main.isEmpty()) { throw std::runtime_error("TiffReader returned empty domain box."); }
@@ -295,10 +289,9 @@ int main (int argc, char* argv[])
                                             amrex::Real(domain_box_main.length(1)),
                                             amrex::Real(domain_box_main.length(2)))});
             
-            amrex::Array<int, AMREX_SPACEDIM> is_periodic_sim{AMREX_D_DECL(1, 1, 1)}; // <<< Ensure this is what you want for the main sim (e.g. {1,1,1} for periodic)
-            // amrex::Array<int, AMREX_SPACEDIM> is_periodic_sim{AMREX_D_DECL(0, 0, 0)}; // <<< Or this for non-periodic main sim test
-
-            if (amrex::ParallelDescriptor::IOProcessor() && verbose > 1) { // Print only if verbose enough
+            amrex::Array<int, AMREX_SPACEDIM> is_periodic_sim{AMREX_D_DECL(1, 1, 1)}; 
+            
+            if (amrex::ParallelDescriptor::IOProcessor() && verbose > 1) { 
                  amrex::Print() << "  MAIN SIM: Setting geom to be "
                                 << (is_periodic_sim[0] ? "PERIODIC" : "NON-PERIODIC") << std::endl;
             }
@@ -371,7 +364,7 @@ int main (int argc, char* argv[])
                 amrex::Print() << "  ERROR during EffectiveDiffusivityHypre construction or solve for chi_"
                                << dir_k_str << ": " << e.what() << std::endl;
                 all_solves_converged = false;
-                 test_passed_overall = false; // Added this line
+                 test_passed_overall = false; 
             }
         }
 
@@ -431,7 +424,6 @@ int main (int argc, char* argv[])
                     if (Deff_tensor_vals[d][d] <= 0.0 || Deff_tensor_vals[d][d] >= 1.0) {
                         amrex::Warning("D_eff diagonal component D_" + std::to_string(d) + std::to_string(d) +
                                        " is out of expected range (0,1): " + std::to_string(Deff_tensor_vals[d][d]));
-                        // test_passed_overall = false; // This might be too strict
                     }
                 }
             }
