@@ -384,12 +384,15 @@ int main (int argc, char* argv[])
                         bx_rev &= domain_box_full; 
 
                         if (bx_rev.isEmpty() || bx_rev.longside() < 8) { // Skip very small or empty REVs
-                            if (rev_verbose_level >=1 && amrex::ParallelDescriptor::IOProcessor()) 
-                                amrex::Warning("Skipping REV for sample " + std::to_string(s_idx) + " size " + std::to_string(current_rev_size_target) + " due to small/empty box after boundary intersection: " + bx_rev.toString() );
+                            if (rev_verbose_level >=1 && amrex::ParallelDescriptor::IOProcessor()) { // Ensure stringstream is in scope
+                                std::stringstream rev_box_ss_warn;
+                                rev_box_ss_warn << bx_rev;
+                                amrex::Warning("Skipping REV for sample " + std::to_string(s_idx) + " size " + std::to_string(current_rev_size_target) + " due to small/empty box after boundary intersection: " + rev_box_ss_warn.str());
+                            }
                             continue;
                         }
                          if (rev_verbose_level >=2 && amrex::ParallelDescriptor::IOProcessor()) {
-                            amrex::Print() << "    Actual REV Box (global coords): " << bx_rev << std::endl;
+                            amrex::Print() << "    Actual REV Box (global coords): " << bx_rev << std::endl; // Corrected "Adjusted" to "Actual" if this is after intersection
                         }
 
                         amrex::Geometry geom_rev;
