@@ -67,6 +67,10 @@ DatReader::DatReader(const std::string& filename) :
 
 // --- File Reading Implementation ---
 
+bool OpenImpala::DatReader::isRead() const {
+    return m_is_read; // Return the state of your internal flag
+}
+
 bool DatReader::readFile(const std::string& filename)
 {
     m_filename = filename;
