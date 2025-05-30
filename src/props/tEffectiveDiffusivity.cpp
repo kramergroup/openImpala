@@ -56,111 +56,125 @@ namespace { // Anonymous namespace for test-local helpers
     // Definition of calculate_Deff_tensor_homogenization (copied from your working Diffusion.cpp or REVMain.cpp)
     // Ensure this is the version that takes mf_chi_x_in, etc. and uses manual gradients.
     void calculate_Deff_tensor_homogenization(
-        amrex::Real Deff_tensor[AMREX_SPACEDIM][AMREX_SPACEDIM],
-        const amrex::MultiFab& mf_chi_x_in,
-        const amrex::MultiFab& mf_chi_y_in,
-        const amrex::MultiFab& mf_chi_z_in,
-        const amrex::iMultiFab& active_mask,
-        const amrex::Geometry& geom,
-        int verbose_level)
-    {
-        BL_PROFILE("calculate_Deff_tensor_homogenization_test"); // Slightly different profile name for test
-        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-            for (int j = 0; j < AMREX_SPACEDIM; ++j) {
-                Deff_tensor[i][j] = 0.0;
-            }
-        }
-        AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1);
-        AMREX_ASSERT(mf_chi_y_in.nGrow() >= 1);
-        if (AMREX_SPACEDIM == 3) {
-            AMREX_ASSERT(mf_chi_z_in.nGrow() >= 1);
-        }
-
-        const amrex::Real* dx_arr = geom.CellSize();
-        amrex::Real inv_2dx[AMREX_SPACEDIM];
-        for (int i=0; i<AMREX_SPACEDIM; ++i) {
-            inv_2dx[i] = 1.0 / (2.0 * dx_arr[i]);
-        }
-
-        amrex::Real sum_integrand_tensor_comp[AMREX_SPACEDIM][AMREX_SPACEDIM];
-        for (int i = 0; i < AMREX_SPACEDIM; ++i) {
-            for (int j = 0; j < AMREX_SPACEDIM; ++j) {
-                sum_integrand_tensor_comp[i][j] = 0.0;
-            }
-        }
-
-    #ifdef AMREX_USE_OMP
-    #pragma omp parallel reduction(+:sum_integrand_tensor_comp)
-    #endif
-        for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box& bx = mfi.validbox();
-            amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
-            amrex::Array4<const amrex::Real> const chi_x_arr = mf_chi_x_in.const_array(mfi);
-            amrex::Array4<const amrex::Real> const chi_y_arr = mf_chi_y_in.const_array(mfi);
-            amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3) ?
-                                                               mf_chi_z_in.const_array(mfi) :
-                                                               mf_chi_x_in.const_array(mfi); // Dummy for 2D
-
-            amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp] (int i, int j, int k) noexcept
-            {
-                if (mask_arr(i,j,k,0) == 1) {
-                    amrex::Real grad_chi_x[AMREX_SPACEDIM] = {0.0};
-                    amrex::Real grad_chi_y[AMREX_SPACEDIM] = {0.0};
-                    amrex::Real grad_chi_z[AMREX_SPACEDIM] = {0.0};
-
-                    grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0];
-                    grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1];
-                    if (AMREX_SPACEDIM == 3) grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2];
-
-                    grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0];
-                    grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1];
-                    if (AMREX_SPACEDIM == 3) grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2];
-
-                    if (AMREX_SPACEDIM == 3) {
-                        grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0];
-                        grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1];
-                        grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2];
-                    }
-
-                    sum_integrand_tensor_comp[0][0] += (grad_chi_x[0] + 1.0);
-                    sum_integrand_tensor_comp[0][1] += grad_chi_y[0];
-                    sum_integrand_tensor_comp[1][0] += grad_chi_x[1];
-                    sum_integrand_tensor_comp[1][1] += (grad_chi_y[1] + 1.0);
-
-                    if (AMREX_SPACEDIM == 3) {
-                        sum_integrand_tensor_comp[0][2] += grad_chi_z[0];
-                        sum_integrand_tensor_comp[2][0] += grad_chi_x[2];
-                        sum_integrand_tensor_comp[1][2] += grad_chi_z[1];
-                        sum_integrand_tensor_comp[2][1] += grad_chi_y[2];
-                        sum_integrand_tensor_comp[2][2] += (grad_chi_z[2] + 1.0);
-                    }
-                }
-            });
-        }
-        for (int r = 0; r < AMREX_SPACEDIM; ++r) {
-            for (int c = 0; c < AMREX_SPACEDIM; ++c) {
-                amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp[r][c]);
-            }
-        }
-        amrex::Long N_total_cells_in_domain = geom.Domain().numPts(); // Use domain, not REV
-        if (N_total_cells_in_domain > 0) {
-            for (int l_idx = 0; l_idx < AMREX_SPACEDIM; ++l_idx) {
-                for (int m_idx = 0; m_idx < AMREX_SPACEDIM; ++m_idx) {
-                    Deff_tensor[l_idx][m_idx] = sum_integrand_tensor_comp[l_idx][m_idx] / static_cast<amrex::Real>(N_total_cells_in_domain);
-                }
-            }
-        } else {
-             if (amrex::ParallelDescriptor::IOProcessor() && verbose_level > 0) {
-                amrex::Warning("Total cells in domain is zero, D_eff cannot be calculated.");
-             }
-        }
-         if (verbose_level > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  [TestCalcDeff] Raw summed D_xx: " << sum_integrand_tensor_comp[0][0]
-                            << ", N_total_cells: " << N_total_cells_in_domain << std::endl;
+    amrex::Real Deff_tensor[AMREX_SPACEDIM][AMREX_SPACEDIM],
+    const amrex::MultiFab& mf_chi_x_in,
+    const amrex::MultiFab& mf_chi_y_in,
+    const amrex::MultiFab& mf_chi_z_in,
+    const amrex::iMultiFab& active_mask,
+    const amrex::Geometry& geom,
+    int verbose_level)
+{
+    BL_PROFILE("calculate_Deff_tensor_homogenization_test_sign_corrected"); // Profile name updated
+    for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+        for (int j = 0; j < AMREX_SPACEDIM; ++j) {
+            Deff_tensor[i][j] = 0.0;
         }
     }
-} // end anonymous namespace for test helpers
+    AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1);
+    AMREX_ASSERT(mf_chi_y_in.nGrow() >= 1);
+    if (AMREX_SPACEDIM == 3) {
+        AMREX_ASSERT(mf_chi_z_in.isDefined() && mf_chi_z_in.nGrow() >= 1); // Conditional assert
+    }
+
+    const amrex::Real* dx_arr = geom.CellSize();
+    amrex::Real inv_2dx[AMREX_SPACEDIM];
+    for (int i=0; i<AMREX_SPACEDIM; ++i) {
+        inv_2dx[i] = 1.0 / (2.0 * dx_arr[i]);
+    }
+
+    amrex::Real sum_integrand_tensor_comp[AMREX_SPACEDIM][AMREX_SPACEDIM];
+    for (int i = 0; i < AMREX_SPACEDIM; ++i) {
+        for (int j = 0; j < AMREX_SPACEDIM; ++j) {
+            sum_integrand_tensor_comp[i][j] = 0.0;
+        }
+    }
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel reduction(+:sum_integrand_tensor_comp)
+#endif
+    for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
+        const amrex::Box& bx = mfi.validbox();
+        amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
+        amrex::Array4<const amrex::Real> const chi_x_arr = mf_chi_x_in.const_array(mfi);
+        amrex::Array4<const amrex::Real> const chi_y_arr = mf_chi_y_in.const_array(mfi);
+        amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3 && mf_chi_z_in.isDefined()) ? // Check if defined
+                                                           mf_chi_z_in.const_array(mfi) :
+                                                           mf_chi_x_in.const_array(mfi); // Dummy for 2D or if mf_chi_z_in not fully defined
+
+        amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp] (int i, int j, int k) noexcept
+        {
+            if (mask_arr(i,j,k,0) == 1) { // If D_material = 1 in this cell (pore)
+                amrex::Real grad_chi_x[AMREX_SPACEDIM] = {0.0};
+                amrex::Real grad_chi_y[AMREX_SPACEDIM] = {0.0};
+                amrex::Real grad_chi_z[AMREX_SPACEDIM] = {0.0};
+
+                // Gradient of chi_x: ∇χ_x
+                grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0]; // ∂χ_x/∂x
+                grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1]; // ∂χ_x/∂y
+                if (AMREX_SPACEDIM == 3) grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2]; // ∂χ_x/∂z
+
+                // Gradient of chi_y: ∇χ_y
+                grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0]; // ∂χ_y/∂x
+                grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1]; // ∂χ_y/∂y
+                if (AMREX_SPACEDIM == 3) grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2]; // ∂χ_y/∂z
+
+                if (AMREX_SPACEDIM == 3) {
+                    // Gradient of chi_z: ∇χ_z
+                    grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0]; // ∂χ_z/∂x
+                    grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1]; // ∂χ_z/∂y
+                    grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2]; // ∂χ_z/∂z
+                }
+
+                // Accumulate for D_eff_LM = < δ_LM - ∂χ_M/∂ξ_L >
+                // L is row index (0=x, 1=y, 2=z), M is col index
+
+                // D_eff_xx (L=0, M=0): (1 - ∂χ_x/∂x)
+                sum_integrand_tensor_comp[0][0] += (1.0 - grad_chi_x[0]); // <<< SIGN CHANGE HERE
+                // D_eff_xy (L=0, M=1): (0 - ∂χ_y/∂x)
+                sum_integrand_tensor_comp[0][1] += (    - grad_chi_y[0]); // <<< SIGN CHANGE HERE
+                // D_eff_yx (L=1, M=0): (0 - ∂χ_x/∂y)
+                sum_integrand_tensor_comp[1][0] += (    - grad_chi_x[1]); // <<< SIGN CHANGE HERE
+                // D_eff_yy (L=1, M=1): (1 - ∂χ_y/∂y)
+                sum_integrand_tensor_comp[1][1] += (1.0 - grad_chi_y[1]); // <<< SIGN CHANGE HERE
+
+                if (AMREX_SPACEDIM == 3) {
+                    // D_eff_xz (L=0, M=2): (0 - ∂χ_z/∂x)
+                    sum_integrand_tensor_comp[0][2] += (    - grad_chi_z[0]); // <<< SIGN CHANGE HERE
+                    // D_eff_zx (L=2, M=0): (0 - ∂χ_x/∂z)
+                    sum_integrand_tensor_comp[2][0] += (    - grad_chi_x[2]); // <<< SIGN CHANGE HERE
+                    // D_eff_yz (L=1, M=2): (0 - ∂χ_z/∂y)
+                    sum_integrand_tensor_comp[1][2] += (    - grad_chi_z[1]); // <<< SIGN CHANGE HERE
+                    // D_eff_zy (L=2, M=1): (0 - ∂χ_y/∂z)
+                    sum_integrand_tensor_comp[2][1] += (    - grad_chi_y[2]); // <<< SIGN CHANGE HERE
+                    // D_eff_zz (L=2, M=2): (1 - ∂χ_z/∂z)
+                    sum_integrand_tensor_comp[2][2] += (1.0 - grad_chi_z[2]); // <<< SIGN CHANGE HERE
+                }
+            }
+        });
+    }
+        for (int r = 0; r < AMREX_SPACEDIM; ++r) {
+        for (int c = 0; c < AMREX_SPACEDIM; ++c) {
+            amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp[r][c]);
+        }
+    }
+    amrex::Long N_total_cells_in_domain = geom.Domain().numPts();
+    if (N_total_cells_in_domain > 0) {
+        for (int l_idx = 0; l_idx < AMREX_SPACEDIM; ++l_idx) {
+            for (int m_idx = 0; m_idx < AMREX_SPACEDIM; ++m_idx) {
+                Deff_tensor[l_idx][m_idx] = sum_integrand_tensor_comp[l_idx][m_idx] / static_cast<amrex::Real>(N_total_cells_in_domain);
+            }
+        }
+    } else {
+         if (amrex::ParallelDescriptor::IOProcessor() && verbose_level > 0) {
+            amrex::Warning("Total cells in domain is zero, D_eff cannot be calculated.");
+         }
+    }
+     if (verbose_level > 1 && amrex::ParallelDescriptor::IOProcessor()) {
+         amrex::Print() << "  [TestCalcDeff SIGN CORRECTED] Raw summed (1-dchi_x_dx): " << sum_integrand_tensor_comp[0][0]
+                        << ", N_total_cells: " << N_total_cells_in_domain << std::endl;
+    }
+}
 
 
 int main (int argc, char* argv[])
