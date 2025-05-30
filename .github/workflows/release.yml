@@ -1,4 +1,4 @@
-name: Build and Release Singularity Container (TESTING ON BUILD BRANCH)
+name: Build and Release Singularity Container
 
 # Trigger the workflow on pushes to the 'build' branch for testing,
 # or manually via workflow_dispatch.
