@@ -175,7 +175,7 @@ namespace { // Anonymous namespace for test-local helpers
                         << ", N_total_cells: " << N_total_cells_in_domain << std::endl;
     }
 }
-
+}
 
 int main (int argc, char* argv[])
 {
