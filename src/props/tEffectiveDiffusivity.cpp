@@ -26,23 +26,6 @@
 
 namespace { // Anonymous namespace for test-local helpers
 
-    // Helper function to manually sum active cells in an iMultiFab (for debugging sum())
-    long ManualSumIMultiFab(const amrex::iMultiFab& imf, int component, int active_value) {
-        long total_active_cells = 0;
-        for (amrex::MFIter mfi(imf, false); mfi.isValid(); ++mfi) {
-            const amrex::Box& vbox = mfi.validbox();
-            amrex::Array4<const int> const arr = imf.const_array(mfi);
-            long local_s = 0;
-            amrex::LoopOnCpu(vbox, [&](int i, int j, int k){
-                if(arr(i,j,k,component) == active_value) local_s++;
-            });
-            total_active_cells += local_s;
-        }
-        amrex::ParallelDescriptor::ReduceLongSum(total_active_cells);
-        return total_active_cells;
-    }
-
-
     OpenImpala::Direction stringToDirection(const std::string& dir_str) {
         std::string lower_dir_str = dir_str;
         std::transform(lower_dir_str.begin(), lower_dir_str.end(), lower_dir_str.begin(),
@@ -74,7 +57,7 @@ namespace { // Anonymous namespace for test-local helpers
     const amrex::MultiFab& mf_chi_x_in,
     const amrex::MultiFab& mf_chi_y_in,
     const amrex::MultiFab& mf_chi_z_in,
-    const amrex::iMultiFab& active_mask, // This mask should have 0 ghost cells for this calculation
+    const amrex::iMultiFab& active_mask, 
     const amrex::Geometry& geom,
     int verbose_level)
 {
@@ -84,12 +67,12 @@ namespace { // Anonymous namespace for test-local helpers
             Deff_tensor[i][j] = 0.0;
         }
     }
-    AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1); // Chi fields need ghost cells for gradient
+    AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1); 
     AMREX_ASSERT(mf_chi_y_in.nGrow() >= 1);
     if (AMREX_SPACEDIM == 3) {
         AMREX_ASSERT(mf_chi_z_in.isDefined() && mf_chi_z_in.nGrow() >= 1); 
     }
-    AMREX_ASSERT(active_mask.nGrow() == 0); // active_mask for D_eff calc should not have ghosts
+    AMREX_ASSERT(active_mask.nGrow() == 0); 
 
     const amrex::Real* dx_arr = geom.CellSize();
     amrex::Real inv_2dx[AMREX_SPACEDIM];
@@ -109,7 +92,7 @@ namespace { // Anonymous namespace for test-local helpers
 #endif
     for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& bx = mfi.tilebox(); // Iterate over tilebox (valid cells of active_mask)
+        const amrex::Box& bx = mfi.tilebox(); 
         amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
         amrex::Array4<const amrex::Real> const chi_x_arr = mf_chi_x_in.const_array(mfi);
         amrex::Array4<const amrex::Real> const chi_y_arr = mf_chi_y_in.const_array(mfi);
@@ -228,7 +211,8 @@ int main (int argc, char* argv[])
             amrex::Print() << "----------------------------------------------\n\n";
         }
 
-        // --- Setup for FillBoundary Test (using original periodic geom) ---
+        // --- FillBoundary Test Block (Commented out as it served its purpose) ---
+        /*
         amrex::Geometry geom_orig_periodic; 
         amrex::BoxArray ba_fb_test;       
         amrex::DistributionMapping dm_fb_test; 
@@ -247,7 +231,7 @@ int main (int argc, char* argv[])
         dm_fb_test.define(ba_fb_test);
 
         amrex::iMultiFab mf_fb_test(ba_fb_test, dm_fb_test, 1, 1); 
-        mf_fb_test.setVal(0); // Explicitly set all to 0 first.
+        mf_fb_test.setVal(0); 
 
         long calculated_expected_sum_fb_test = 0;
         for (amrex::MFIter mfi(mf_fb_test); mfi.isValid(); ++mfi) {
@@ -286,7 +270,7 @@ int main (int argc, char* argv[])
             amrex::Print() << "DEBUG FillBoundary Test: Sum of valid cells AFTER FillBoundary (using mf.sum())= " << sum_after_fb_mfsum << std::endl;
         }
 
-        long manual_sum_after_fb = ManualSumIMultiFab(mf_fb_test, 0, 1); // Use helper
+        long manual_sum_after_fb = ::ManualSumIMultiFab(mf_fb_test, 0, 1); // Use helper in anon namespace
         if (amrex::ParallelDescriptor::IOProcessor()) {
             amrex::Print() << "DEBUG FillBoundary Test: Manual sum of valid cells AFTER FillBoundary = " << manual_sum_after_fb << std::endl;
             if (sum_after_fb_mfsum != manual_sum_after_fb) {
@@ -298,8 +282,9 @@ int main (int argc, char* argv[])
                  amrex::Print() << "DEBUG FillBoundary Test: Manual sum of valid cells UNCHANGED by FillBoundary." << std::endl;
             }
         }
-        // --- End of FillBoundary Test ---
         // if (amrex::ParallelDescriptor::IOProcessor()) amrex::Abort("Stopping after FillBoundary test");
+        */
+        // --- End of FillBoundary Test Block ---
 
 
         // --- Actual Simulation Setup ---
@@ -320,7 +305,7 @@ int main (int argc, char* argv[])
                                             amrex::Real(domain_box_main.length(1)),
                                             amrex::Real(domain_box_main.length(2)))});
             
-            amrex::Array<int, AMREX_SPACEDIM> is_periodic_sim{AMREX_D_DECL(1, 1, 1)}; 
+            amrex::Array<int, AMREX_SPACEDIM> is_periodic_sim{AMREX_D_DECL(1, 1, 1)}; // Main sim is periodic
             
             if (amrex::ParallelDescriptor::IOProcessor() && verbose > 1) { 
                  amrex::Print() << "  MAIN SIM: Setting geom to be "
@@ -407,7 +392,7 @@ int main (int argc, char* argv[])
                 amrex::Print() << "\n--- Calculating D_eff Tensor from Converged Chi Fields ---\n";
             }
 
-            amrex::iMultiFab active_mask_for_deff(ba_main_sim, dm_main_sim, 1, 0); // 0 ghost cells
+            amrex::iMultiFab active_mask_for_deff(ba_main_sim, dm_main_sim, 1, 0); 
             #ifdef AMREX_USE_OMP
             #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
             #endif
@@ -452,13 +437,14 @@ int main (int argc, char* argv[])
                 }
 
                 for (int d=0; d < AMREX_SPACEDIM; ++d) {
-                    // Relaxed check: D_eff components should be positive.
-                    // The D_eff/D_material < 1 check is only valid if porosity is also < 1 and
-                    // there are no unusual geometric enhancements (which is typically not the case for diffusion).
                     if (Deff_tensor_vals[d][d] < 0.0) { 
                         amrex::Warning("D_eff diagonal component D_" + std::to_string(d) + std::to_string(d) +
                                        " is negative: " + std::to_string(Deff_tensor_vals[d][d]));
                          test_passed_overall = false; 
+                    } else if (Deff_tensor_vals[d][d] >= 1.0 && verbose > 0) { // Only warn if verbose
+                        amrex::Print() << "  INFO: D_eff diagonal component D_" + std::to_string(d) + std::to_string(d) +
+                                       " is >= 1.0: " + std::to_string(Deff_tensor_vals[d][d]) + 
+                                       " (This might be plausible depending on definition and problem scale)." << std::endl;
                     }
                 }
             }
