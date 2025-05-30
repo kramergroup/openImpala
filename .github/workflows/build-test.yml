@@ -6,7 +6,7 @@ on:
   push:
     # Trigger on pushes to these specific branches
     branches:
-      - main
+      - master
       - working
       - build
       - 'makefile' # Include makefile branch trigger
