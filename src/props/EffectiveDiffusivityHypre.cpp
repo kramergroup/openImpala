@@ -65,6 +65,22 @@ namespace {
     constexpr int istn_py = 4;
     constexpr int istn_mz = 5;
     constexpr int istn_pz = 6;
+
+    // Helper function to manually sum active cells in an iMultiFab
+    long ManualSumActiveCells(const amrex::iMultiFab& imf, int component, int active_value) {
+        long total_active_cells = 0;
+        for (amrex::MFIter mfi(imf, false); mfi.isValid(); ++mfi) {
+            const amrex::Box& vbox = mfi.validbox();
+            amrex::Array4<const int> const arr = imf.const_array(mfi);
+            long local_s = 0;
+            amrex::LoopOnCpu(vbox, [&](int i, int j, int k){
+                if(arr(i,j,k,component) == active_value) local_s++;
+            });
+            total_active_cells += local_s;
+        }
+        amrex::ParallelDescriptor::ReduceLongSum(total_active_cells);
+        return total_active_cells;
+    }
 }
 
 namespace OpenImpala {
@@ -87,7 +103,7 @@ EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
     const amrex::BoxArray& ba,
     const amrex::DistributionMapping& dm,
     const amrex::iMultiFab& mf_phase_input,
-    const int phase_id_arg, // Renamed argument to avoid confusion with member
+    const int phase_id_arg, 
     const OpenImpala::Direction dir_of_chi_k,
     const SolverType solver_type,
     const std::string& resultspath,
@@ -123,24 +139,11 @@ EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
         amrex::Print() << "  DEBUG HYPRE: Constructor received phase_id_arg (argument) = " << phase_id_arg << std::endl;
     }
 
-    long initial_phase_count_debug = 0;
-    // Manual sum for debug clarity
-    for (amrex::MFIter mfi(m_mf_phase_original, false); mfi.isValid(); ++mfi) {
-        const amrex::Box& bx = mfi.validbox();
-        amrex::Array4<const int> const phase_arr = m_mf_phase_original.const_array(mfi);
-        long local_count = 0;
-        amrex::LoopOnCpu(bx, [&] (int i, int j, int k) noexcept {
-            if (phase_arr(i,j,k,0) == m_phase_id) {
-                local_count++;
-            }
-        });
-        initial_phase_count_debug += local_count;
-    }
-    amrex::ParallelDescriptor::ReduceLongSum(initial_phase_count_debug);
+    long initial_phase_count_debug = ManualSumActiveCells(m_mf_phase_original, 0, m_phase_id);
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  DEBUG HYPRE: Number of cells in input m_mf_phase_original matching m_phase_id (" << m_phase_id
-                       << ") before generateActiveMask: " << initial_phase_count_debug << std::endl;
+                       << ") before generateActiveMask (manual sum): " << initial_phase_count_debug << std::endl;
         amrex::Print() << "  DEBUG HYPRE: m_mf_phase_original nComp: " << m_mf_phase_original.nComp()
                        << ", nGrow: " << m_mf_phase_original.nGrow() << std::endl;
     }
@@ -161,17 +164,19 @@ EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
     m_mf_active_mask.setVal(cell_inactive);
     generateActiveMask(); 
 
-    // Use standard AMReX sum now that we've confirmed its behavior in this context via manual sums
-    long num_active_cells = m_mf_active_mask.sum(MaskComp, true); // Sum over valid cells only, local sum
-    amrex::ParallelDescriptor::ReduceLongSum(num_active_cells); // Reduce to get global sum
+    long num_active_cells = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()){
-        amrex::Print() << "  Active mask generated. Number of active cells (from m_mf_active_mask.sum()): " << num_active_cells << std::endl;
+        amrex::Print() << "  Active mask generated. Number of active cells (Manually summed in constructor from m_mf_active_mask): " << num_active_cells << std::endl;
+        // For comparison, print the iMultiFab::sum() result as well
+        long num_active_cells_imfsum = m_mf_active_mask.sum(MaskComp, true);
+        amrex::ParallelDescriptor::ReduceLongSum(num_active_cells_imfsum);
+        amrex::Print() << "  Active mask generated. Number of active cells (from m_mf_active_mask.sum()): " << num_active_cells_imfsum << std::endl;
     }
 
-    if (num_active_cells == 0) {
+    if (num_active_cells == 0) { // Logic uses the manual sum
         if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "WARNING: No active cells found for phase_id " << m_phase_id
+            amrex::Print() << "WARNING: No active cells found (manual sum) for phase_id " << m_phase_id
                            << ". HYPRE setup will be skipped." << std::endl;
         }
         m_converged = true;
@@ -208,20 +213,8 @@ void EffectiveDiffusivityHypre::generateActiveMask()
     BL_PROFILE("EffectiveDiffusivityHypre::generateActiveMask");
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        long phase_original_sum_debug_again = 0;
-        for (amrex::MFIter mfi_po(m_mf_phase_original, false); mfi_po.isValid(); ++mfi_po) {
-            const amrex::Box& bx_po_valid = mfi_po.validbox();
-            amrex::Array4<const int> const phase_arr_po = m_mf_phase_original.const_array(mfi_po);
-            long local_count_po = 0;
-            amrex::LoopOnCpu(bx_po_valid, [&] (int i, int j, int k) noexcept {
-                if (phase_arr_po(i,j,k,0) == m_phase_id) { 
-                    local_count_po++;
-                }
-            });
-            phase_original_sum_debug_again += local_count_po;
-        }
-        amrex::ParallelDescriptor::ReduceLongSum(phase_original_sum_debug_again);
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Sum of m_mf_phase_original for m_phase_id (" << m_phase_id
+        long phase_original_sum_debug_again = ManualSumActiveCells(m_mf_phase_original, 0, m_phase_id);
+        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Manual sum of m_mf_phase_original for m_phase_id (" << m_phase_id
                        << ") *immediately before* mask generation loop: " << phase_original_sum_debug_again << std::endl;
     }
 
@@ -244,8 +237,8 @@ void EffectiveDiffusivityHypre::generateActiveMask()
         
         const int local_m_phase_id = m_phase_id;
 
-        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor() && mfi.LocalIndex() == 0 && amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
-            amrex::Print() << "  DEBUG HYPRE: generateActiveMask MFIter loop is using local_m_phase_id = " << local_m_phase_id
+        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor() && mfi.LocalIndex() == 0 && amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) {
+             amrex::Print() << "  DEBUG HYPRE: generateActiveMask MFIter loop (verbose > 1) is using local_m_phase_id = " << local_m_phase_id
                            << " (from m_phase_id = " << m_phase_id << ") for comparison." << std::endl;
         }
 
@@ -259,19 +252,18 @@ void EffectiveDiffusivityHypre::generateActiveMask()
             if (should_be_active) {
                 mask_arr(i,j,k,MaskComp) = cell_active;
                 if (valid_bx_for_debug.contains(i,j,k)) { 
-                    if (original_phase_val == 1) phase1_became_active_count_debug++; // Assuming phase 1 is the target for this counter
+                    if (original_phase_val == local_m_phase_id) phase1_became_active_count_debug++; // Count if it was the target phase and became active
                 }
             } else {
                 mask_arr(i,j,k,MaskComp) = cell_inactive;
                  if (valid_bx_for_debug.contains(i,j,k)) { 
-                    if (original_phase_val == 1) phase1_became_inactive_count_debug++; // Assuming phase 1 is the target
+                    if (original_phase_val == local_m_phase_id) phase1_became_inactive_count_debug++; // Count if it was the target phase but became inactive
                  }
             }
 
             if (valid_bx_for_debug.contains(i,j,k)) {
-                // Specifically check if a cell that should be inactive (original phase 0 when target is 1) becomes active
-                if (original_phase_val == 0 && local_m_phase_id == 1 && mask_arr(i,j,k,MaskComp) == cell_active) {
-                    phase0_became_active_count_debug++;
+                if (original_phase_val != local_m_phase_id && mask_arr(i,j,k,MaskComp) == cell_active) { // If it wasn't the target phase but became active
+                    phase0_became_active_count_debug++; // Use this counter for "wrongly activated"
                 }
             }
         });
@@ -286,19 +278,22 @@ void EffectiveDiffusivityHypre::generateActiveMask()
     amrex::ParallelDescriptor::ReduceLongSum(phase1_became_inactive_val);
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { 
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally phase 0 that BECAME ACTIVE: "
+        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally NOT m_phase_id that BECAME ACTIVE: "
                        << phase0_became_active_val << std::endl;
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally phase 1 that BECAME ACTIVE: "
+        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally m_phase_id that BECAME ACTIVE: "
                        << phase1_became_active_val << std::endl;
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally phase 1 that BECAME INACTIVE: "
+        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally m_phase_id that BECAME INACTIVE: "
                        << phase1_became_inactive_val << std::endl;
     }
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        long active_mask_sum_before_fillboundary = m_mf_active_mask.sum(MaskComp, true);
-        amrex::ParallelDescriptor::ReduceLongSum(active_mask_sum_before_fillboundary);
+        long active_mask_sum_manual_before_fb = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
+        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Manual sum of m_mf_active_mask (valid cells) *after* loop, *before* FillBoundary: "
+                       << active_mask_sum_manual_before_fb << std::endl;
+        long active_mask_sum_imf_before_fb = m_mf_active_mask.sum(MaskComp, true); // local sum
+        amrex::ParallelDescriptor::ReduceLongSum(active_mask_sum_imf_before_fb);
         amrex::Print() << "  DEBUG HYPRE generateActiveMask: m_mf_active_mask.sum() (valid cells) *after* loop, *before* FillBoundary: "
-                       << active_mask_sum_before_fillboundary << std::endl;
+                       << active_mask_sum_imf_before_fb << std::endl;
     }
 
     if (m_mf_active_mask.nGrow() > 0) {
@@ -311,10 +306,14 @@ void EffectiveDiffusivityHypre::generateActiveMask()
         }
 
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { 
-            long active_mask_sum_after_fillboundary = m_mf_active_mask.sum(MaskComp, true);
-            amrex::ParallelDescriptor::ReduceLongSum(active_mask_sum_after_fillboundary);
+            long active_mask_sum_manual_after_fb = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
+            amrex::Print() << "  DEBUG HYPRE generateActiveMask: Manual sum of m_mf_active_mask (valid cells) *immediately after* FillBoundary: "
+                           << active_mask_sum_manual_after_fb << std::endl;
+            long active_mask_sum_imf_after_fb = m_mf_active_mask.sum(MaskComp, true); // local sum
+            amrex::ParallelDescriptor::ReduceLongSum(active_mask_sum_imf_after_fb);
             amrex::Print() << "  DEBUG HYPRE generateActiveMask: m_mf_active_mask.sum() (valid cells) *immediately after* FillBoundary: "
-                           << active_mask_sum_after_fillboundary << std::endl;
+                           << active_mask_sum_imf_after_fb << std::endl;
+
         }
     } else {
          if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
@@ -455,7 +454,7 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
     const int current_dir_int = static_cast<int>(m_dir_solve);
 
     if (m_mf_active_mask.nGrow() > 0) {
-        m_mf_active_mask.FillBoundary(m_geom.periodicity());
+        m_mf_active_mask.FillBoundary(m_geom.periodicity()); // This is crucial for Fortran
     }
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
@@ -535,17 +534,18 @@ bool EffectiveDiffusivityHypre::solve()
 {
     BL_PROFILE("EffectiveDiffusivityHypre::solve");
 
-    long num_active_cells_in_solve = m_mf_active_mask.sum(MaskComp, true);
-    amrex::ParallelDescriptor::ReduceLongSum(num_active_cells_in_solve);
-
+    long num_active_cells_in_solve = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  DEBUG HYPRE solve: num_active_cells_in_solve (from m_mf_active_mask.sum()) = " << num_active_cells_in_solve << std::endl;
+        amrex::Print() << "  DEBUG HYPRE solve: num_active_cells_in_solve (Manually summed) = " << num_active_cells_in_solve << std::endl;
+        long num_active_cells_imfsum_solve = m_mf_active_mask.sum(MaskComp, true);
+        amrex::ParallelDescriptor::ReduceLongSum(num_active_cells_imfsum_solve);
+        amrex::Print() << "  DEBUG HYPRE solve: num_active_cells_in_solve (from m_mf_active_mask.sum()) = " << num_active_cells_imfsum_solve << std::endl;
     }
 
-    if (num_active_cells_in_solve == 0) {
+    if (num_active_cells_in_solve == 0) { // Logic uses the manual sum
         if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "EffectiveDiffusivityHypre::solve: Skipping HYPRE solve as no active cells were found for phase "
+            amrex::Print() << "EffectiveDiffusivityHypre::solve: Skipping HYPRE solve as no active cells were found (manual sum) for phase "
                            << m_phase_id << std::endl;
         }
         m_mf_chi.setVal(0.0); 
