@@ -1,8 +1,85 @@
-FILENAME     = "SampleData_2Phase.tif"    # Filename
-DATA_PATH    = "/openImpala/data/"        # Directory path of input data, use ~ if you want to point it to your home directory i.e. "~/openImpala/data/" 
-RESULTS_PATH = "~/openimpalaresults/"     # Directory path for results, use ~ for HOMEDIR
-DIRECTION    = 0                          # Direction of diffusion calculation, x=0, y=1, z=2, all=3
-BOX_SIZE     = 32                         # 1D size of computational box
-EPS          = 1e-10                      # Tolerance of calculation
-HDF5_DATASET = "t$F/channel$C"            # Optional: HDF5 dataset path
-TIFF_STACK   = 100                        # Optional: Number of tiff files in stack
+# ============================================================
+# Inputs for Diffusion.cpp Tortuosity Calculation
+# Refactored based on review.
+# Oxford, UK - Tue Mar 25 2025 10:26 PM GMT
+# ============================================================
+
+# --- Input File Configuration ---
+
+# Input filename (TIFF, DAT, RAW, HDF5). Mandatory.
+filename = "data/SampleData_2Phase.tif"
+
+# Path prefix for the input file (optional, '.' means relative to executable location)
+data_path = "."
+
+# --- Reader Specific Parameters (Uncomment and set as needed) ---
+
+# Required for HDF5: Path to dataset within HDF5 file
+# hdf5_dataset = "exchange/data"
+
+# Required if reading a sequence of TIFFs instead of multi-directory TIFF
+# tiff_stack_size = 100
+
+# Required if reading RAW or DAT files (Reader needs dimensions & type)
+# raw_width     = 100
+# raw_height    = 100
+# raw_depth     = 100
+# raw_datatype  = "UINT8" # e.g., UINT8, UINT16_LE, FLOAT32_BE etc. (See RawReader.H)
+
+# --- Analysis Parameters ---
+
+# Phase ID within the (potentially thresholded) input data to analyze
+# Usually 0 or 1 for binary data resulting from thresholding.
+phase_id = 1
+
+# Threshold value used by readers (TiffReader, DatReader, HDF5Reader)
+# Adjust based on input data type/range (e.g., 127.5 for uint8 0-255)
+threshold_value = 1.0 # Example: check if appropriate for SampleData_2Phase.tif
+
+# Direction(s) for tortuosity calculation
+# Options: "X", "Y", "Z", "All", or space-separated list like "X Z"
+direction = "All"
+
+# --- Solver Configuration (for TortuosityHypre) ---
+
+# Solver type: Jacobi, GMRES, FlexGMRES, PCG (Case-insensitive likely)
+solver_type = "FlexGMRES"
+
+# Relative tolerance for the HYPRE solver convergence
+hypre_eps = 1e-9
+
+# Maximum iterations for the HYPRE solver
+hypre_maxiter = 200
+
+# --- Grid Configuration ---
+
+# AMReX maximum grid size (1D) - affects parallel decomposition efficiency
+box_size = 32
+
+# --- Output Configuration ---
+
+# Directory for results (output file, optional plotfiles).
+# '~/' at the beginning will be expanded to the user's $HOME directory.
+results_dir = "~/openimpala_results/" # Ensure trailing slash if desired
+
+# Name for the output text file containing summary results
+output_filename = "diffusion_results.txt"
+
+# Flag to enable writing detailed plotfiles from solver (0=No, 1=Yes)
+write_plotfile = 0
+
+# --- Comparison/Test Parameters (Optional) ---
+
+# Tolerance for comparing calculated vs expected floating-point results (if provided)
+tolerance = 1e-9
+
+# Expected Volume Fraction (optional, for testing) - uncomment and set value if needed
+# expected_vf = 0.5123
+
+# Expected Tortuosity (optional, for testing) - uncomment and set value if needed
+# expected_tau = 1.956
+
+# --- Control ---
+
+# Verbosity level (0=minimal, 1=standard, >1 for more debug output)
+verbose = 1

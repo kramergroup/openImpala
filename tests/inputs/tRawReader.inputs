@@ -1,0 +1,12 @@
+# tests/inputs/tRawReader.inputs
+
+rawfile = data/SampleData_2Phase_stack_3d_uint8.raw
+width   = 100  # Replace with actual width if different
+height  = 100  # Replace with actual height if different
+depth   = 100  # Replace with actual depth if different
+datatype = UINT8 # Replace with actual type if different (e.g., INT16_LE)
+
+# Optional parameters (can be omitted to use defaults in .cpp)
+threshold = 0.5
+# box_size = 32
+# write_plotfile = 0

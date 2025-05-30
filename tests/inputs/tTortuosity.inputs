@@ -1,0 +1,32 @@
+# Input file for tTortuosity test using PFMG preconditioner
+
+# Path to the input image file used to define the geometry/phases.
+tifffile = data/SampleData_2Phase_stack_3d_1bit.tif
+
+# --- Tortuosity specific parameters ---
+
+phase_id = 0          # ID of the phase to calculate tortuosity for
+direction = X         # X, Y, or Z
+# Solver type (Options: Jacobi, GMRES, FlexGMRES, PCG, BiCGSTAB)
+solver = FlexGMRES     # Set solver to test BiCGSTAB + PFMG combination
+
+# --- Solver Controls ---
+# Allow sufficient iterations for the potentially more effective PFMG preconditioner.
+# Tolerance remains reasonably loose for testing speed.
+hypre.maxiter = 1000     # Max solver iterations
+hypre.eps = 1e-10        # Solver relative tolerance
+
+# --- Test Verbosity ---
+# High verbosity for detailed HYPRE/solver output during debugging.
+verbose = 2
+
+# Optional output file (usually not needed for automated tests)
+# output_file = tort.txt
+
+tortuosity.remspot_passes = 0 
+
+# Expected values for verification (Optional - set if known for this specific test setup)
+# If uncommented, ensures the calculated value matches expectation.
+# expected_vf = 0.382848 # Value from previous log run
+# expected_tau = ???.??  # Replace ???.?? with the known correct value if available
+# tolerance = 1e-5       # Tolerance for comparing expected vs actual values (adjust as needed)
