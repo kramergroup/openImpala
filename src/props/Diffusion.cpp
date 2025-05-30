@@ -317,9 +317,9 @@ int main (int argc, char* argv[])
                 amrex::Print() << "  REV Plotfiles: " << (rev_write_plotfiles ? "Yes" : "No") << std::endl;
             }
 
-            std::vector<int> rev_actual_sizes_vec; // Renamed to avoid conflict
+            std::vector<int> rev_actual_sizes_vec; 
             std::stringstream ss_rev_sizes(rev_sizes_str);
-            int size_val_loop; // Renamed
+            int size_val_loop; 
             while (ss_rev_sizes >> size_val_loop) rev_actual_sizes_vec.push_back(size_val_loop);
 
             if (rev_actual_sizes_vec.empty()) {
@@ -336,11 +336,11 @@ int main (int argc, char* argv[])
 
                 for (int s_idx = 0; s_idx < rev_num_samples; ++s_idx) {
                     for (int current_rev_size_target : rev_actual_sizes_vec) {
-                        amrex::IntVect seed_lo_global; // Changed from seed_center to seed_lo_global
+                        amrex::IntVect seed_lo_global; 
                         for(int d=0; d<AMREX_SPACEDIM; ++d) {
                             int min_coord = domain_box_full.smallEnd(d);
                             int max_coord = domain_box_full.bigEnd(d) - (current_rev_size_target -1) ;
-                            if (min_coord > max_coord) { 
+                            if (min_coord > max_coord || current_rev_size_target > domain_box_full.length(d)) { 
                                 seed_lo_global[d] = domain_box_full.smallEnd(d); 
                             } else {
                                 std::uniform_int_distribution<> distr(min_coord, max_coord);
@@ -348,7 +348,8 @@ int main (int argc, char* argv[])
                             }
                         }
                         
-                        amrex::Box bx_rev_global = amrex::Box(seed_lo_global, seed_lo_global + amrex::IntVect(current_rev_size_target - 1));
+                        amrex::Box bx_rev_global_const = amrex::Box(seed_lo_global, seed_lo_global + amrex::IntVect(current_rev_size_target - 1));
+                        amrex::Box bx_rev_global = bx_rev_global_const; // Make a non-const copy
                         bx_rev_global &= domain_box_full; 
 
                         if (bx_rev_global.isEmpty() || bx_rev_global.longside() < 8) { 
@@ -366,7 +367,9 @@ int main (int argc, char* argv[])
                                            << ", Actual REV Box (global): " << bx_rev_global << std::endl;
                         }
                         
-                        amrex::Box domain_rev_relative = bx_rev_global.shift(-bx_rev_global.smallEnd()); // CORRECTED
+                        amrex::Box domain_rev_relative_temp = bx_rev_global; 
+                        amrex::Box domain_rev_relative = domain_rev_relative_temp.shift(-bx_rev_global.smallEnd());
+                        
                         amrex::Geometry geom_rev;
                         amrex::RealBox rb_rev({AMREX_D_DECL(0.0,0.0,0.0)},
                                               {AMREX_D_DECL(amrex::Real(domain_rev_relative.length(0)), 
@@ -381,26 +384,12 @@ int main (int argc, char* argv[])
 
                         amrex::iMultiFab mf_phase_rev(ba_rev, dm_rev, 1, 1); 
                         
-                        amrex::BoxArray ba_source_temp(bx_rev_global); 
-                        amrex::DistributionMapping dm_source_temp(ba_source_temp); 
-                        amrex::iMultiFab mf_source_subvolume(ba_source_temp, dm_source_temp, 1, mf_phase_full.nGrow());
-                        mf_source_subvolume.ParallelCopy(mf_phase_full, 0, 0, 1, mf_phase_full.nGrow(), mf_phase_full.nGrow());
-                        
-                        mf_phase_rev.setVal(0); 
-                        for (amrex::MFIter mfi_rev(mf_phase_rev); mfi_rev.isValid(); ++mfi_rev) {
-                            const amrex::Box& rev_vbox_local = mfi_rev.validbox(); 
-                            amrex::Box rev_vbox_global_map = rev_vbox_local.shift(bx_rev_global.smallEnd()); // CORRECTED
-
-                            for (amrex::MFIter mfi_src(mf_source_subvolume); mfi_src.isValid(); ++mfi_src) {
-                                if (mfi_src.validbox().intersects(rev_vbox_global_map)) { // Compare global boxes
-                                    const amrex::Box& overlap_global = mfi_src.validbox() & rev_vbox_global_map;
-                                    amrex::Box overlap_local_dest = overlap_global.shift(-bx_rev_global.smallEnd()); // CORRECTED
-                                    amrex::Box overlap_local_src  = overlap_global.shift(-mfi_src.validbox().smallEnd()); // CORRECTED
-
-                                    mf_phase_rev[mfi_rev].copy(mf_source_subvolume[mfi_src], overlap_local_src, 0, overlap_local_dest, 0, 1);
-                                }
-                            }
-                        }
+                        // Efficiently copy the subvolume for the REV
+                        // The mf_phase_full is already defined on ba_full, dm_full
+                        // We need to copy the region bx_rev_global from mf_phase_full
+                        // into mf_phase_rev, which is defined on domain_rev_relative.
+                        mf_phase_rev.setVal(0); // Initialize destination
+                        mf_phase_rev.ParallelCopy(mf_phase_full, bx_rev_global.smallEnd(), domain_rev_relative.smallEnd(), 0, 0, 1, mf_phase_full.nGrowVect(), mf_phase_rev.nGrowVect());
                         mf_phase_rev.FillBoundary(geom_rev.periodicity());
 
 
@@ -559,9 +548,9 @@ int main (int argc, char* argv[])
 
                     if (amrex::ParallelDescriptor::IOProcessor()) {
                         amrex::Print() << "Full Domain Effective Diffusivity Tensor D_eff / D_material:\n";
-                        for (int r_print = 0; r_print < AMREX_SPACEDIM; ++r_print) { // Renamed loop var
+                        for (int r_print = 0; r_print < AMREX_SPACEDIM; ++r_print) { 
                             amrex::Print() << "  [";
-                            for (int c_print = 0; c_print < AMREX_SPACEDIM; ++c_print) { // Renamed loop var
+                            for (int c_print = 0; c_print < AMREX_SPACEDIM; ++c_print) { 
                                 amrex::Print() << std::scientific << std::setprecision(8) << Deff_tensor_full[r_print][c_print]
                                                << (c_print == AMREX_SPACEDIM - 1 ? "" : ", ");
                             }
