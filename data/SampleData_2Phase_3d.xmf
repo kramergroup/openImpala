@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>
+<Xdmf Version="3.0">
+  <Domain>
+    <Grid Name="StructureGrid" GridType="Uniform">
+      <Topology TopologyType="3DCoRectMesh" Dimensions="100 100 100"/>
+      <Geometry GeometryType="ORIGIN_DXDYDZ">
+        <DataItem Name="Origin" Format="XML" Dimensions="3">0 0 0</DataItem>
+        <DataItem Name="Spacing" Format="XML" Dimensions="3">1 1 1</DataItem>
+      </Geometry>
+      <Attribute Name="Phase" AttributeType="Scalar" Center="Cell">
+        <DataItem Format="HDF" Dimensions="100 100 100" NumberType="UChar" Precision="1" >
+          SampleData_2Phase_3d.hdf5:/image
+        </DataItem>
+      </Attribute>
+    </Grid>
+  </Domain>
+</Xdmf>

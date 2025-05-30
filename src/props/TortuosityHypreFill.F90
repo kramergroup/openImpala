@@ -1,261 +1,331 @@
 module tortuosity_poisson_3d_module
 
   use amrex_fort_module, only : amrex_real
-  
+  use amrex_error_module, only : amrex_abort
+
   implicit none
+
+  private ! Default module visibility to private
+
+  public :: tortuosity_fillmtx ! Make only the subroutine public
 
   integer, parameter :: direction_x = 0
   integer, parameter :: direction_y = 1
   integer, parameter :: direction_z = 2
 
+  ! Component index for phase data in MultiFab 'p' (Fortran 1-based)
+  ! NOTE: Phase array 'p' might become optional if mask fully determines activity
+  integer, parameter :: comp_phase = 1
+  ! Component index for mask data (assuming 1 component in mask FAB)
+  integer, parameter :: comp_mask = 1
+
+  ! Stencil indices (0-based, matching C++ HYPRE_StructStencilSetElement order)
+  integer, parameter :: istn_c  = 0 ! Center
+  integer, parameter :: istn_mx = 1 ! -X (West)
+  integer, parameter :: istn_px = 2 ! +X (East)
+  integer, parameter :: istn_my = 3 ! -Y (South)
+  integer, parameter :: istn_py = 4 ! +Y (North)
+  integer, parameter :: istn_mz = 5 ! -Z (Bottom)
+  integer, parameter :: istn_pz = 6 ! +Z (Top)
+  integer, parameter :: nstencil = 7
+
+  ! Activity mask values (assuming C++ convention)
+  integer, parameter :: cell_inactive = 0
+  integer, parameter :: cell_active = 1
+
+  ! Tolerance for floating point comparisons
+  real(amrex_real), parameter :: small_real = 1.0e-15_amrex_real
+
 contains
 
   ! ::: -----------------------------------------------------------
-  ! ::: This routine fills the hypre matrix coefficients for the 
-  ! ::: interior of the domain.
-  ! ::: 
-  ! ::: INPUTS/OUTPUTS:
-  ! ::: a           <=  array to fill for matrix coefficients
-  ! ::: rhs         <=  array to fill for rhs
-  ! ::: nval         => number of poins (size of rhs / size of a is nval*nstencil (7))
-  ! ::: p            => array with phase indices
-  ! ::: bxlo, bxhi   => dimensions of valid box 
-  ! ::: domlo,domhi  => index extent of problem domain
-  ! ::: vlo,vhi      => boundary values at lo/hi end of flow
-  ! ::: phase        => index of the active phase
-  ! ::: dir          => direction of flow ()
-  ! :::
-  ! ::: ALGORITHM:
-  ! ::: Go over domain and adjust stencil for blocked and mixed cells.
-  ! :::
-  ! :::    Fluid cells:
-  ! :::      fill all points with a normal seven point poisson stencil
-  ! :::
-  ! :::      0 = x[i-1] - 2 x[i] + x[i+1]
-  ! :::        + y[i-1] - 2 y[i] + y[i+1]
-  ! :::        + z[i-1] - 2 z[i] + z[i-1]
-  ! :::
-  ! :::                 c  -x  +x  -y  +y  -z  +z
-  ! :::      stencil:   6  -1  -1  -1  -1  -1  -1
-  ! :::
-  ! :::      We have used x,y,z to designate the direction. They all refer to the same field:
-  ! ::: 
-  ! :::        phi[i] = x[i] = y[i] = z[i]
-  ! :::
-  ! :::    Blocked cells:
-  ! :::      simply reduce the stencil to a simple phi(i) = 0 condition.
-  ! :::
-  ! :::                 c  -x  +x  -y  +y  -z  +z
-  ! :::      stencil:   1   0   0   0   0   0   0
-  ! :::
-  ! :::    Mixed cells:
-  ! :::      We do this by sustracting from the default stencil when we have a
-  ! :::      cell that is touching a boundary cell. Example: 
-  ! :::
-  ! :::      a boundary in the x direction at the low side:
-  ! :::      
-  ! :::                 c  -x  +x  -y  +y  -z  +z
-  ! :::      default:   6  -1  -1  -1  -1  -1  -1
-  ! :::      substact:  1  -1 
-  ! :::                 -------------------------
-  ! :::      result     5   0  -1  -1  -1  -1  -1
-  ! :::
-  ! :::      This changes the x-direction equation from
-  ! :::        
-  ! :::         0 = x[i+1] - 2 x[i] + x[i-1]
-  ! ::: 
-  ! :::      to
-  ! ::: 
-  ! :::         0 = x[i+1] - x[i]
-  ! :::
-  ! :::      which is a normal upwind gradient for zero flux
-  ! :::
-  ! :::    Domain boundary cells:
-  ! :::      At the inlet and outlet in flow direction, von Neumann conditions are used
-  ! :::      to fix the concentration. 
-  ! :::
-  ! :::         v_lo = x[0]     v_hi = x[max]
-  ! :::
-  ! :::      The kernel and right-hand side are set accordingly
-  ! :::        
-  ! :::                 c  -x  +x  -y  +y  -z  +z
-  ! :::      neumann:   1   0   0   0   0   0   0
-  ! :::
-  ! :::      Domain boundaries parallel to the flow direction have Dirichlet boundary 
-  ! :::      conditions and are configured like internal Dirichlet conditions (see above).
+  ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
+  ! ::: Uses an activity_mask (1=active, 0=inactive) derived from
+  ! ::: geometric analysis (e.g., percolation check) to determine
+  ! ::: which cells participate in the solve.
+  ! ::: Inactive cells are decoupled (Aii=1, Aij=0, bi=0, xinit=0).
+  ! ::: Active cells have the Laplacian assembled only considering
+  ! ::: connections to other active cells (Neumann at boundary with inactive).
+  ! ::: Dirichlet BCs overwrite at domain boundaries perp. to flow.
+  ! ::: Includes detailed debugging output if debug_print_level >= 3.
   ! ::: -----------------------------------------------------------
+  subroutine tortuosity_fillmtx(a, rhs, xinit, nval, &
+                                p, p_lo, p_hi, &                ! Phase (Optional if mask is sufficient)
+                                active_mask, mask_lo, mask_hi, & ! Activity Mask
+                                bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase_unused, dir, &
+                                debug_print_level) bind(c)       ! <<< NEW Debug Level Argument
+                                ! Renamed 'phase' arg to 'phase_unused' as mask should control activity
 
-  subroutine tortuosity_fillmtx(a, rhs, xinit, nval, p, p_lo, p_hi, &
-                                bxlo, bxhi, domlo, domhi, vlo, vhi, phase, dir) bind(c)
+    ! Argument declarations
+    integer,            intent(in)  :: nval
+    real(amrex_real),   intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval)
+    integer,            intent(in)  :: p_lo(3), p_hi(3)
+    integer,            intent(in)  :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), *)
+    integer,            intent(in)  :: mask_lo(3), mask_hi(3)        ! <<< NEW
+    integer,            intent(in)  :: active_mask(mask_lo(1):mask_hi(1), & ! <<< NEW
+                                                     mask_lo(2):mask_hi(2), &
+                                                     mask_lo(3):mask_hi(3)) !, *) ! Assume 1 component
+    integer,            intent(in)  :: bxlo(3), bxhi(3)
+    integer,            intent(in)  :: domlo(3), domhi(3)
+    real(amrex_real),   intent(in)  :: dxinv(3) ! [1/dx^2, 1/dy^2, 1/dz^2]
+    real(amrex_real),   intent(in)  :: vlo, vhi
+    integer,            intent(in)  :: phase_unused, dir ! phase_id is no longer directly used for matrix construction
+                                                       ! Mask determines activity
+    integer,            intent(in)  :: debug_print_level          ! <<< NEW
 
-    integer,          intent(in   ) :: nval
-    real(amrex_real), intent(inout) :: a(nval*7), rhs(nval), xinit(nval)
-    integer,          intent(in   ) :: p_lo(3), p_hi(3), bxlo(3), bxhi(3), domlo(3), domhi(3)
-    integer,          intent(in   ) :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2),p_lo(3):p_hi(3))
-    integer,          intent(in   ) :: phase, dir
-    real(amrex_real), intent(in   ) :: vlo, vhi
+    ! Local variables
+    integer :: i, j, k, m_idx, stencil_idx_start, s_idx
+    integer :: len_x, len_y, len_z, expected_nval
+    real(amrex_real) :: diag_val, coeff_x, coeff_y, coeff_z
+    real(amrex_real) :: domain_extent, factor
+    logical :: on_dirichlet_boundary
+    integer :: neighbor_mask_val ! To store neighbor mask value
+    ! Debugging variables
+    logical :: print_this_cell, near_boundary, has_inactive_neighbor
+    real(amrex_real) :: off_diag_sum, diag_ratio
+    character(len=200) :: fmt_str ! Format string for printing
 
-    integer :: i,j,k,m,u
-    integer :: idx(7)
+    ! Calculate box dimensions based on bxlo/bxhi (the valid box)
+    len_x = bxhi(1) - bxlo(1) + 1
+    len_y = bxhi(2) - bxlo(2) + 1
+    len_z = bxhi(3) - bxlo(3) + 1
+    expected_nval = len_x * len_y * len_z
 
-    m = 1
+    ! Pre-calculate stencil coefficients based on grid spacing
+    coeff_x = dxinv(1)
+    coeff_y = dxinv(2)
+    coeff_z = dxinv(3)
 
-    do k = bxlo(3),bxhi(3) 
+    ! Check consistency between expected nval and passed nval (only if box not empty)
+    if (expected_nval > 0 .and. expected_nval /= nval) then
+       call amrex_abort("tortuosity_fillmtx: nval mismatch.")
+    end if
+    if (nval <= 0) return ! Nothing to do for empty box
+
+    ! Loop over the valid box defined by bxlo/bxhi
+    do k = bxlo(3), bxhi(3)
       do j = bxlo(2), bxhi(2)
         do i = bxlo(1), bxhi(1)
 
-          ! Domain interior
-          ! ---------------
+          ! Calculate indices
+          m_idx = (i - bxlo(1)) + (j - bxlo(2)) * len_x + (k - bxlo(3)) * len_x * len_y + 1
+          stencil_idx_start = nstencil * (m_idx - 1)
 
-          idx = (/ (7*(m-1)+u,u=1,7) /)
+          ! Initialize debugging flags for this cell
+          print_this_cell = .false.
+          near_boundary = .false.
+          has_inactive_neighbor = .false.
 
-          if ( p(i,j,k) .ne. phase) then
-          
-            ! Constant value in non fluidic phase
-            ! p[x,y,z]  =  0
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = 0.0
-
-          else 
-            
-            ! Set default seven point stencil
-            a(idx) = (/6.0,-1.0,-1.0,-1.0,-1.0,-1.0,-1.0/)
-            rhs(m) = 0.0
-            
-            ! Change to one-sided Dirichlet condition at phase boundaries
-            if ( (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (i .ne. domlo(1)+1) .and. (i .ne. domhi(1)-1))  then
-              a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
-            end if
-            if ( (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. domhi(1)) .and. (i .ne. domlo(1)) &
-            .and. (i .ne. domlo(1)+1) .and. (i .ne. domhi(1)-1)) then
-              a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
-            end if
-            if ( (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) &
-            .and. (j .ne. domlo(2)+1) .and. (j .ne. domhi(2)-1) ) then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
-            end if
-            if ( (p(i,j+1,k) .ne. p(i,j,k)) .and. (j .ne. domhi(2)) .and. (j .ne. domlo(2)) &
-            .and. (j .ne. domlo(2)+1) .and. (j .ne. domhi(2)-1) ) then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
-            end if
-            if ( (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. domlo(3)) .and. (k .ne. domhi(3)) &
-            .and. (k .ne. domlo(3)+1) .and. (k .ne. domhi(3)-1)) then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
-            end if 
-            if ( (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) &
-            .and. (k .ne. domhi(3)-1) .and. (k .ne. domlo(3)+1)) then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
-            end if
-            if ( (i .eq. domlo(1)+1) .and. (p(i,j,k) .ne. p(domhi(1)-1,j,k))  )  then
-              a(idx) = a(idx) + (/-1.0,1.0,0.0,0.0,0.0,0.0,0.0/)
-            end if
-            if ( (i .eq. domhi(1)-1) .and. (p(i,j,k) .ne. p(domlo(1)+1,j,k))  )  then
-              a(idx) = a(idx) + (/-1.0,0.0,1.0,0.0,0.0,0.0,0.0/)
-            end if
-            if ( (j .eq. domlo(2)+1) .and. (p(i,j,k) .ne. p(i,domhi(2)-1,k))  )  then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,1.0,0.0,0.0,0.0/)
-            end if
-            if ( (j .eq. domhi(2)-1) .and. (p(i,j,k) .ne. p(i,domlo(2)+1,k))  )  then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,1.0,0.0,0.0/)
-            end if
-            if ( (k .eq. domlo(3)+1) .and. (p(i,j,k) .ne. p(i,j,domhi(3)-1))  )  then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,1.0,0.0/)
-            end if
-            if ( (k .eq. domhi(3)-1) .and. (p(i,j,k) .ne. p(i,j,domlo(3)+1))  )  then
-              a(idx) = a(idx) + (/-1.0,0.0,0.0,0.0,0.0,0.0,1.0/)
-            end if
-            
-          end if 
-          ! Fixed Boundaries 
-          ! ----------------
-
-          ! Change to Neumann condition at domain boundaries
-          ! perpendicular to flow direction
-         if ( p(i,j,k) .eq. phase) then
-          if ( ( dir .eq. direction_x ) .and. (p(i-1,j,k) .ne. p(i,j,k)) .and. (i .ne. bxlo(1)) .and. (i .ne. bxhi(1)) &
-            .and. (i .ne. bxlo(1)+1) .and. (i .ne. bxhi(1)-1) .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (i .ne. bxlo(1)-1) .and. (i .ne. bxhi(1)+1) ) then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
-          end if
-          if ( ( dir .eq. direction_x ) .and. (p(i+1,j,k) .ne. p(i,j,k)) .and. (i .ne. bxhi(1)) .and. (i .ne. bxlo(1)) &
-            .and. (i .ne. bxlo(1)+1) .and. (i .ne. bxhi(1)-1) .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (i .ne. bxlo(1)-1) .and. (i .ne. bxhi(1)+1) ) then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
-          end if
-          if ( ( dir .eq. direction_y ) .and. (p(i,j-1,k) .ne. p(i,j,k)) .and. (j .ne. bxlo(2)) .and. (j .ne. bxhi(2)) &
-            .and. (j .ne. bxlo(2)+1) .and. (j .ne. bxhi(2)-1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (j .ne. bxlo(2)-1) .and. (j .ne. bxhi(2)+1)) then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
-          end if
-          if ( ( dir .eq. direction_y ) .and. (p(i,j+1,k) .ne. p(i,j,k)) .and. (j .ne. bxhi(2)) .and. (j .ne. bxlo(2)) &
-            .and. (j .ne. bxlo(2)+1) .and. (j .ne. bxhi(2)-1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (k .ne. domhi(3)) .and. (k .ne. domlo(3)) .and. (j .ne. bxlo(2)-1) .and. (j .ne. bxhi(2)+1)) then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
-          end if
-          if ( ( dir .eq. direction_z ) .and. (p(i,j,k-1) .ne. p(i,j,k)) .and. (k .ne. bxlo(3)) .and. (k .ne. bxhi(3)) &
-            .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxlo(3)+1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) .and. (k .ne. bxhi(3)+1) .and. (k .ne. bxlo(3)-1)) then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vhi
-          end if
-          if ( ( dir .eq. direction_z ) .and. (p(i,j,k+1) .ne. p(i,j,k)) .and. (k .ne. bxhi(3)) .and. (k .ne. bxlo(3))  &
-            .and. (k .ne. bxhi(3)-1) .and. (k .ne. bxlo(3)+1) .and. (i .ne. domlo(1)) .and. (i .ne. domhi(1)) &
-            .and. (j .ne. domlo(2)) .and. (j .ne. domhi(2)) .and. (k .ne. bxhi(3)+1) .and. (k .ne. bxlo(3)-1)) then
-            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-            rhs(m) = vlo
-          end if
-          
-!          if ( ( dir .eq. direction_x ) .and. (i .eq. domlo(1)+1) .and. (p(i,j,k) .ne. p(domhi(1)-1,j,k))  )  then
-!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-!            rhs(m) = vhi
-!          end if
-!          if ( ( dir .eq. direction_x ) .and. (i .eq. domhi(1)-1) .and. (p(i,j,k) .ne. p(domlo(1)+1,j,k))  )  then
-!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-!            rhs(m) = vlo
-!          end if
-!          if ( ( dir .eq. direction_y ) .and. (j .eq. domlo(2)+1) .and. (p(i,j,k) .ne. p(i,domhi(2)-1,k))  )  then
-!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-!            rhs(m) = vhi
-!          end if
-!          if ( ( dir .eq. direction_y ) .and. (j .eq. domhi(2)-1) .and. (p(i,j,k) .ne. p(i,domlo(2)+1,k))  )  then
-!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-!            rhs(m) = vlo
-!          end if
-!          if ( ( dir .eq. direction_z ) .and. (k .eq. domlo(3)+1) .and. (p(i,j,k) .ne. p(i,j,domhi(3)-1))  )  then
-!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-!            rhs(m) = vhi
-!          end if
-!          if ( ( dir .eq. direction_z ) .and. (k .eq. domhi(3)-1) .and. (p(i,j,k) .ne. p(i,j,domlo(3)+1))  )  then
-!            a(idx) = (/1.0,0.0,0.0,0.0,0.0,0.0,0.0/)
-!            rhs(m) = vlo
-!          end if
-          
-        end if
-          
-          ! Initial guess
-          ! -------------
-          
-          if ( dir .eq. direction_x ) then
-            xinit(m) = vlo + (vhi - vlo) * (i-domlo(1)) / (domhi(1)-domlo(1)) 
-          end if
-          if ( dir .eq. direction_y ) then
-            xinit(m) = vlo + (vhi - vlo) * (j-domlo(2)) / (domhi(2)-domlo(2))
-          end if
-          if ( dir .eq. direction_z ) then
-            xinit(m) = vlo + (vhi - vlo) * (k-domlo(3)) / (domhi(3)-domlo(3))
+          ! --- Check Activity Mask ---
+          if ( active_mask(i,j,k) == cell_inactive ) then
+              ! --- Apply Explicit Decoupling for INACTIVE cells ---
+              a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+              a(stencil_idx_start + istn_c) = 1.0_amrex_real
+              rhs(m_idx)  = 0.0_amrex_real
+              xinit(m_idx) = 0.0_amrex_real
+              cycle ! Skip to next (i,j,k)
           end if
 
-          m = m + 1
+          ! --- If we reach here, cell (i,j,k) is ACTIVE ---
+          ! --- Assemble stencil based on ACTIVE neighbors ---
+          diag_val = 0.0_amrex_real
+          a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Initialize stencil row to zero
 
-        end do
-      end do
-    end do
+          ! -X face
+          neighbor_mask_val = active_mask(i-1, j, k) ! Assumes mask has ghost cells filled
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_mx) = -coeff_x
+             diag_val = diag_val + coeff_x
+          else
+             has_inactive_neighbor = .true. ! Active cell next to inactive cell
+          end if
+          ! +X face
+          neighbor_mask_val = active_mask(i+1, j, k)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_px) = -coeff_x
+             diag_val = diag_val + coeff_x
+          else
+             has_inactive_neighbor = .true.
+          end if
+          ! -Y face
+          neighbor_mask_val = active_mask(i, j-1, k)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_my) = -coeff_y
+             diag_val = diag_val + coeff_y
+          else
+             has_inactive_neighbor = .true.
+          end if
+          ! +Y face
+          neighbor_mask_val = active_mask(i, j+1, k)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_py) = -coeff_y
+             diag_val = diag_val + coeff_y
+          else
+             has_inactive_neighbor = .true.
+          end if
+          ! -Z face
+          neighbor_mask_val = active_mask(i, j, k-1)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_mz) = -coeff_z
+             diag_val = diag_val + coeff_z
+          else
+             has_inactive_neighbor = .true.
+          end if
+           ! +Z face
+          neighbor_mask_val = active_mask(i, j, k+1)
+          if ( neighbor_mask_val == cell_active ) then
+             a(stencil_idx_start + istn_pz) = -coeff_z
+             diag_val = diag_val + coeff_z
+          else
+             has_inactive_neighbor = .true.
+          end if
 
-  end subroutine
+          ! Set the diagonal entry
+          a(stencil_idx_start + istn_c) = diag_val
 
-end module
+          ! Check for zero diagonal in an active cell (should only happen if isolated, which mask should prevent)
+          if ( abs(diag_val) < small_real ) then
+             ! This case should ideally not be reached if the mask is correct,
+             ! but as a safety, decouple it.
+             write(*,'(A,3I5)') "WARNING: Zero diagonal in ACTIVE cell at (i,j,k)=", i,j,k
+             a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+             a(stencil_idx_start + istn_c) = 1.0_amrex_real
+             rhs(m_idx)  = 0.0_amrex_real
+             ! Keep xinit as calculated below or set to 0? Set to 0 for safety.
+             xinit(m_idx) = 0.0_amrex_real
+             cycle ! Skip Dirichlet overwrite if we decouple here
+          else
+             ! Set default RHS for active interior cells
+             rhs(m_idx) = 0.0_amrex_real
+          endif
+
+
+          ! --- Overwrite stencil for Domain Boundaries Perpendicular to Flow (Dirichlet) ---
+          ! This applies AFTER the active cell logic. If an active cell is on the
+          ! Dirichlet boundary, its equation becomes Aii=1, bi=V.
+          on_dirichlet_boundary = .false.
+          if ( dir == direction_x ) then
+              if ( i == domlo(1) ) then
+                  a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+                  a(stencil_idx_start + istn_c) = 1.0_amrex_real
+                  rhs(m_idx) = vlo
+                  on_dirichlet_boundary = .true.
+              else if ( i == domhi(1) ) then
+                  a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+                  a(stencil_idx_start + istn_c) = 1.0_amrex_real
+                  rhs(m_idx) = vhi
+                  on_dirichlet_boundary = .true.
+              end if
+          else if ( dir == direction_y ) then
+              if ( j == domlo(2) ) then
+                  a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+                  a(stencil_idx_start + istn_c) = 1.0_amrex_real
+                  rhs(m_idx) = vlo
+                  on_dirichlet_boundary = .true.
+              else if ( j == domhi(2) ) then
+                  a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+                  a(stencil_idx_start + istn_c) = 1.0_amrex_real
+                  rhs(m_idx) = vhi
+                  on_dirichlet_boundary = .true.
+              end if
+          else if ( dir == direction_z ) then
+              if ( k == domlo(3) ) then
+                  a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+                  a(stencil_idx_start + istn_c) = 1.0_amrex_real
+                  rhs(m_idx) = vlo
+                  on_dirichlet_boundary = .true.
+              else if ( k == domhi(3) ) then
+                  a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
+                  a(stencil_idx_start + istn_c) = 1.0_amrex_real
+                  rhs(m_idx) = vhi
+                  on_dirichlet_boundary = .true.
+              end if
+          end if ! End of Dirichlet BC overwrite
+
+          ! --- Calculate Initial Guess (Only for ACTIVE cells) ---
+          ! Note: Inactive cells had xinit set to 0 already
+          ! If an active cell was decoupled due to safety check, xinit was also set to 0
+          if ( abs(a(stencil_idx_start + istn_c) - 1.0_amrex_real) > small_real .or. on_dirichlet_boundary ) then
+             ! Calculate linear ramp only for active cells not safety-decoupled
+             if ( dir == direction_x ) then
+                 domain_extent = domhi(1) - domlo(1)
+                 if (abs(domain_extent) < small_real) then
+                   factor = 0.0_amrex_real
+                 else
+                   factor = 1.0_amrex_real / domain_extent
+                 end if
+                 xinit(m_idx) = vlo + (vhi - vlo) * (i - domlo(1)) * factor
+             else if ( dir == direction_y ) then
+                 domain_extent = domhi(2) - domlo(2)
+                 if (abs(domain_extent) < small_real) then
+                   factor = 0.0_amrex_real
+                 else
+                   factor = 1.0_amrex_real / domain_extent
+                 end if
+                 xinit(m_idx) = vlo + (vhi - vlo) * (j - domlo(2)) * factor
+             else if ( dir == direction_z ) then
+                 domain_extent = domhi(3) - domlo(3)
+                 if (abs(domain_extent) < small_real) then
+                   factor = 0.0_amrex_real
+                 else
+                   factor = 1.0_amrex_real / domain_extent
+                 end if
+                 xinit(m_idx) = vlo + (vhi - vlo) * (k - domlo(3)) * factor
+             else ! Should not happen
+                 xinit(m_idx) = 0.5_amrex_real * (vlo + vhi)
+             end if
+          endif ! End check for calculating xinit ramp
+
+          ! --- ** Debug Printing Section (Activated if debug_print_level >= 3) ** ---
+          if (debug_print_level >= 3) then
+              ! Check if cell is near physical boundary (within 1 cell)
+              near_boundary = (i <= domlo(1)+1 .or. i >= domhi(1)-1 .or. &
+                               j <= domlo(2)+1 .or. j >= domhi(2)-1 .or. &
+                               k <= domlo(3)+1 .or. k >= domhi(3)-1)
+
+              ! Decide whether to print: Print if near boundary OR if it's an interface cell
+              print_this_cell = near_boundary .or. has_inactive_neighbor
+
+              if (print_this_cell) then
+                  ! Calculate sum of absolute off-diagonals for ratio calculation
+                  off_diag_sum = 0.0_amrex_real
+                  do s_idx = 1, nstencil-1 ! Skip diagonal index istn_c = 0
+                      off_diag_sum = off_diag_sum + abs(a(stencil_idx_start + s_idx))
+                  end do
+
+                  ! Calculate diagonal dominance ratio
+                  diag_val = a(stencil_idx_start + istn_c) ! Get the final diagonal value
+                  if (abs(off_diag_sum) < small_real) then
+                      if (abs(diag_val) < small_real) then
+                          diag_ratio = 1.0_amrex_real ! Define as 1 if both are zero (e.g., isolated active cell?)
+                      else
+                          diag_ratio = 1.0e+30_amrex_real ! Indicate infinitely dominant if off-diag is zero
+                      end if
+                  else
+                      diag_ratio = abs(diag_val) / off_diag_sum
+                  end if
+
+                  ! Print Information
+                  write(*,'(A,3I5,A,L1,A,L1,A,L1)') "DEBUG Stencil at (", i, j, k, ")", &
+                      " Active=", .true., & ! We know it's active if we reached here
+                      " Dirichlet=", on_dirichlet_boundary, &
+                      " Interface=", has_inactive_neighbor
+                  write(*,'(A,ES12.4)')   "  RHS =", rhs(m_idx)
+                  write(*,'(A,7(ES12.4,1X))') "  Stencil (C, -X,+X, -Y,+Y, -Z,+Z) =" , &
+                                             a(stencil_idx_start + istn_c), a(stencil_idx_start + istn_mx), &
+                                             a(stencil_idx_start + istn_px), a(stencil_idx_start + istn_my), &
+                                             a(stencil_idx_start + istn_py), a(stencil_idx_start + istn_mz), &
+                                             a(stencil_idx_start + istn_pz)
+                  write(*,'(A,ES12.4, A,ES12.4)') "  Diag Dominance Ratio (|Aii|/Sum|Aij|) =", diag_ratio, &
+                                                 " (OffDiagSum =", off_diag_sum, ")"
+              end if !(print_this_cell)
+          end if !(debug_print_level >= 3)
+          ! --- ** End Debug Printing Section ** ---
+
+        end do ! i
+      end do ! j
+    end do ! k
+
+  end subroutine tortuosity_fillmtx
+
+end module tortuosity_poisson_3d_module

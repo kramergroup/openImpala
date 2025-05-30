@@ -1,0 +1,3 @@
+filename = data/SampleData_2Phase_3d.hdf5
+hdf5_dataset = image
+threshold_value = 0.5
