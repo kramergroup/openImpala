@@ -78,6 +78,12 @@ public:
     bool readFile(const std::string& filename);
 
     /**
+     * @brief Checks if the reader has successfully read metadata and data.
+     * @return true if data is read and the reader is operational, false otherwise.
+     */
+    bool isRead() const;
+
+    /**
      * @brief Fills an iMultiFab based on thresholding the raw data.
      *
      * Iterates through the cells of the iMultiFab 'mf'. For each cell (i,j,k),
