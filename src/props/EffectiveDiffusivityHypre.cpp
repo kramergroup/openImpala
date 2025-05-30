@@ -288,17 +288,21 @@ void EffectiveDiffusivityHypre::generateActiveMask()
         });
     }
     
-    amrex::ParallelDescriptor::ReduceLongSum(phase0_became_active_count_debug);
-    amrex::ParallelDescriptor::ReduceLongSum(phase1_became_active_count_debug);
-    amrex::ParallelDescriptor::ReduceLongSum(phase1_became_inactive_count_debug);
+    long phase0_became_active_val = phase0_became_active_count_debug.load();
+    long phase1_became_active_val = phase1_became_active_count_debug.load();
+    long phase1_became_inactive_val = phase1_became_inactive_count_debug.load();
+
+    amrex::ParallelDescriptor::ReduceLongSum(phase0_became_active_val);
+    amrex::ParallelDescriptor::ReduceLongSum(phase1_became_active_val);
+    amrex::ParallelDescriptor::ReduceLongSum(phase1_became_inactive_val);
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally phase 0 that BECAME ACTIVE: "
-                       << phase0_became_active_count_debug.load() << std::endl;
+                       << phase0_became_active_val << std::endl;
         amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally phase 1 that BECAME ACTIVE: "
-                       << phase1_became_active_count_debug.load() << std::endl;
+                       << phase1_became_active_val << std::endl;
         amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally phase 1 that BECAME INACTIVE: "
-                       << phase1_became_inactive_count_debug.load() << std::endl;
+                       << phase1_became_inactive_val << std::endl;
     }
 
 
@@ -485,7 +489,7 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
             valid_bx.loVect(), valid_bx.hiVect(),
             domain_for_kernel.loVect(), domain_for_kernel.hiVect(),
             m_dx.dataPtr(),
-            ¤t_dir_int,
+            &current_dir_int,
             &m_verbose
         );
 
