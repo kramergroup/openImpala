@@ -220,8 +220,8 @@ From: quay.io/rockylinux/rockylinux:8 # Consistent base image
 
     cd / # Go to a standard location like /opt or /usr/local for cloning app
     export OPENIMPALA_INSTALL_DIR=/opt/openImpala 
-    echo "Cloning OpenImpala 'working' branch into ${OPENIMPALA_INSTALL_DIR}..."
-    git clone --depth 1 --branch working https://github.com/kramergroup/openImpala.git ${OPENIMPALA_INSTALL_DIR}
+    echo "Cloning OpenImpala 'master' branch into ${OPENIMPALA_INSTALL_DIR}..."
+    git clone --depth 1 --branch master https://github.com/kramergroup/openImpala.git ${OPENIMPALA_INSTALL_DIR}
     cd ${OPENIMPALA_INSTALL_DIR}
     echo "Building OpenImpala using Makefile..."
     # Ensure Makefile uses environment variables like AMREX_HOME, HYPRE_HOME, etc.
