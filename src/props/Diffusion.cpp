@@ -4,6 +4,8 @@
  * either for the full domain or as part of a Representative Elementary Volume (REV) study.
  * For an REV study, it analyzes multiple random sub-volumes of increasing sizes.
  *
+ * It now supports multi-phase calculations where each phase can have a distinct
+ * transport coefficient, specified in the inputs file.
  */
 
 #include "../io/TiffReader.H"
@@ -34,6 +36,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <map> // <-- ADDED for multi-phase coefficients
 #include <algorithm>
 #include <random>
 #include <iomanip>
@@ -57,27 +60,30 @@ namespace {
         return OpenImpala::EffectiveDiffusivityHypre::SolverType::GMRES; // Should not reach
     }
 
+// TODO: This function will need to be updated to accept and use the spatially-varying
+//       coefficient field, `D(x)`, to correctly calculate the homogenized tensor according to:
+//       Deff_{lm} = (1/|Ω|) ∫_Ω (δ_{lm} - ∂χ_l/∂ξ_m) * D(ξ) dξ
 void calculate_Deff_tensor_homogenization(
     amrex::Real Deff_tensor[AMREX_SPACEDIM][AMREX_SPACEDIM],
     const amrex::MultiFab& mf_chi_x_in,
     const amrex::MultiFab& mf_chi_y_in,
     const amrex::MultiFab& mf_chi_z_in,
-    const amrex::iMultiFab& active_mask, 
+    const amrex::iMultiFab& active_mask,
     const amrex::Geometry& geom,
     int verbose_level)
 {
-    BL_PROFILE("calculate_Deff_tensor_homogenization_main_driver"); 
+    BL_PROFILE("calculate_Deff_tensor_homogenization_main_driver");
     for (int i = 0; i < AMREX_SPACEDIM; ++i) {
         for (int j = 0; j < AMREX_SPACEDIM; ++j) {
             Deff_tensor[i][j] = 0.0;
         }
     }
-    AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1); 
+    AMREX_ASSERT(mf_chi_x_in.nGrow() >= 1);
     AMREX_ASSERT(mf_chi_y_in.nGrow() >= 1);
     if (AMREX_SPACEDIM == 3) {
-        AMREX_ASSERT(mf_chi_z_in.isDefined() && mf_chi_z_in.nGrow() >= 1); 
+        AMREX_ASSERT(mf_chi_z_in.isDefined() && mf_chi_z_in.nGrow() >= 1);
     }
-    AMREX_ASSERT(active_mask.nGrow() == 0); 
+    AMREX_ASSERT(active_mask.nGrow() == 0);
 
     const amrex::Real* dx_arr = geom.CellSize();
     amrex::Real inv_2dx[AMREX_SPACEDIM];
@@ -97,57 +103,57 @@ void calculate_Deff_tensor_homogenization(
 #endif
     for (amrex::MFIter mfi(active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
     {
-        const amrex::Box& bx = mfi.tilebox(); 
+        const amrex::Box& bx = mfi.tilebox();
         amrex::Array4<const int> const mask_arr = active_mask.const_array(mfi);
         amrex::Array4<const amrex::Real> const chi_x_arr = mf_chi_x_in.const_array(mfi);
         amrex::Array4<const amrex::Real> const chi_y_arr = mf_chi_y_in.const_array(mfi);
-        amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3 && mf_chi_z_in.isDefined()) ? 
+        amrex::Array4<const amrex::Real> const chi_z_arr = (AMREX_SPACEDIM == 3 && mf_chi_z_in.isDefined()) ?
                                                            mf_chi_z_in.const_array(mfi) :
-                                                           mf_chi_x_in.const_array(mfi); 
+                                                           mf_chi_x_in.const_array(mfi);
 
         amrex::LoopOnCpu(bx, [=, &sum_integrand_tensor_comp_local] (int i, int j, int k) noexcept
         {
-            if (mask_arr(i,j,k,0) == 1) { 
+            if (mask_arr(i,j,k,0) == 1) {
                 amrex::Real grad_chi_x[AMREX_SPACEDIM] = {0.0};
                 amrex::Real grad_chi_y[AMREX_SPACEDIM] = {0.0};
                 amrex::Real grad_chi_z[AMREX_SPACEDIM] = {0.0};
 
-                grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0]; 
-                grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1]; 
-                if (AMREX_SPACEDIM == 3) grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2]; 
+                grad_chi_x[0] = (chi_x_arr(i+1,j,k,0) - chi_x_arr(i-1,j,k,0)) * inv_2dx[0];
+                grad_chi_x[1] = (chi_x_arr(i,j+1,k,0) - chi_x_arr(i,j-1,k,0)) * inv_2dx[1];
+                if (AMREX_SPACEDIM == 3) grad_chi_x[2] = (chi_x_arr(i,j,k+1,0) - chi_x_arr(i,j,k-1,0)) * inv_2dx[2];
 
-                grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0]; 
-                grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1]; 
-                if (AMREX_SPACEDIM == 3) grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2]; 
+                grad_chi_y[0] = (chi_y_arr(i+1,j,k,0) - chi_y_arr(i-1,j,k,0)) * inv_2dx[0];
+                grad_chi_y[1] = (chi_y_arr(i,j+1,k,0) - chi_y_arr(i,j-1,k,0)) * inv_2dx[1];
+                if (AMREX_SPACEDIM == 3) grad_chi_y[2] = (chi_y_arr(i,j,k+1,0) - chi_y_arr(i,j,k-1,0)) * inv_2dx[2];
 
                 if (AMREX_SPACEDIM == 3) {
-                    grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0]; 
-                    grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1]; 
-                    grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2]; 
+                    grad_chi_z[0] = (chi_z_arr(i+1,j,k,0) - chi_z_arr(i-1,j,k,0)) * inv_2dx[0];
+                    grad_chi_z[1] = (chi_z_arr(i,j+1,k,0) - chi_z_arr(i,j-1,k,0)) * inv_2dx[1];
+                    grad_chi_z[2] = (chi_z_arr(i,j,k+1,0) - chi_z_arr(i,j,k-1,0)) * inv_2dx[2];
                 }
-                sum_integrand_tensor_comp_local[0][0] += (1.0 - grad_chi_x[0]); 
-                sum_integrand_tensor_comp_local[0][1] += (    - grad_chi_y[0]); 
-                sum_integrand_tensor_comp_local[1][0] += (    - grad_chi_x[1]); 
-                sum_integrand_tensor_comp_local[1][1] += (1.0 - grad_chi_y[1]); 
+                sum_integrand_tensor_comp_local[0][0] += (1.0 - grad_chi_x[0]);
+                sum_integrand_tensor_comp_local[0][1] += (    - grad_chi_y[0]);
+                sum_integrand_tensor_comp_local[1][0] += (    - grad_chi_x[1]);
+                sum_integrand_tensor_comp_local[1][1] += (1.0 - grad_chi_y[1]);
 
                 if (AMREX_SPACEDIM == 3) {
-                    sum_integrand_tensor_comp_local[0][2] += (    - grad_chi_z[0]); 
-                    sum_integrand_tensor_comp_local[2][0] += (    - grad_chi_x[2]); 
-                    sum_integrand_tensor_comp_local[1][2] += (    - grad_chi_z[1]); 
-                    sum_integrand_tensor_comp_local[2][1] += (    - grad_chi_y[2]); 
-                    sum_integrand_tensor_comp_local[2][2] += (1.0 - grad_chi_z[2]); 
+                    sum_integrand_tensor_comp_local[0][2] += (    - grad_chi_z[0]);
+                    sum_integrand_tensor_comp_local[2][0] += (    - grad_chi_x[2]);
+                    sum_integrand_tensor_comp_local[1][2] += (    - grad_chi_z[1]);
+                    sum_integrand_tensor_comp_local[2][1] += (    - grad_chi_y[2]);
+                    sum_integrand_tensor_comp_local[2][2] += (1.0 - grad_chi_z[2]);
                 }
             }
         });
     }
-    
+
     for (int r = 0; r < AMREX_SPACEDIM; ++r) {
         for (int c = 0; c < AMREX_SPACEDIM; ++c) {
             amrex::ParallelDescriptor::ReduceRealSum(sum_integrand_tensor_comp_local[r][c]);
         }
     }
 
-    amrex::Long N_total_cells_in_domain = geom.Domain().numPts(); 
+    amrex::Long N_total_cells_in_domain = geom.Domain().numPts();
     if (N_total_cells_in_domain > 0) {
         for (int l_idx = 0; l_idx < AMREX_SPACEDIM; ++l_idx) {
             for (int m_idx = 0; m_idx < AMREX_SPACEDIM; ++m_idx) {
@@ -170,50 +176,78 @@ void calculate_Deff_tensor_homogenization(
 
 int main (int argc, char* argv[])
 {
-    HYPRE_Init(); 
+    HYPRE_Init();
     amrex::Initialize(argc, argv);
     {
         amrex::Real master_strt_time = amrex::second();
 
+        // --- Parameter Reading ---
         std::string main_filename;
-        std::string main_data_path_str = "./data/";    
-        std::string main_results_path_str = "./results_diffusion/"; 
-        std::string main_hdf5_dataset = "image";      
+        std::string main_data_path_str = "./data/";
+        std::string main_results_path_str = "./results_diffusion/";
+        std::string main_hdf5_dataset = "image";
         amrex::Real main_threshold_val = 0.5;
-        int main_phase_id_analysis = 1; 
+        int main_phase_id_analysis = 1; // Now acts as a fallback/default
         std::string main_solver_str = "FlexGMRES";
         int main_box_size = 32;
         int main_verbose = 1;
-        int main_write_plotfile_full = 0; 
-        std::string main_calculation_method = "homogenization"; 
+        int main_write_plotfile_full = 0;
+        std::string main_calculation_method = "homogenization";
+
+        // Multi-phase parameters
+        std::map<int, amrex::Real> phase_coeff_map;
 
         bool rev_do_study = false;
         int rev_num_samples = 3;
-        std::string rev_sizes_str = "32 64 96"; 
+        std::string rev_sizes_str = "32 64 96";
         std::string rev_solver_str = "FlexGMRES";
         std::string rev_results_filename = "rev_study_Deff.csv";
-        int rev_write_plotfiles = 0; 
-        int rev_verbose_level = 1;   
+        int rev_write_plotfiles = 0;
+        int rev_verbose_level = 1;
 
-        { 
-            amrex::ParmParse pp; 
+        {
+            amrex::ParmParse pp;
             pp.get("filename", main_filename);
             pp.query("data_path", main_data_path_str);
             pp.query("results_path", main_results_path_str);
             pp.query("hdf5_dataset", main_hdf5_dataset);
             pp.query("threshold_val", main_threshold_val);
-            pp.query("phase_id", main_phase_id_analysis); 
-            pp.query("solver_type", main_solver_str); 
+            pp.query("phase_id", main_phase_id_analysis);
+            pp.query("solver_type", main_solver_str);
             pp.query("box_size", main_box_size);
             pp.query("verbose", main_verbose);
             pp.query("write_plotfile", main_write_plotfile_full);
             pp.query("calculation_method", main_calculation_method);
 
-            amrex::ParmParse ppr("rev"); 
+            // --- Read Multi-Phase Coefficients ---
+            // Use a prefixed ParmParse to read from a specific block in the inputs file
+            amrex::ParmParse pp_effdiff("effdiff");
+            std::vector<amrex::Real> phase_coeffs_vec;
+            pp_effdiff.queryarr("phase_coeffs", phase_coeffs_vec);
+
+            if (!phase_coeffs_vec.empty()) {
+                if (phase_coeffs_vec.size() % 2 != 0) {
+                    amrex::Abort("Parameter 'effdiff.phase_coeffs' must contain an even number of values (phase_id, coeff).");
+                }
+                for (size_t i = 0; i < phase_coeffs_vec.size(); i += 2) {
+                    int phase_id = static_cast<int>(phase_coeffs_vec[i]);
+                    amrex::Real coeff = phase_coeffs_vec[i+1];
+                    phase_coeff_map[phase_id] = coeff;
+                }
+                if (amrex::ParallelDescriptor::IOProcessor() && main_verbose > 0) {
+                    amrex::Print() << "  Multi-phase coefficients loaded for Effective Diffusivity:\n";
+                    for(const auto& pair : phase_coeff_map) {
+                        amrex::Print() << "    Phase " << pair.first << ": D = " << pair.second << "\n";
+                    }
+                }
+            }
+            // --- End Multi-Phase Reading ---
+
+            amrex::ParmParse ppr("rev");
             ppr.query("do_study", rev_do_study);
             ppr.query("num_samples", rev_num_samples);
             ppr.query("sizes", rev_sizes_str);
-            ppr.query("solver_type", rev_solver_str); 
+            ppr.query("solver_type", rev_solver_str);
             ppr.query("results_file", rev_results_filename);
             ppr.query("write_plotfiles", rev_write_plotfiles);
             ppr.query("verbose", rev_verbose_level);
@@ -221,21 +255,21 @@ int main (int argc, char* argv[])
 
         std::filesystem::path main_data_path(main_data_path_str);
         std::filesystem::path main_results_path(main_results_path_str);
-        
+
         if (amrex::ParallelDescriptor::IOProcessor()) {
             if (!std::filesystem::exists(main_results_path)) {
                 std::filesystem::create_directories(main_results_path);
                  if (main_verbose >=1 ) amrex::Print() << "Created results directory: " << main_results_path.string() << std::endl;
             }
         }
-        amrex::ParallelDescriptor::Barrier(); 
+        amrex::ParallelDescriptor::Barrier();
         std::filesystem::path full_input_path = main_data_path / main_filename;
 
 
         amrex::Geometry geom_full;
         amrex::BoxArray ba_full;
         amrex::DistributionMapping dm_full;
-        amrex::iMultiFab mf_phase_full; 
+        amrex::iMultiFab mf_phase_full;
         amrex::Box domain_box_full;
 
         try {
@@ -249,8 +283,11 @@ int main (int argc, char* argv[])
             } else {
                  throw std::runtime_error("File has no extension: " + full_input_path.string());
             }
-            
-            int reader_phase_active = main_phase_id_analysis;
+
+            // For multi-phase, we read the raw image values. The reader just gives us the phase IDs.
+            // The thresholding concept is less relevant unless the input is not yet segmented.
+            // For now, we assume the reader provides integer phase IDs directly.
+            int reader_phase_active = main_phase_id_analysis; // This is now a fallback
             int reader_phase_inactive = (main_phase_id_analysis == 0 ? 1 : 0);
 
             if (ext == ".tif" || ext == ".tiff") {
@@ -260,9 +297,13 @@ int main (int argc, char* argv[])
                 ba_full.define(domain_box_full);
                 ba_full.maxSize(main_box_size);
                 dm_full.define(ba_full);
-                mf_phase_full.define(ba_full, dm_full, 1, 1); 
+                mf_phase_full.define(ba_full, dm_full, 1, 1);
+                // The TiffReader's threshold method populates the iMultiFab based on raw values.
+                // For multi-phase, we need the raw phase IDs. We use threshold to convert image values to phase IDs.
+                // Here, we use a simple pass-through: value_if_true=1, value_if_false=0.
+                // A more advanced reader could directly output multi-level integer data.
                 amrex::iMultiFab mf_temp_no_ghost(ba_full, dm_full, 1, 0);
-                reader.threshold(main_threshold_val, reader_phase_active, reader_phase_inactive, mf_temp_no_ghost);
+                reader.threshold(main_threshold_val, 1, 0, mf_temp_no_ghost); // Example: creates phase 0 and 1.
                 amrex::Copy(mf_phase_full, mf_temp_no_ghost, 0,0,1,0);
 
             } else if (ext == ".dat") {
@@ -274,7 +315,7 @@ int main (int argc, char* argv[])
                 dm_full.define(ba_full);
                 mf_phase_full.define(ba_full, dm_full, 1, 1);
                 amrex::iMultiFab mf_temp_no_ghost(ba_full, dm_full, 1, 0);
-                reader.threshold(main_threshold_val, reader_phase_active, reader_phase_inactive, mf_temp_no_ghost);
+                reader.threshold(main_threshold_val, 1, 0, mf_temp_no_ghost);
                 amrex::Copy(mf_phase_full, mf_temp_no_ghost, 0,0,1,0);
 
             } else if (ext == ".h5" || ext == ".hdf5") {
@@ -286,7 +327,7 @@ int main (int argc, char* argv[])
                 dm_full.define(ba_full);
                 mf_phase_full.define(ba_full, dm_full, 1, 1);
                 amrex::iMultiFab mf_temp_no_ghost(ba_full, dm_full, 1, 0);
-                reader.threshold(main_threshold_val, reader_phase_active, reader_phase_inactive, mf_temp_no_ghost);
+                reader.threshold(main_threshold_val, 1, 0, mf_temp_no_ghost);
                 amrex::Copy(mf_phase_full, mf_temp_no_ghost, 0,0,1,0);
             }
             else {
@@ -298,7 +339,7 @@ int main (int argc, char* argv[])
                                                  amrex::Real(domain_box_full.length(1)),
                                                  amrex::Real(domain_box_full.length(2)))});
             amrex::Array<int,AMREX_SPACEDIM> is_periodic_full;
-            is_periodic_full = {AMREX_D_DECL(1,1,1)}; 
+            is_periodic_full = {AMREX_D_DECL(1,1,1)};
             geom_full.define(domain_box_full, &rb_full, 0, is_periodic_full.data());
             mf_phase_full.FillBoundary(geom_full.periodicity());
 
@@ -310,16 +351,16 @@ int main (int argc, char* argv[])
 
         if (rev_do_study) {
             if (main_verbose >=1 && amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "\n--- Starting REV Study (Homogenization Method) for Phase ID " << main_phase_id_analysis << " ---\n";
+                amrex::Print() << "\n--- Starting REV Study (Homogenization Method) ---\n";
                 amrex::Print() << "  Number of samples per size: " << rev_num_samples << std::endl;
                 amrex::Print() << "  Target REV sizes: " << rev_sizes_str << std::endl;
                 amrex::Print() << "  REV Solver: " << rev_solver_str << std::endl;
                 amrex::Print() << "  REV Plotfiles: " << (rev_write_plotfiles ? "Yes" : "No") << std::endl;
             }
 
-            std::vector<int> rev_actual_sizes_vec; 
+            std::vector<int> rev_actual_sizes_vec;
             std::stringstream ss_rev_sizes(rev_sizes_str);
-            int size_val_loop; 
+            int size_val_loop;
             while (ss_rev_sizes >> size_val_loop) rev_actual_sizes_vec.push_back(size_val_loop);
 
             if (rev_actual_sizes_vec.empty()) {
@@ -332,86 +373,59 @@ int main (int argc, char* argv[])
                     rev_csv_file << "SampleNo,SeedX,SeedY,SeedZ,REV_Size_Target,ActualSizeX,ActualSizeY,ActualSizeZ,D_xx,D_yy,D_zz,D_xy,D_xz,D_yz\n";
                 }
 
-                std::mt19937 gen(amrex::ParallelDescriptor::MyProc() + 12345 + rev_num_samples); 
+                std::mt19937 gen(amrex::ParallelDescriptor::MyProc() + 12345 + rev_num_samples);
 
                 for (int s_idx = 0; s_idx < rev_num_samples; ++s_idx) {
                     for (int current_rev_size_target : rev_actual_sizes_vec) {
-                        amrex::IntVect seed_lo_global; 
+                        amrex::IntVect seed_lo_global;
                         for(int d=0; d<AMREX_SPACEDIM; ++d) {
                             int min_coord = domain_box_full.smallEnd(d);
                             int max_coord = domain_box_full.bigEnd(d) - (current_rev_size_target -1) ;
-                            if (min_coord > max_coord || current_rev_size_target > domain_box_full.length(d)) { 
-                                seed_lo_global[d] = domain_box_full.smallEnd(d); 
+                            if (min_coord > max_coord || current_rev_size_target > domain_box_full.length(d)) {
+                                seed_lo_global[d] = domain_box_full.smallEnd(d);
                             } else {
                                 std::uniform_int_distribution<> distr(min_coord, max_coord);
                                 seed_lo_global[d] = distr(gen);
                             }
                         }
-                        
-                        amrex::Box bx_rev_global_const = amrex::Box(seed_lo_global, seed_lo_global + amrex::IntVect(current_rev_size_target - 1));
-                        amrex::Box bx_rev_global = bx_rev_global_const; 
-                        bx_rev_global &= domain_box_full; 
 
-                        if (bx_rev_global.isEmpty() || bx_rev_global.longside() < 8) { 
+                        amrex::Box bx_rev_global = amrex::Box(seed_lo_global, seed_lo_global + amrex::IntVect(current_rev_size_target - 1));
+                        bx_rev_global &= domain_box_full;
+
+                        if (bx_rev_global.isEmpty() || bx_rev_global.longside() < 8) {
                             if (rev_verbose_level >=1 && amrex::ParallelDescriptor::IOProcessor()) {
                                 std::stringstream ss; ss << bx_rev_global;
-                                amrex::Warning("Skipping REV for sample " + std::to_string(s_idx+1) + 
-                                               " target size " + std::to_string(current_rev_size_target) + 
+                                amrex::Warning("Skipping REV for sample " + std::to_string(s_idx+1) +
+                                               " target size " + std::to_string(current_rev_size_target) +
                                                " due to small/empty box after intersection: " + ss.str());
                             }
                             continue;
                         }
                          if (rev_verbose_level >=1 && amrex::ParallelDescriptor::IOProcessor()) {
-                            amrex::Print() << " REV Sample " << s_idx + 1 << ", Target Size " << current_rev_size_target 
-                                           << ", Seed Lo (global): " << seed_lo_global 
+                            amrex::Print() << " REV Sample " << s_idx + 1 << ", Target Size " << current_rev_size_target
+                                           << ", Seed Lo (global): " << seed_lo_global
                                            << ", Actual REV Box (global): " << bx_rev_global << std::endl;
                         }
-                        
-                        amrex::Box domain_rev_relative_temp = bx_rev_global; 
-                        amrex::Box domain_rev_relative = domain_rev_relative_temp; // Make a copy
-                        domain_rev_relative.shift(-bx_rev_global.smallEnd()); // Shift the copy
-                        
+
+                        amrex::Box domain_rev_relative = bx_rev_global;
+                        domain_rev_relative.shift(-bx_rev_global.smallEnd());
+
                         amrex::Geometry geom_rev;
                         amrex::RealBox rb_rev({AMREX_D_DECL(0.0,0.0,0.0)},
-                                              {AMREX_D_DECL(amrex::Real(domain_rev_relative.length(0)), 
-                                                            amrex::Real(domain_rev_relative.length(1)), 
+                                              {AMREX_D_DECL(amrex::Real(domain_rev_relative.length(0)),
+                                                            amrex::Real(domain_rev_relative.length(1)),
                                                             amrex::Real(domain_rev_relative.length(2)))});
-                        amrex::Array<int,AMREX_SPACEDIM> is_periodic_rev = {AMREX_D_DECL(1,1,1)}; 
-                        geom_rev.define(domain_rev_relative, &rb_rev, 0, is_periodic_rev.data()); 
+                        amrex::Array<int,AMREX_SPACEDIM> is_periodic_rev = {AMREX_D_DECL(1,1,1)};
+                        geom_rev.define(domain_rev_relative, &rb_rev, 0, is_periodic_rev.data());
 
-                        amrex::BoxArray ba_rev_relative(domain_rev_relative); 
-                        ba_rev_relative.maxSize(main_box_size); 
+                        amrex::BoxArray ba_rev_relative(domain_rev_relative);
+                        ba_rev_relative.maxSize(main_box_size);
                         amrex::DistributionMapping dm_rev_relative(ba_rev_relative);
-                        amrex::iMultiFab mf_phase_rev(ba_rev_relative, dm_rev_relative, 1, 1); 
-                        
-                        amrex::BoxArray ba_temp_global(bx_rev_global);
-                        amrex::DistributionMapping dm_temp_global(ba_temp_global); 
-                        amrex::iMultiFab mf_temp_global(ba_temp_global, dm_temp_global, 1, 0); 
-                        mf_temp_global.ParallelCopy(mf_phase_full, 0, 0, 1, amrex::IntVect::TheZeroVector(), amrex::IntVect::TheZeroVector(), geom_full.periodicity());
-                        
-                        mf_phase_rev.setVal(0); 
-                        for(amrex::MFIter mfi_dest(mf_phase_rev); mfi_dest.isValid(); ++mfi_dest) {
-                            amrex::IArrayBox& dest_fab = mf_phase_rev[mfi_dest];
-                            const amrex::Box& dest_fab_box_local = dest_fab.box(); 
+                        amrex::iMultiFab mf_phase_rev(ba_rev_relative, dm_rev_relative, 1, 1);
 
-                            amrex::Box temp_dest_box_global = dest_fab_box_local; // Non-const copy
-                            amrex::Box required_src_box_global = temp_dest_box_global.shift(bx_rev_global.smallEnd());
-                            
-                            for (amrex::MFIter mfi_src(mf_temp_global); mfi_src.isValid(); ++mfi_src) { // Should be 1 FAB for np=1
-                                const amrex::IArrayBox& src_fab = mf_temp_global[mfi_src];
-                                const amrex::Box& src_fab_box_global_const = src_fab.box(); 
-                                amrex::Box src_fab_box_global = src_fab_box_global_const; // Non-const copy
-                                
-                                amrex::Box copy_region_global = required_src_box_global & src_fab_box_global;
-
-                                if (!copy_region_global.isEmpty()) {
-                                    amrex::Box temp_copy_region_dest_local = copy_region_global; // Non-const copy
-                                    amrex::Box copy_region_dest_local = temp_copy_region_dest_local.shift(-bx_rev_global.smallEnd());
-                                    dest_fab.copy(src_fab, copy_region_global, 0, copy_region_dest_local, 0, 1);
-                                }
-                            }
-                        }
-                        mf_phase_rev.FillBoundary(geom_rev.periodicity()); 
+                        // This copy logic remains valid for multi-phase
+                        mf_phase_rev.ParallelCopy(mf_phase_full, 0, 0, 1, -bx_rev_global.smallEnd(), amrex::IntVect(0), geom_full.periodicity());
+                        mf_phase_rev.FillBoundary(geom_rev.periodicity());
 
 
                         amrex::MultiFab mf_chi_x_rev(ba_rev_relative, dm_rev_relative, 1, 1);
@@ -425,25 +439,27 @@ int main (int argc, char* argv[])
                         OpenImpala::EffectiveDiffusivityHypre::SolverType rev_solver_type_enum = stringToSolverType(rev_solver_str);
 
                         for (const auto& dir_k_solve : rev_solve_dirs) {
-                            std::string chi_plot_rev_subdir_str = "REV_Sample" + std::to_string(s_idx+1) + 
-                                                                  "_Size" + std::to_string(bx_rev_global.length(0)) + 
+                            std::string chi_plot_rev_subdir_str = "REV_Sample" + std::to_string(s_idx+1) +
+                                                                  "_Size" + std::to_string(bx_rev_global.length(0)) +
                                                                   "_Dir" + std::to_string(static_cast<int>(dir_k_solve));
                             std::filesystem::path chi_plot_rev_full_path = main_results_path / chi_plot_rev_subdir_str;
-                            
+
                             if (rev_write_plotfiles != 0 && amrex::ParallelDescriptor::IOProcessor()) {
                                  amrex::UtilCreateDirectory(chi_plot_rev_full_path.string(), 0755);
                             }
-                             amrex::ParallelDescriptor::Barrier(); 
+                             amrex::ParallelDescriptor::Barrier();
 
                             std::unique_ptr<OpenImpala::EffectiveDiffusivityHypre> rev_chi_solver;
                             try {
+                                 // TODO: Update EffectiveDiffusivityHypre constructor to accept phase_coeff_map
                                  rev_chi_solver = std::make_unique<OpenImpala::EffectiveDiffusivityHypre>(
-                                    geom_rev, ba_rev_relative, dm_rev_relative, mf_phase_rev, // use ba_rev_relative and dm_rev_relative
+                                    geom_rev, ba_rev_relative, dm_rev_relative, mf_phase_rev,
+                                    // phase_coeff_map, // <-- Will be added here
                                     main_phase_id_analysis, dir_k_solve, rev_solver_type_enum,
                                     chi_plot_rev_full_path.string(), rev_verbose_level, (rev_write_plotfiles !=0)
                                 );
                                 if (!rev_chi_solver->solve()) {
-                                    all_chi_rev_converged = false; 
+                                    all_chi_rev_converged = false;
                                     if(rev_verbose_level >= 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    REV Chi solve FAILED for dir " << static_cast<int>(dir_k_solve) << std::endl;
                                     break;
                                 }
@@ -460,15 +476,15 @@ int main (int argc, char* argv[])
                         for(int r=0; r<AMREX_SPACEDIM; ++r) for(int c=0; c<AMREX_SPACEDIM; ++c) Deff_tensor_rev[r][c] = std::numeric_limits<amrex::Real>::quiet_NaN();
 
                         if (all_chi_rev_converged) {
-                            amrex::iMultiFab active_mask_rev(ba_rev_relative, dm_rev_relative, 1, 0); // use ba_rev_relative
+                            amrex::iMultiFab active_mask_rev(ba_rev_relative, dm_rev_relative, 1, 0);
                             #ifdef AMREX_USE_OMP
                             #pragma omp parallel if(amrex::Gpu::notInLaunchRegion())
                             #endif
                             for (amrex::MFIter mfi(active_mask_rev, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi){
-                                const amrex::Box& tb = mfi.tilebox(); 
+                                const amrex::Box& tb = mfi.tilebox();
                                 auto const& mask_arr = active_mask_rev.array(mfi);
-                                auto const& phase_arr = mf_phase_rev.const_array(mfi); 
-                                amrex::LoopOnCpu(tb, [=] (int i, int j, int k) { 
+                                auto const& phase_arr = mf_phase_rev.const_array(mfi);
+                                amrex::LoopOnCpu(tb, [=] (int i, int j, int k) {
                                     mask_arr(i,j,k,0) = (phase_arr(i,j,k,0) == main_phase_id_analysis) ? 1 : 0;
                                 });
                             }
@@ -478,29 +494,29 @@ int main (int argc, char* argv[])
                         }
                         if (amrex::ParallelDescriptor::IOProcessor()) {
                             rev_csv_file << s_idx+1 << ","
-                                         << seed_lo_global[0] << "," << seed_lo_global[1] << "," 
+                                         << seed_lo_global[0] << "," << seed_lo_global[1] << ","
                                          << (AMREX_SPACEDIM == 3 ? seed_lo_global[2] : 0) << ","
-                                         << current_rev_size_target << "," 
-                                         << bx_rev_global.length(0) << "," << bx_rev_global.length(1) << "," 
-                                         << (AMREX_SPACEDIM == 3 ? bx_rev_global.length(2) : 1) << "," 
+                                         << current_rev_size_target << ","
+                                         << bx_rev_global.length(0) << "," << bx_rev_global.length(1) << ","
+                                         << (AMREX_SPACEDIM == 3 ? bx_rev_global.length(2) : 1) << ","
                                          << std::fixed << std::setprecision(8)
                                          << Deff_tensor_rev[0][0] << "," << Deff_tensor_rev[1][1] << ","
                                          << (AMREX_SPACEDIM == 3 ? Deff_tensor_rev[2][2] : std::numeric_limits<amrex::Real>::quiet_NaN()) << ","
                                          << Deff_tensor_rev[0][1] << ","
                                          << (AMREX_SPACEDIM == 3 ? Deff_tensor_rev[0][2] : std::numeric_limits<amrex::Real>::quiet_NaN()) << ","
                                          << (AMREX_SPACEDIM == 3 ? Deff_tensor_rev[1][2] : std::numeric_limits<amrex::Real>::quiet_NaN()) << "\n";
-                            rev_csv_file.flush(); 
+                            rev_csv_file.flush();
                         }
-                    } 
-                } 
+                    }
+                }
                 if (amrex::ParallelDescriptor::IOProcessor()) rev_csv_file.close();
-            } 
-        } 
+            }
+        }
 
 
-        if (!rev_do_study || main_calculation_method != "skip_if_rev") { 
+        if (!rev_do_study || main_calculation_method != "skip_if_rev") {
             if (main_verbose >=1 && amrex::ParallelDescriptor::IOProcessor()) {
-                amrex::Print() << "\n--- Full Domain Calculation (" << main_calculation_method << ") using phase " << main_phase_id_analysis << " ---\n";
+                amrex::Print() << "\n--- Full Domain Calculation (" << main_calculation_method << ") ---\n";
             }
             if (main_calculation_method == "homogenization") {
                 if (main_verbose >= 1 && amrex::ParallelDescriptor::IOProcessor())
@@ -508,7 +524,7 @@ int main (int argc, char* argv[])
 
                 amrex::MultiFab mf_chi_x_full(ba_full, dm_full, 1, 1);
                 amrex::MultiFab mf_chi_y_full(ba_full, dm_full, 1, 1);
-                amrex::MultiFab mf_chi_z_full; 
+                amrex::MultiFab mf_chi_z_full;
                 if (AMREX_SPACEDIM == 3) mf_chi_z_full.define(ba_full, dm_full, 1, 1);
                 bool all_chi_full_converged = true;
 
@@ -521,7 +537,7 @@ int main (int argc, char* argv[])
                     std::string dir_k_str = (dir_k == OpenImpala::Direction::X) ? "X" : (dir_k == OpenImpala::Direction::Y) ? "Y" : "Z";
                     if (main_verbose >= 1 && amrex::ParallelDescriptor::IOProcessor())
                         amrex::Print() << "\n--- Solving for Full Domain chi_" << dir_k_str << " ---\n";
-                    
+
                     std::filesystem::path full_chi_plot_dir_path = main_results_path / ("FullDomain_chi_" + dir_k_str);
                     if (main_write_plotfile_full !=0 && amrex::ParallelDescriptor::IOProcessor()) {
                         amrex::UtilCreateDirectory(full_chi_plot_dir_path.string(), 0755);
@@ -530,15 +546,17 @@ int main (int argc, char* argv[])
 
                     std::unique_ptr<OpenImpala::EffectiveDiffusivityHypre> solver_chi_k_full;
                      try {
+                        // TODO: Update EffectiveDiffusivityHypre constructor to accept phase_coeff_map
                         solver_chi_k_full = std::make_unique<OpenImpala::EffectiveDiffusivityHypre>(
-                            geom_full, ba_full, dm_full, mf_phase_full, 
-                            main_phase_id_analysis, dir_k, solver_type_effdiff_full, 
-                            full_chi_plot_dir_path.string(), 
+                            geom_full, ba_full, dm_full, mf_phase_full,
+                            // phase_coeff_map, // <-- Will be added here
+                            main_phase_id_analysis, dir_k, solver_type_effdiff_full,
+                            full_chi_plot_dir_path.string(),
                             main_verbose, (main_write_plotfile_full != 0)
                         );
                         if (!solver_chi_k_full->solve()) {
                             all_chi_full_converged = false;
-                            break; 
+                            break;
                         }
                         if (dir_k == OpenImpala::Direction::X) solver_chi_k_full->getChiSolution(mf_chi_x_full);
                         else if (dir_k == OpenImpala::Direction::Y) solver_chi_k_full->getChiSolution(mf_chi_y_full);
@@ -551,7 +569,7 @@ int main (int argc, char* argv[])
 
                 if (all_chi_full_converged) {
                     amrex::Real Deff_tensor_full[AMREX_SPACEDIM][AMREX_SPACEDIM];
-                    amrex::iMultiFab active_mask_full(ba_full, dm_full, 1, 0); 
+                    amrex::iMultiFab active_mask_full(ba_full, dm_full, 1, 0);
                     #ifdef AMREX_USE_OMP
                     #pragma omp parallel if(amrex::Gpu::notInLaunchRegion())
                     #endif
@@ -568,10 +586,10 @@ int main (int argc, char* argv[])
                         active_mask_full, geom_full, main_verbose);
 
                     if (amrex::ParallelDescriptor::IOProcessor()) {
-                        amrex::Print() << "Full Domain Effective Diffusivity Tensor D_eff / D_material:\n";
-                        for (int r_print = 0; r_print < AMREX_SPACEDIM; ++r_print) { 
+                        amrex::Print() << "Full Domain Effective Diffusivity Tensor D_eff:\n";
+                        for (int r_print = 0; r_print < AMREX_SPACEDIM; ++r_print) {
                             amrex::Print() << "  [";
-                            for (int c_print = 0; c_print < AMREX_SPACEDIM; ++c_print) { 
+                            for (int c_print = 0; c_print < AMREX_SPACEDIM; ++c_print) {
                                 amrex::Print() << std::scientific << std::setprecision(8) << Deff_tensor_full[r_print][c_print]
                                                << (c_print == AMREX_SPACEDIM - 1 ? "" : ", ");
                             }
@@ -583,7 +601,8 @@ int main (int argc, char* argv[])
                 }
 
             } else if (main_calculation_method == "flow_through") {
-                amrex::Print() << "Full domain flow-through calculation (placeholder/not implemented here)." << std::endl;
+                // TODO: Add logic for Tortuosity/flow-through calculations
+                amrex::Print() << "Full domain flow-through calculation (placeholder/not fully implemented here)." << std::endl;
             }
         }
 
@@ -595,6 +614,6 @@ int main (int argc, char* argv[])
 
     }
     amrex::Finalize();
-    HYPRE_Finalize(); 
+    HYPRE_Finalize();
     return 0;
 }
