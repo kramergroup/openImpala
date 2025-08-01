@@ -386,7 +386,7 @@ void TiffReader::readDistributedIntoFab(
                                         else { val_dbl=0.0; }
                                     }
                                     if (amrex::Verbose()>=3 && amrex::ParallelDescriptor::IOProcessor()){ bool bnd=(i==image_width_const-1||j==image_height_const-1||k_fab==image_depth_const-1||i==0||j==0||k_fab==0); if(bnd&&bits_per_sample_val==1) {amrex::Print().SetPrecision(0)<<"TIFF_DBG(Tile): V("<<i<<","<<j<<","<<k_fab<<") T("<<tx<<","<<ty<<") LinChkIdx("<<lin_i_chk<<") ByteIdx("<<byte_i<<") BitInByte("<<bit_i<<") PByte(0x"<<std::hex<<(int)p_byte<<std::dec<<") RawBit("<<bit_v<<") Thr("<<((val_dbl>raw_threshold)?value_if_true:value_if_false)<<")\n";}}
-                                    fab_arr(i,j,k_fab) = (val_dbl > raw_threshold) ? value_if_true : value_if_false;
+                                   fab_arr(i,j,k_fab) = static_cast<int>(std::round(val_dbl));
                                 });
                             }
                         }
@@ -431,7 +431,8 @@ void TiffReader::readDistributedIntoFab(
                                     else { val_dbl=0.0; }
                                 }
                                 if (amrex::Verbose()>=3 && amrex::ParallelDescriptor::IOProcessor()){ bool bnd=(i==image_width_const-1||j==image_height_const-1||k_fab==image_depth_const-1||i==0||j==0||k_fab==0); if(bnd&&bits_per_sample_val==1) {amrex::Print().SetPrecision(0)<<"TIFF_DBG(Strip): V("<<i<<","<<j<<","<<k_fab<<") Strp("<<strip_num<<") ByteIdxInBuf("<<byte_i<<") BitInByte("<<bit_i<<") PByte(0x"<<std::hex<<(int)p_byte<<std::dec<<") RawBit("<<bit_v<<") Thr("<<((val_dbl > raw_threshold) ? value_if_true : value_if_false)<<")\n";}}
-                                fab_arr(i,j,k_fab) = (val_dbl > raw_threshold) ? value_if_true : value_if_false;
+                                fab_arr(i,j,k_fab) = static_cast<int>(std::round(val_dbl));
+
                             });
                         }
                     }
@@ -440,8 +441,10 @@ void TiffReader::readDistributedIntoFab(
             } // End k_loop_idx Z-slices
         } // End MFIter
     } // End OMP parallel region
-    amrex::ParallelDescriptor::Barrier("TiffReader::readDistributedIntoFab");
+    amrex::ParallelDescriptor::Barrier("TiffReader::readPhaseIDs");
 }
+
+
 
 //================================================================
 // Public threshold methods
