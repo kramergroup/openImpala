@@ -101,12 +101,13 @@ amrex::Array<HYPRE_Int,AMREX_SPACEDIM> EffectiveDiffusivityHypre::hiV (const amr
     return hypre_hi;
 }
 
+// --- MODIFIED CONSTRUCTOR for Multi-Phase ---
 EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
     const amrex::Geometry& geom,
     const amrex::BoxArray& ba,
     const amrex::DistributionMapping& dm,
     const amrex::iMultiFab& mf_phase_input,
-    const int phase_id_arg, 
+    const std::map<int, amrex::Real>& phase_coeffs, // <-- CHANGED
     const OpenImpala::Direction dir_of_chi_k,
     const SolverType solver_type,
     const std::string& resultspath,
@@ -114,7 +115,7 @@ EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
     bool write_plotfile_flag)
     : m_geom(geom), m_ba(ba), m_dm(dm),
       m_mf_phase_original(ba, dm, mf_phase_input.nComp(), mf_phase_input.nGrow()),
-      m_phase_id(phase_id_arg), 
+      m_phase_coeffs(phase_coeffs), // <-- NEW
       m_dir_solve(dir_of_chi_k),
       m_solvertype(solver_type),
       m_eps(1e-9), m_maxiter(1000),
@@ -122,6 +123,7 @@ EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
       m_verbose(verbose_level),
       m_write_plotfile(write_plotfile_flag),
       m_mf_chi(ba, dm, numComponentsChi, 1),
+      m_mf_coeff_D(ba, dm, 1, 1), // <-- NEW
       m_mf_active_mask(ba, dm, 1, 1),
       m_grid(NULL), m_stencil(NULL), m_A(NULL), m_b(NULL), m_x(NULL),
       m_num_iterations(-1),
@@ -129,68 +131,66 @@ EffectiveDiffusivityHypre::EffectiveDiffusivityHypre(
       m_converged(false)
 {
     BL_PROFILE("EffectiveDiffusivityHypre::Constructor");
-
     amrex::Copy(m_mf_phase_original, mf_phase_input, 0, 0, m_mf_phase_original.nComp(), m_mf_phase_original.nGrow());
-    if (m_mf_phase_original.nGrow() > 0) {
-        m_mf_phase_original.FillBoundary(m_geom.periodicity());
-    }
+    m_mf_phase_original.FillBoundary(m_geom.periodicity());
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "EffectiveDiffusivityHypre: Initializing for chi_k in direction "
-                       << static_cast<int>(m_dir_solve) << "..." << std::endl;
-        amrex::Print() << "  DEBUG HYPRE: Constructor received m_phase_id (member) = " << m_phase_id << std::endl;
-    }
-
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { // Keep this detailed check for high verbosity
-        long initial_phase_count_debug = ManualSumActiveCells(m_mf_phase_original, 0, m_phase_id);
-        amrex::Print() << "  DEBUG HYPRE: Number of cells in input m_mf_phase_original matching m_phase_id (" << m_phase_id
-                       << ") before generateActiveMask (manual sum): " << initial_phase_count_debug << std::endl;
-        amrex::Print() << "  DEBUG HYPRE: m_mf_phase_original nComp: " << m_mf_phase_original.nComp()
-                       << ", nGrow: " << m_mf_phase_original.nGrow() << std::endl;
+                       << static_cast<int>(m_dir_solve) << " (Multi-Phase)..." << std::endl;
     }
 
     amrex::ParmParse pp_hypre("hypre");
     pp_hypre.query("eps", m_eps);
     pp_hypre.query("maxiter", m_maxiter);
 
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_eps > 0.0, "Solver tolerance (eps) must be positive");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_maxiter > 0, "Solver max iterations must be positive");
-
     const amrex::Real* dx_tmp = m_geom.CellSize();
-    for(int i_dim=0; i_dim<AMREX_SPACEDIM; ++i_dim) { 
-        m_dx[i_dim] = dx_tmp[i_dim];
-        AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_dx[i_dim] > 0.0, "Cell size must be positive.");
-    }
+    for(int i_dim=0; i_dim<AMREX_SPACEDIM; ++i_dim) m_dx[i_dim] = dx_tmp[i_dim];
 
+    // --- NEW: Populate Coefficient and Mask MultiFabs directly ---
+    m_mf_coeff_D.setVal(0.0);
     m_mf_active_mask.setVal(cell_inactive);
-    generateActiveMask(); 
 
-    long num_active_cells = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(m_mf_phase_original, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& tile_box = mfi.tilebox();
+        const auto& phase_arr = m_mf_phase_original.const_array(mfi);
+        auto& coeff_arr = m_mf_coeff_D.array(mfi);
+        auto& mask_arr = m_mf_active_mask.array(mfi);
 
-    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()){
-        amrex::Print() << "  Active mask generated. Number of active cells (Manually summed): " << num_active_cells << std::endl;
-        if (m_verbose > 1) { // If very verbose, also show the iMultiFab::sum() for comparison/awareness
-            long num_active_cells_imfsum = m_mf_active_mask.sum(MaskComp, true);
-            amrex::ParallelDescriptor::ReduceLongSum(num_active_cells_imfsum);
-            amrex::Print() << "  Active mask generated. Number of active cells (from m_mf_active_mask.sum()): " << num_active_cells_imfsum << std::endl;
-        }
+        amrex::LoopOnCpu(tile_box, [&](int i, int j, int k) {
+            int phase_id = phase_arr(i, j, k, 0);
+            auto it = m_phase_coeffs.find(phase_id);
+            if (it != m_phase_coeffs.end()) {
+                amrex::Real coeff = it->second;
+                coeff_arr(i, j, k, 0) = coeff;
+                if (coeff > 0.0) {
+                    mask_arr(i, j, k, 0) = cell_active;
+                }
+            }
+        });
     }
 
-    if (num_active_cells == 0) { 
+    m_mf_coeff_D.FillBoundary(m_geom.periodicity());
+    m_mf_active_mask.FillBoundary(m_geom.periodicity());
+
+    long num_active_cells = m_mf_active_mask.sum(MaskComp);
+    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()){
+        amrex::Print() << "  Active mask generated. Number of active cells: " << num_active_cells << std::endl;
+    }
+
+    if (num_active_cells == 0) {
         if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "WARNING: No active cells found (manual sum) for phase_id " << m_phase_id
-                           << ". HYPRE setup will be skipped." << std::endl;
+            amrex::Print() << "WARNING: No active cells found (D > 0). HYPRE setup will be skipped." << std::endl;
         }
-        m_converged = true;
+        m_converged = true; // No solve needed, result is trivial
         m_num_iterations = 0;
         m_final_res_norm = 0.0;
         m_mf_chi.setVal(0.0);
         return;
     }
 
-    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "EffectiveDiffusivityHypre: Setting up HYPRE structures..." << std::endl;
-    }
     setupGrids();
     setupStencil();
     setupMatrixEquation();
@@ -208,118 +208,6 @@ EffectiveDiffusivityHypre::~EffectiveDiffusivityHypre()
     if (m_stencil) HYPRE_StructStencilDestroy(m_stencil);
     if (m_grid)    HYPRE_StructGridDestroy(m_grid);
     m_x = m_b = NULL; m_A = NULL; m_stencil = NULL; m_grid = NULL;
-}
-
-void EffectiveDiffusivityHypre::generateActiveMask()
-{
-    BL_PROFILE("EffectiveDiffusivityHypre::generateActiveMask");
-
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        long phase_original_sum_debug_again = ManualSumActiveCells(m_mf_phase_original, 0, m_phase_id);
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Manual sum of m_mf_phase_original for m_phase_id (" << m_phase_id
-                       << ") *immediately before* mask generation loop: " << phase_original_sum_debug_again << std::endl;
-    }
-
-    if (m_mf_phase_original.nGrow() > 0) {
-         m_mf_phase_original.FillBoundary(m_geom.periodicity());
-    }
-
-    std::atomic<long> cells_not_target_became_active(0); // Renamed for clarity
-    std::atomic<long> cells_target_became_active(0);     // Renamed
-    std::atomic<long> cells_target_became_inactive(0);   // Renamed
-
-    #ifdef AMREX_USE_OMP
-    #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-    #endif
-    for (amrex::MFIter mfi(m_mf_active_mask, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
-    {
-        const amrex::Box& current_tile_box = mfi.tilebox();
-        amrex::Array4<int> const mask_arr = m_mf_active_mask.array(mfi);
-        amrex::Array4<const int> const phase_arr = m_mf_phase_original.const_array(mfi);
-        
-        const int local_m_phase_id = m_phase_id;
-
-        if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor() && mfi.LocalIndex() == 0 && amrex::ParallelDescriptor::MyProc() == amrex::ParallelDescriptor::IOProcessorNumber()) { // Changed to verbose > 2
-             amrex::Print() << "  DEBUG HYPRE: generateActiveMask MFIter loop (verbose > 2) is using local_m_phase_id = " << local_m_phase_id
-                           << " (from m_phase_id = " << m_phase_id << ") for comparison." << std::endl;
-        }
-
-        const amrex::Box& valid_bx_for_debug = mfi.validbox();
-
-        amrex::LoopOnCpu(current_tile_box, [=, &cells_not_target_became_active, &cells_target_became_active, &cells_target_became_inactive] (int i, int j, int k) noexcept
-        {
-            int original_phase_val = phase_arr(i,j,k,0);
-            bool is_target_phase = (original_phase_val == local_m_phase_id);
-            
-            if (is_target_phase) {
-                mask_arr(i,j,k,MaskComp) = cell_active;
-                if (valid_bx_for_debug.contains(i,j,k)) { 
-                    cells_target_became_active++; 
-                }
-            } else {
-                mask_arr(i,j,k,MaskComp) = cell_inactive;
-                 if (valid_bx_for_debug.contains(i,j,k)) { 
-                    // This cell was not target_phase and correctly made inactive.
-                    // If it *was* target phase but made inactive (error in logic), this counter is not for it.
-                 }
-            }
-            // Separate check for errors in valid region
-            if (valid_bx_for_debug.contains(i,j,k)) {
-                if (!is_target_phase && mask_arr(i,j,k,MaskComp) == cell_active) { // Was not target, but became active
-                    cells_not_target_became_active++; 
-                } else if (is_target_phase && mask_arr(i,j,k,MaskComp) == cell_inactive) { // Was target, but became inactive
-                    cells_target_became_inactive++;
-                }
-            }
-        });
-    }
-    
-    long cells_not_target_became_active_val = cells_not_target_became_active.load();
-    long cells_target_became_active_val = cells_target_became_active.load();
-    long cells_target_became_inactive_val = cells_target_became_inactive.load();
-
-    amrex::ParallelDescriptor::ReduceLongSum(cells_not_target_became_active_val);
-    amrex::ParallelDescriptor::ReduceLongSum(cells_target_became_active_val);
-    amrex::ParallelDescriptor::ReduceLongSum(cells_target_became_inactive_val);
-
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { // Changed to verbose > 1
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally NOT m_phase_id that BECAME ACTIVE: "
-                       << cells_not_target_became_active_val << std::endl;
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally m_phase_id that BECAME ACTIVE: "
-                       << cells_target_became_active_val << std::endl;
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Count of (valid) cells originally m_phase_id that BECAME INACTIVE: "
-                       << cells_target_became_inactive_val << std::endl;
-    }
-
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        long active_mask_sum_manual_before_fb = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
-        amrex::Print() << "  DEBUG HYPRE generateActiveMask: Manual sum of m_mf_active_mask (valid cells) *after* loop, *before* FillBoundary: "
-                       << active_mask_sum_manual_before_fb << std::endl;
-    }
-
-    if (m_mf_active_mask.nGrow() > 0) {
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  DEBUG HYPRE generateActiveMask: Calling m_mf_active_mask.FillBoundary()..." << std::endl;
-        }
-        m_mf_active_mask.FillBoundary(m_geom.periodicity()); 
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  DEBUG HYPRE generateActiveMask: Returned from m_mf_active_mask.FillBoundary()." << std::endl;
-        }
-
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { // Changed to verbose > 1 for these detailed checks
-            long active_mask_sum_manual_after_fb = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
-            amrex::Print() << "  DEBUG HYPRE generateActiveMask: Manual sum of m_mf_active_mask (valid cells) *immediately after* FillBoundary: "
-                           << active_mask_sum_manual_after_fb << std::endl;
-            long active_mask_sum_imf_after_fb = m_mf_active_mask.sum(MaskComp, true); 
-            amrex::ParallelDescriptor::ReduceLongSum(active_mask_sum_imf_after_fb);
-            amrex::Print() << "  DEBUG HYPRE generateActiveMask: m_mf_active_mask.sum() (valid cells) *immediately after* FillBoundary: "
-                           << active_mask_sum_imf_after_fb << std::endl;
-        }
-    } else {
-         if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "  DEBUG HYPRE generateActiveMask: Skipped m_mf_active_mask.FillBoundary() as nGrow is 0." << std::endl;
-         }
-    }
 }
 
 // ... (setupGrids, setupStencil, setupMatrixEquation are unchanged from your last correct version)
@@ -448,27 +336,10 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "    HYPRE_StructVectorInitialize (x): OK" << std::endl;
 
     const amrex::Box& domain_for_kernel = m_geom.Domain();
-    int stencil_indices_hypre[stencil_size]; 
-    for(int i_loop=0; i_loop<stencil_size; ++i_loop) {
-        stencil_indices_hypre[i_loop] = i_loop;
-    }
     const int current_dir_int = static_cast<int>(m_dir_solve);
 
-    if (m_mf_active_mask.nGrow() > 0) {
-        // This FillBoundary is crucial for the Fortran kernel if it accesses ghost cells
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Print() << "  DEBUG HYPRE setupMatrixEquation: Calling m_mf_active_mask.FillBoundary() before Fortran..." << std::endl;
-        }
-        m_mf_active_mask.FillBoundary(m_geom.periodicity());
-        if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-            long sum_check = ManualSumActiveCells(m_mf_active_mask, MaskComp, cell_active);
-            amrex::Print() << "  DEBUG HYPRE setupMatrixEquation: Manual sum of m_mf_active_mask after FillBoundary (before Fortran) = " << sum_check << std::endl;
-        }
-    }
-
-
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  setupMatrixEquation: Calling Fortran kernel 'effdiff_fillmtx' and SetBoxValues..." << std::endl;
+        amrex::Print() << "  setupMatrixEquation: Calling Fortran kernel 'effdiff_fillmtx_mp'..." << std::endl;
     }
 
     std::vector<amrex::Real> matrix_values_buffer;
@@ -489,19 +360,19 @@ void EffectiveDiffusivityHypre::setupMatrixEquation()
         rhs_values_buffer.resize(npts_valid);
         initial_guess_buffer.resize(npts_valid);
 
-        const amrex::IArrayBox& mask_fab = m_mf_active_mask[mfi]; 
-        const int* mask_ptr = mask_fab.dataPtr(MaskComp);
-        const auto* mask_fab_lo = mask_fab.loVect();
-        const auto* mask_fab_hi = mask_fab.hiVect();
-
-        effdiff_fillmtx(
+        const amrex::FArrayBox& coeff_fab = m_mf_coeff_D[mfi];
+        const amrex::IArrayBox& mask_fab = m_mf_active_mask[mfi];
+        
+        // --- NEW Fortran Call ---
+        effdiff_fillmtx_mp(
             matrix_values_buffer.data(), rhs_values_buffer.data(), initial_guess_buffer.data(),
             &npts_valid,
-            mask_ptr, mask_fab_lo, mask_fab_hi,
+            coeff_fab.dataPtr(), coeff_fab.loVect(), coeff_fab.hiVect(),
+            mask_fab.dataPtr(), mask_fab.loVect(), mask_fab.hiVect(),
             valid_bx.loVect(), valid_bx.hiVect(),
             domain_for_kernel.loVect(), domain_for_kernel.hiVect(),
             m_dx.dataPtr(),
-            &current_dir_int, 
+            &current_dir_int,
             &m_verbose
         );
 
@@ -645,34 +516,30 @@ bool EffectiveDiffusivityHypre::solve()
         }
     }
 
-    if (m_write_plotfile && (m_converged || num_active_cells_in_solve == 0) ) { // Use logic based on num_active_cells_in_solve
+   // --- MODIFIED Plotfile Writing Section ---
+    if (m_write_plotfile && m_converged) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  Writing solution plotfile for chi_k in direction "
-                            << static_cast<int>(m_dir_solve) << "..." << std::endl;
+            amrex::Print() << "  Writing multi-phase solution plotfile for chi_k in direction "
+                           << static_cast<int>(m_dir_solve) << "..." << std::endl;
         }
-        amrex::MultiFab mf_plot(m_ba, m_dm, 2, 0);
-        amrex::Copy(mf_plot, m_mf_chi, ChiComp, 0, 1, 0);
 
-        #ifdef AMREX_USE_OMP
-        #pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
-        #endif
-        for (amrex::MFIter mfi(mf_plot, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi)
-        {
-            const amrex::Box& bx_plot = mfi.tilebox(); 
-            amrex::Array4<amrex::Real> const plot_arr = mf_plot.array(mfi);
-            // Use m_mf_active_mask which has the correct content for visualization
-            amrex::Array4<const int> const mask_arr_plot = m_mf_active_mask.const_array(mfi); 
+        // Plot chi_k, D(x), original phase_id, and active_mask
+        amrex::MultiFab mf_plot(m_ba, m_dm, 4, 0);
+        amrex::MultiFab mf_phase_temp(m_ba, m_dm, 1, 0);
+        amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0);
 
-            amrex::LoopOnCpu(bx_plot, [=] (int i, int j, int k) noexcept
-            {
-                plot_arr(i,j,k,1) = static_cast<amrex::Real>(mask_arr_plot(i,j,k,MaskComp));
-            });
-        }
+        amrex::convert(mf_phase_temp, m_mf_phase_original, 0);
+        amrex::convert(mf_mask_temp, m_mf_active_mask, 0);
+        
+        amrex::Copy(mf_plot, m_mf_chi,              0, 0, 1, 0);
+        amrex::Copy(mf_plot, m_mf_coeff_D,          0, 1, 1, 0);
+        amrex::Copy(mf_plot, mf_phase_temp,         0, 2, 1, 0);
+        amrex::Copy(mf_plot, mf_mask_temp,          0, 3, 1, 0);
 
         std::string plot_filename_str = "effdiff_chi_dir" + std::to_string(static_cast<int>(m_dir_solve));
         std::string full_plot_path = m_resultspath + "/" + plot_filename_str;
 
-        amrex::Vector<std::string> varnames = {"chi_k", "active_mask_from_solver"}; // Clarify name
+        amrex::Vector<std::string> varnames = {"chi_k", "coefficient_D", "phase_id", "active_mask"};
         amrex::WriteSingleLevelPlotfile(full_plot_path, mf_plot, varnames, m_geom, 0.0, 0);
 
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
@@ -680,7 +547,7 @@ bool EffectiveDiffusivityHypre::solve()
         }
     } else if (m_write_plotfile && !m_converged) {
         if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-            amrex::Warning("Skipping plotfile write for chi_k because solver did not converge and had active cells.");
+            amrex::Warning("Skipping plotfile write for chi_k because solver did not converge.");
         }
     }
     return m_converged;
