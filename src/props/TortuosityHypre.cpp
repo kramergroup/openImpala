@@ -18,6 +18,7 @@
 #include <algorithm> // For std::sort, std::unique
 #include <numeric>   // For std::accumulate, iota (potentially useful)
 #include <sstream>   // For std::stringstream
+#include <map>
 
 #include <AMReX_MultiFab.H>
 #include <AMReX_MultiFabUtil.H> // Needed for amrex::Copy, amrex::sum
@@ -92,17 +93,12 @@ amrex::Array<HYPRE_Int,AMREX_SPACEDIM> TortuosityHypre::hiV (const amrex::Box& b
 }
 
 
-// --- Constructor ---
-// NOTE: Assumes TortuosityHypre.H has been modified to include:
-// private:
-//     amrex::Real m_active_vf = 0.0; // Volume fraction of the percolating phase
-//
+// --- MODIFIED CONSTRUCTOR for Multi-Phase ---
 OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              const amrex::BoxArray& ba,
                                              const amrex::DistributionMapping& dm,
                                              const amrex::iMultiFab& mf_phase_input,
-                                             const amrex::Real vf, // Original total VF
-                                             const int phase,
+                                             const std::map<int, amrex::Real>& phase_coeffs,
                                              const OpenImpala::Direction dir,
                                              const SolverType st,
                                              const std::string& resultspath,
@@ -112,78 +108,90 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
                                              bool write_plotfile)
     : m_geom(geom), m_ba(ba), m_dm(dm),
       m_mf_phase(ba, dm, mf_phase_input.nComp(), mf_phase_input.nGrow()),
-      m_phase(phase),
-      m_vf(vf), // Store original total VF
+      m_phase_coeffs(phase_coeffs),
       m_dir(dir), m_solvertype(st),
       m_vlo(vlo), m_vhi(vhi),
       m_resultspath(resultspath), m_verbose(verbose),
       m_write_plotfile(write_plotfile),
-      m_mf_phi(ba, dm, numComponentsPhi, 1),
+      m_mf_phi(ba, dm, 1, 1),
+      m_mf_coeff_D(ba, dm, 1, 1),
       m_mf_active_mask(ba, dm, 1, 1),
-      m_active_vf(0.0), // <<< CHANGE: Initialize active VF member
+      m_active_vf(0.0),
       m_first_call(true), m_value(std::numeric_limits<amrex::Real>::quiet_NaN()),
       m_grid(NULL), m_stencil(NULL), m_A(NULL), m_b(NULL), m_x(NULL),
       m_num_iterations(-1), m_final_res_norm(std::numeric_limits<amrex::Real>::quiet_NaN()),
       m_converged(false),
-      m_flux_in(0.0),
-      m_flux_out(0.0)
+      m_flux_in(0.0), m_flux_out(0.0)
 {
-    // Copy data from input iMultiFab to member iMultiFab
     amrex::Copy(m_mf_phase, mf_phase_input, 0, 0, m_mf_phase.nComp(), m_mf_phase.nGrow());
 
-    // --- Rest of constructor ---
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "TortuosityHypre: Initializing..." << std::endl;
-        // Optional: Print the original total VF passed in
-        amrex::Print() << "  Original Total VF (Phase " << m_phase << "): " << m_vf << std::endl;
+        amrex::Print() << "TortuosityHypre: Initializing for Multi-Phase Calculation..." << std::endl;
     }
 
-    // Set hardcoded default solver parameters.
-    m_eps = 1e-9;
-    m_maxiter = 200;
-
-    // Allow advanced users to override these defaults from the inputs file
-    // by providing a [hypre] block, e.g., hypre.eps = 1e-12
     amrex::ParmParse pp("hypre");
     pp.query("eps", m_eps);
     pp.query("maxiter", m_maxiter);
-    amrex::ParmParse pp_tort("tortuosity");
-    pp_tort.query("verbose", m_verbose);
+
+    // --- 1. Populate Coefficient MultiFab D(x) and create Active Mask ---
+    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "TortuosityHypre: Populating coefficient field D(x) and active mask..." << std::endl;
+    }
+
+    m_mf_coeff_D.setVal(0.0); // Initialize all coefficients to 0 (non-conductive)
+    m_mf_active_mask.setVal(cell_inactive);
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())
+#endif
+    for (amrex::MFIter mfi(m_mf_phase, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& tile_box = mfi.tilebox();
+        const auto& phase_arr = m_mf_phase.const_array(mfi);
+        auto& coeff_arr = m_mf_coeff_D.array(mfi);
+        auto& mask_arr = m_mf_active_mask.array(mfi);
+
+        amrex::LoopOnCpu(tile_box, [&](int i, int j, int k) {
+            int phase_id = phase_arr(i, j, k, 0);
+            auto it = m_phase_coeffs.find(phase_id);
+            if (it != m_phase_coeffs.end()) {
+                amrex::Real coeff = it->second;
+                coeff_arr(i, j, k, 0) = coeff;
+                if (coeff > 0.0) {
+                    mask_arr(i, j, k, 0) = cell_active;
+                }
+            }
+        });
+    }
+
+    m_mf_coeff_D.FillBoundary(m_geom.periodicity());
+
+    m_mf_active_mask.FillBoundary(m_geom.periodicity());
+    
+    // --- 2. Calculate Active Volume Fraction ---
+    long num_active = m_mf_active_mask.sum(MaskComp);
+    long total_cells = m_geom.Domain().numPts();
+    m_active_vf = (total_cells > 0) ? static_cast<amrex::Real>(num_active) / total_cells : 0.0;
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  HYPRE Params: eps=" << m_eps << ", maxiter=" << m_maxiter << std::endl;
-        amrex::Print() << "  Class Verbose Level: " << m_verbose << std::endl;
-        amrex::Print() << "  Write Plotfile Flag: " << m_write_plotfile << std::endl;
+        amrex::Print() << "  Total Volume Fraction of Conductive Phases (D>0): " << m_active_vf << std::endl;
     }
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_vf >= 0.0 && m_vf <= 1.0, "Original Volume fraction must be between 0 and 1");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_eps > 0.0, "Solver tolerance (eps) must be positive");
-    AMREX_ALWAYS_ASSERT_WITH_MESSAGE(m_maxiter > 0, "Solver max iterations must be positive");
 
-
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "TortuosityHypre: Running preconditionPhaseFab (remspot)..." << std::endl;
-    preconditionPhaseFab();
-
-    if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "TortuosityHypre: Generating activity mask via boundary search..." << std::endl;
-    generateActivityMask(m_mf_phase, m_phase, m_dir); // <<< This now calculates and stores m_active_vf
-
-    // Check if active VF is zero after generation
     if (m_active_vf <= std::numeric_limits<amrex::Real>::epsilon()) {
-         if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "WARNING: Active volume fraction is zero. Skipping matrix setup and solve." << std::endl;
-         }
-         // No need to setup HYPRE if there's no active phase
-         m_first_call = false; // Mark as "calculated" (result is NaN or Inf)
-         m_value = std::numeric_limits<amrex::Real>::quiet_NaN(); // Or Inf if you prefer for zero VF
-         return; // Exit constructor early
+        if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "WARNING: Total conductive volume fraction is zero. Skipping solve." << std::endl;
+        }
+        m_first_call = false;
+        m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+        return;
     }
-
-    // Setup HYPRE structures only if there's an active phase
+    
+    // --- 3. Setup HYPRE structures ---
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "TortuosityHypre: Running setupGrids..." << std::endl;
     setupGrids();
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "TortuosityHypre: Running setupStencil..." << std::endl;
     setupStencil();
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "TortuosityHypre: Running setupMatrixEquation..." << std::endl;
-    setupMatrixEquation();
+    setupMatrixEquation(m_mf_active_mask); // Pass the member variable directly
 
     if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "TortuosityHypre: Initialization complete." << std::endl;
@@ -557,14 +565,12 @@ void OpenImpala::TortuosityHypre::generateActivityMask(
       }
 }
 
-// --- setupMatrixEquation ---
-// Remains the same...
-void OpenImpala::TortuosityHypre::setupMatrixEquation()
+// --- MODIFIED setupMatrixEquation ---
+void OpenImpala::TortuosityHypre::setupMatrixEquation(const amrex::iMultiFab& active_mask)
 {
     BL_PROFILE("TortuosityHypre::setupMatrixEquation");
     HYPRE_Int ierr = 0;
 
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  setupMatrixEq: Creating HYPRE Matrix/Vectors..." << std::endl; }
     ierr = HYPRE_StructMatrixCreate(MPI_COMM_WORLD, m_grid, m_stencil, &m_A); HYPRE_CHECK(ierr);
     ierr = HYPRE_StructMatrixInitialize(m_A); HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorCreate(MPI_COMM_WORLD, m_grid, &m_b); HYPRE_CHECK(ierr);
@@ -577,15 +583,12 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
     const amrex::Box& domain = m_geom.Domain();
     int stencil_indices[stencil_size] = {istn_c, istn_mx, istn_px, istn_my, istn_py, istn_mz, istn_pz};
     const int dir_int = static_cast<int>(m_dir);
-    amrex::Array<amrex::Real, AMREX_SPACEDIM> dxinv_sq;
+    
+    // Note: dx is passed to Fortran, dxinv is calculated inside
     const amrex::Real* dx = m_geom.CellSize();
-    for(int i=0; i<AMREX_SPACEDIM; ++i) { dxinv_sq[i] = (dx[i] > 0.0) ? (1.0/dx[i]) * (1.0/dx[i]) : 0.0; }
-
-    m_mf_active_mask.FillBoundary(m_geom.periodicity());
-    m_mf_phase.FillBoundary(m_geom.periodicity());
 
     if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "  setupMatrixEq: Calling tortuosity_fillmtx Fortran routine (using mask)..." << std::endl;
+        amrex::Print() << "  setupMatrixEq: Calling tortuosity_fillmtx Fortran routine for multi-phase..." << std::endl;
     }
 
     std::vector<amrex::Real> matrix_values;
@@ -596,7 +599,7 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) \
                  private(matrix_values, rhs_values, initial_guess)
 #endif
-    for (amrex::MFIter mfi(m_mf_phase, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+    for (amrex::MFIter mfi(m_mf_coeff_D, amrex::TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.tilebox();
         const int npts = static_cast<int>(bx.numPts());
         if (npts == 0) continue;
@@ -604,30 +607,24 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         matrix_values.resize(static_cast<size_t>(npts) * stencil_size);
         rhs_values.resize(npts);
         initial_guess.resize(npts);
+        
+        const amrex::FArrayBox& coeff_fab = m_mf_coeff_D[mfi];
+        const amrex::Real* d_ptr = coeff_fab.dataPtr(0);
+        const auto& dbox = coeff_fab.box();
 
-        const amrex::IArrayBox& phase_iab = m_mf_phase[mfi];
-        const int* p_ptr = phase_iab.dataPtr(0);
-        const auto& pbox = phase_iab.box();
-
-        const amrex::IArrayBox& mask_iab = m_mf_active_mask[mfi];
+        const amrex::IArrayBox& mask_iab = active_mask[mfi];
         const int* mask_ptr = mask_iab.dataPtr(MaskComp);
         const auto& mask_box = mask_iab.box();
-
-        tortuosity_fillmtx(matrix_values.data(), rhs_values.data(), initial_guess.data(),
-                           &npts,
-                           p_ptr, pbox.loVect(), pbox.hiVect(),
-                           mask_ptr, mask_box.loVect(), mask_box.hiVect(),
-                           bx.loVect(), bx.hiVect(),
-                           domain.loVect(), domain.hiVect(),
-                           dxinv_sq.data(), &m_vlo, &m_vhi, &m_phase, &dir_int,
-                           &m_verbose);
-
-        // NaN/Inf check remains the same...
-        bool data_ok = true;
-        for(size_t i = 0; i < matrix_values.size(); ++i) { if (std::isnan(matrix_values[i]) || std::isinf(matrix_values[i])) data_ok = false; }
-        for(size_t i = 0; i < rhs_values.size(); ++i) { if (std::isnan(rhs_values[i]) || std::isinf(rhs_values[i])) data_ok = false; }
-        if (!data_ok) { amrex::Warning("NaN/Inf detected in Fortran output before HYPRE SetBoxValues!"); }
-
+        
+        // --- NEW Fortran Call ---
+        tortuosity_fillmtx_mp(matrix_values.data(), rhs_values.data(), initial_guess.data(),
+                              &npts,
+                              coeff_fab.dataPtr(0), dbox.loVect(), dbox.hiVect(),
+                              mask_ptr, mask_box.loVect(), mask_box.hiVect(),
+                              bx.loVect(), bx.hiVect(),
+                              domain.loVect(), domain.hiVect(),
+                              dx, &m_vlo, &m_vhi, &dir_int,
+                              &m_verbose);
 
         auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx);
         auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
@@ -639,15 +636,11 @@ void OpenImpala::TortuosityHypre::setupMatrixEquation()
         ierr = HYPRE_StructVectorSetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), initial_guess.data());
         HYPRE_CHECK(ierr);
     }
-    if (m_verbose > 2 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  setupMatrixEq: Finished MFIter loop." << std::endl; }
 
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  setupMatrixEq: Assembling HYPRE Matrix/Vectors..." << std::endl; }
     ierr = HYPRE_StructMatrixAssemble(m_A); HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorAssemble(m_b); HYPRE_CHECK(ierr);
     ierr = HYPRE_StructVectorAssemble(m_x); HYPRE_CHECK(ierr);
-    if (m_verbose > 1 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  setupMatrixEq: Assembly complete." << std::endl; }
 }
-
 
 // --- solve ---
 // Remains the same...
@@ -706,88 +699,89 @@ bool OpenImpala::TortuosityHypre::solve() {
         amrex::Warning("HYPRE solve resulted in NaN or Inf residual norm!");
         m_converged = false;
     }
-    // Plotfile writing remains the same...
+    // MODIFIED: Plotfile Writing
     if (m_write_plotfile && m_converged) {
         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Print() << "  Writing solution plotfile..." << std::endl;
-         }
-         amrex::MultiFab mf_plot(m_ba, m_dm, numComponentsPhi, 0);
-         amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 0);
-         mf_soln_temp.setVal(0.0);
-         std::vector<double> soln_buffer;
-         #ifdef AMREX_USE_OMP
-         #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
-         #endif
-         for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
-             const amrex::Box& bx = mfi.validbox();
-             const int npts = static_cast<int>(bx.numPts());
-             if (npts == 0) continue;
-             soln_buffer.resize(npts);
-             auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx);
-             auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
-             HYPRE_Int get_ierr = HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
-             if (get_ierr != 0) { amrex::Warning("HYPRE_StructVectorGetBoxValues failed during plotfile writing!"); }
-             amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
-             long long k_lin_idx = 0;
-             amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
-                 if (k_lin_idx < npts) { soln_arr(ii,jj,kk, 0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]); }
-                 else { amrex::Warning("Buffer overrun detected during HYPRE GetBoxValues copy!"); }
-                 k_lin_idx++;
-             });
-            if (k_lin_idx != npts) { amrex::Warning("Point count mismatch during HYPRE GetBoxValues copy!"); }
-         }
-         amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0);
-         amrex::Copy(mf_mask_temp, m_mf_active_mask, MaskComp, 0, 1, 0);
-         amrex::MultiFab mf_phase_temp(m_ba, m_dm, 1, 0);
-         amrex::Copy(mf_phase_temp, m_mf_phase, 0, 0, 1, 0);
-         amrex::Copy(mf_plot, mf_soln_temp,   0, 0, 1, 0);
-         amrex::Copy(mf_plot, mf_phase_temp,  0, 1, 1, 0);
-         amrex::Copy(mf_plot, mf_mask_temp,   0, 2, 1, 0);
-         std::string plotfilename = m_resultspath + "/tortuosity_solution_" + std::to_string(static_cast<int>(m_dir));
-         amrex::Vector<std::string> varnames = {"solution_potential", "phase_id", "active_mask"};
-         amrex::WriteSingleLevelPlotfile(plotfilename, mf_plot, varnames, m_geom, 0.0, 0);
-         if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "  Plotfile written to " << plotfilename << std::endl;}
-     } else if (m_write_plotfile && !m_converged) {
-         if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-             amrex::Warning("Skipping plotfile write because solver did not converge.");
-         }
+            amrex::Print() << "  Writing multi-phase solution plotfile..." << std::endl;
+        }
+        
+        // Get solution from HYPRE vector into an AMReX MultiFab
+        amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 0);
+        mf_soln_temp.setVal(0.0);
+        std::vector<double> soln_buffer;
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
+#endif
+        for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
+            const amrex::Box& bx = mfi.validbox();
+            const int npts = static_cast<int>(bx.numPts());
+            if (npts == 0) continue;
+            soln_buffer.resize(npts);
+            auto hypre_lo = OpenImpala::TortuosityHypre::loV(bx);
+            auto hypre_hi = OpenImpala::TortuosityHypre::hiV(bx);
+            HYPRE_StructVectorGetBoxValues(m_x, hypre_lo.data(), hypre_hi.data(), soln_buffer.data());
+            
+            amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
+            long long k_lin_idx = 0;
+            amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
+                if (k_lin_idx < npts) { soln_arr(ii,jj,kk, 0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]); }
+                k_lin_idx++;
+            });
+        }
+        
+        // Create a plotfile with all relevant data
+        amrex::MultiFab mf_plot(m_ba, m_dm, numPlotFileComps, 0);
+        amrex::MultiFab mf_phase_temp(m_ba, m_dm, 1, 0);
+        amrex::MultiFab mf_mask_temp(m_ba, m_dm, 1, 0);
+        amrex::MultiFab mf_coeff_temp(m_ba, m_dm, 1, 0);
+
+        amrex::convert(mf_phase_temp, m_mf_phase, 0);
+        amrex::convert(mf_mask_temp, m_mf_active_mask, 0);
+
+        amrex::Copy(mf_plot, mf_soln_temp,       0, 0, 1, 0);
+        amrex::Copy(mf_plot, m_mf_coeff_D,       0, 1, 1, 0);
+        amrex::Copy(mf_plot, mf_phase_temp,      0, 2, 1, 0);
+        amrex::Copy(mf_plot, mf_mask_temp,       0, 3, 1, 0);
+
+        std::string plotfilename = m_resultspath + "/tortuosity_solution_" + std::to_string(static_cast<int>(m_dir));
+        amrex::Vector<std::string> varnames = {"solution_potential", "coefficient_D", "phase_id", "active_mask"};
+        amrex::WriteSingleLevelPlotfile(plotfilename, mf_plot, varnames, m_geom, 0.0, 0);
+        
+        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "  Plotfile written to " << plotfilename << std::endl;
+        }
     }
     return m_converged;
 }
 
 
-// --- Calculate Tortuosity Value (Calls Solve if needed) ---
-// <<< MODIFIED to use ACTIVE volume fraction >>>
+// --- MODIFIED value() method ---
 amrex::Real OpenImpala::TortuosityHypre::value(const bool refresh)
 {
-    // If active VF is zero (checked in constructor), return NaN immediately.
     if (m_active_vf <= std::numeric_limits<amrex::Real>::epsilon() && !m_first_call) {
-        return std::numeric_limits<amrex::Real>::quiet_NaN(); // Or Inf
+        return std::numeric_limits<amrex::Real>::quiet_NaN();
     }
 
     if (m_first_call || refresh) {
-        // Check again in case constructor exited early
         if (m_active_vf <= std::numeric_limits<amrex::Real>::epsilon()) {
-             if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) {
-                 amrex::Print() << "WARNING: Active volume fraction is zero. Tortuosity is NaN or Inf." << std::endl;
-             }
-             m_value = std::numeric_limits<amrex::Real>::quiet_NaN(); // Or Inf
-             m_first_call = false;
-             return m_value;
-        }
-
-        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "Calculating Tortuosity (solve required)..." << std::endl; }
-        bool solve_converged = solve(); // Call solve, which now sets m_converged
-
-        if (!solve_converged) {
-            if (m_verbose >= 0 && amrex::ParallelDescriptor::IOProcessor()) { amrex::Print() << "WARNING: Solver did not converge or failed. Tortuosity calculation skipped, returning NaN." << std::endl; }
             m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
             m_first_call = false;
             return m_value;
         }
 
-        // Solve converged, now calculate fluxes and check conservation
-        global_fluxes(); // Calculates and stores m_flux_in, m_flux_out
+        if (m_verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
+             amrex::Print() << "Calculating Effective Property (solve required)..." << std::endl;
+        }
+        bool solve_converged = solve();
+
+        if (!solve_converged) {
+            if (m_verbose >= 0) amrex::Print() << "WARNING: Solver did not converge. Calculation skipped." << std::endl;
+            m_value = std::numeric_limits<amrex::Real>::quiet_NaN();
+            m_first_call = false;
+            return m_value;
+        }
+
+        global_fluxes(); // Calculates m_flux_in, m_flux_out
 
         // --- Check Flux Conservation ---
         // Logic remains the same...
@@ -994,9 +988,6 @@ void OpenImpala::TortuosityHypre::getCellTypes(amrex::MultiFab& phi, int ncomp) 
     amrex::Abort("TortuosityHypre::getCellTypes not implemented yet!");
 }
 
-
-// --- global_fluxes ---
-// Remains the same...
 void OpenImpala::TortuosityHypre::global_fluxes()
 {
     BL_PROFILE("TortuosityHypre::global_fluxes");
@@ -1006,13 +997,13 @@ void OpenImpala::TortuosityHypre::global_fluxes()
     const amrex::Real* dx = m_geom.CellSize();
     const int idir = static_cast<int>(m_dir);
 
-    // Solution copy logic remains the same...
+    // Solution copy logic (This is essential and remains unchanged)
     amrex::MultiFab mf_soln_temp(m_ba, m_dm, 1, 1);
     mf_soln_temp.setVal(0.0);
     std::vector<double> soln_buffer;
-    #ifdef AMREX_USE_OMP
-    #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
-    #endif
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) private(soln_buffer)
+#endif
     for (amrex::MFIter mfi(mf_soln_temp, false); mfi.isValid(); ++mfi) {
         const amrex::Box& bx = mfi.validbox();
         const int npts = static_cast<int>(bx.numPts());
@@ -1025,15 +1016,20 @@ void OpenImpala::TortuosityHypre::global_fluxes()
         amrex::Array4<amrex::Real> const soln_arr = mf_soln_temp.array(mfi);
         long long k_lin_idx = 0;
         amrex::LoopOnCpu(bx, [&](int ii, int jj, int kk) {
-             if (k_lin_idx < npts) { soln_arr(ii,jj,kk,0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]); }
-             k_lin_idx++;
+            if (k_lin_idx < npts) { soln_arr(ii,jj,kk,0) = static_cast<amrex::Real>(soln_buffer[k_lin_idx]); }
+            k_lin_idx++;
         });
         if (k_lin_idx != npts) { amrex::Warning("Point count mismatch during flux calc copy!"); }
     }
     mf_soln_temp.FillBoundary(m_geom.periodicity());
+    
+    // NOTE: The grown mask used for setupMatrixEquation should be used here,
+    // or m_mf_active_mask needs to be filled at the boundary.
+    // The previous code had m_mf_active_mask.FillBoundary, which implies it has ghost cells.
+    // Assuming m_mf_active_mask has been defined with ghost cells.
     m_mf_active_mask.FillBoundary(m_geom.periodicity());
 
-    // Flux calculation loop remains the same...
+
     amrex::Real local_fxin = 0.0;
     amrex::Real local_fxout = 0.0;
     amrex::Real local_active_cells_in = 0.0;
@@ -1041,11 +1037,14 @@ void OpenImpala::TortuosityHypre::global_fluxes()
     const amrex::Real dx_dir = dx[idir];
     if (dx_dir <= 0.0) amrex::Abort("Zero cell size in flux calculation direction!");
     amrex::IntVect shift = amrex::IntVect::TheDimensionVector(idir);
+    
+    // Debug logic (unchanged)
     if (amrex::ParallelDescriptor::IOProcessor() && m_verbose >= 3) {
         amrex::Print() << "\n--- START LIMITED DEBUG_FLUX (global_fluxes, verbose>=3) ---\n";
         amrex::Print() << "DEBUG_FLUX: Printing details for first few active cells per tile...\n";
     }
     const int max_debug_prints_per_tile = 5;
+    
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (amrex::Gpu::notInLaunchRegion()) reduction(+:local_fxin, local_fxout, local_active_cells_in, local_active_cells_out)
 #endif
@@ -1056,12 +1055,14 @@ void OpenImpala::TortuosityHypre::global_fluxes()
         const amrex::Box& tileBox = mfi.tilebox();
         amrex::Array4<const int> const mask = m_mf_active_mask.const_array(mfi);
         amrex::Array4<const amrex::Real> const soln = mf_soln_temp.const_array(mfi);
+        
+        // --- CHANGE 1: Get the coefficient data ---
+        amrex::Array4<const amrex::Real> const D_coeff = m_mf_coeff_D.const_array(mfi);
+        
         amrex::Box lobox_face = amrex::bdryLo(domain, idir);
         lobox_face &= tileBox;
-        amrex::Box domain_hi_face = domain;
-        domain_hi_face.setSmall(idir, domain.bigEnd(idir));
-        domain_hi_face.setBig(idir, domain.bigEnd(idir));
-        amrex::Box hibox_face = domain_hi_face & tileBox;
+        amrex::Box hibox_face = amrex::bdryHi(domain, idir);
+        hibox_face &= tileBox;
 
         if (!lobox_face.isEmpty()) {
             amrex::LoopOnCpu(lobox_face, [&](int i, int j, int k) {
@@ -1070,10 +1071,12 @@ void OpenImpala::TortuosityHypre::global_fluxes()
                     local_active_cells_in += 1.0;
                     amrex::IntVect iv_inner = iv + shift;
                     if (mask(iv_inner) == cell_active) {
-                        amrex::Real val_bnd = soln(iv);
-                        amrex::Real val_in  = soln(iv_inner);
-                        amrex::Real grad = (val_in - val_bnd) / dx_dir;
-                        amrex::Real flux = -grad;
+                        // --- CHANGE 2: Use harmonic mean for flux calculation ---
+                        amrex::Real D1 = D_coeff(iv);
+                        amrex::Real D2 = D_coeff(iv_inner);
+                        amrex::Real D_face = (D1 + D2 > tiny_flux_threshold) ? (2.0 * D1 * D2) / (D1 + D2) : 0.0;
+                        amrex::Real grad = (soln(iv_inner) - soln(iv)) / dx_dir;
+                        amrex::Real flux = -D_face * grad; // J = -D * grad(phi)
                         local_fxin += flux;
                         // Debug print logic...
                     } else { // Inner inactive
@@ -1083,17 +1086,18 @@ void OpenImpala::TortuosityHypre::global_fluxes()
             });
         }
         if (!hibox_face.isEmpty()) {
-             amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
+            amrex::LoopOnCpu(hibox_face, [&](int i, int j, int k) {
                 amrex::IntVect iv(i,j,k);
-                int mask_val = mask(iv);
-                if (mask_val == cell_active) {
+                if (mask(iv) == cell_active) {
                     local_active_cells_out += 1.0;
                     amrex::IntVect iv_inner = iv - shift;
                     if (mask(iv_inner) == cell_active) {
-                        amrex::Real val_bnd = soln(iv);
-                        amrex::Real val_in = soln(iv_inner);
-                        amrex::Real grad = (val_bnd - val_in) / dx_dir;
-                        amrex::Real flux = -grad;
+                        // --- CHANGE 3: Use harmonic mean for flux calculation ---
+                        amrex::Real D1 = D_coeff(iv);
+                        amrex::Real D2 = D_coeff(iv_inner);
+                        amrex::Real D_face = (D1 + D2 > tiny_flux_threshold) ? (2.0 * D1 * D2) / (D1 + D2) : 0.0;
+                        amrex::Real grad = (soln(iv) - soln(iv_inner)) / dx_dir;
+                        amrex::Real flux = -D_face * grad; // J = -D * grad(phi)
                         local_fxout += flux;
                         // Debug print logic...
                     } else { // Inner inactive
@@ -1104,7 +1108,7 @@ void OpenImpala::TortuosityHypre::global_fluxes()
         }
     } // End MFIter loop
 
-    // Reduction and final scaling remain the same...
+    // Reduction and final scaling (unchanged)
     amrex::ParallelDescriptor::ReduceRealSum(local_fxin);
     amrex::ParallelDescriptor::ReduceRealSum(local_fxout);
     amrex::ParallelDescriptor::ReduceRealSum(local_active_cells_in);
@@ -1113,11 +1117,11 @@ void OpenImpala::TortuosityHypre::global_fluxes()
     long global_active_out = static_cast<long>(local_active_cells_out);
     if (amrex::ParallelDescriptor::IOProcessor()) {
         if (m_verbose > 1) {
-             amrex::Print() << "  Active boundary cell counts: In=" << global_active_in << ", Out=" << global_active_out << "\n";
+            amrex::Print() << "  Active boundary cell counts: In=" << global_active_in << ", Out=" << global_active_out << "\n";
         }
         if (m_verbose >= 3) {
-             amrex::Print() << "DEBUG_FLUX: After reduction: Summed_fxin=" << local_fxin << " Summed_fxout=" << local_fxout << "\n";
-             amrex::Print() << "--- END LIMITED DEBUG_FLUX (global_fluxes, verbose>=3) ---\n\n";
+            amrex::Print() << "DEBUG_FLUX: After reduction: Summed_fxin=" << local_fxin << " Summed_fxout=" << local_fxout << "\n";
+            amrex::Print() << "--- END LIMITED DEBUG_FLUX (global_fluxes, verbose>=3) ---\n\n";
         }
     }
     amrex::Real face_area_element = 1.0;
