@@ -200,11 +200,10 @@ DatReader::DataType DatReader::getRawValue(int i, int j, int k) const {
     return m_raw[static_cast<size_t>(idx)];
 }
 
-// --- Threshold Implementation ---
-void DatReader::threshold(DataType raw_threshold, int value_if_true, int value_if_false, amrex::iMultiFab& mf) const
+void DatReader::readPhaseIDs(amrex::iMultiFab& mf) const
 {
     if (!m_is_read) {
-        amrex::Abort("[DatReader::threshold] Cannot threshold, data not read successfully.");
+        amrex::Abort("[DatReader::readPhaseIDs] Cannot process, data not read successfully.");
     }
     const DataType* const AMREX_RESTRICT data_ptr = m_raw.data();
     const amrex::Long raw_data_size = static_cast<amrex::Long>(m_raw.size());
@@ -228,12 +227,13 @@ void DatReader::threshold(DataType raw_threshold, int value_if_true, int value_i
                                   static_cast<amrex::Long>(i);
                 if (idx >= 0 && idx < raw_data_size)
                 {
-                    fab(amrex::IntVect(i, j, k), 0) = (data_ptr[idx] > raw_threshold) ? value_if_true : value_if_false;
+                    // This is the only change: direct assignment instead of thresholding
+                    fab(amrex::IntVect(i, j, k), 0) = static_cast<int>(data_ptr[idx]);
                 } else {
-                    fab(amrex::IntVect(i, j, k), 0) = value_if_false;
+                    fab(amrex::IntVect(i, j, k), 0) = 0; // Default for out-of-bounds index
                 }
             } else {
-                 fab(amrex::IntVect(i, j, k), 0) = value_if_false;
+                 fab(amrex::IntVect(i, j, k), 0) = 0; // Default for out-of-bounds cell
             }
         });
     }
