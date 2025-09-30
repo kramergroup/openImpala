@@ -19,11 +19,11 @@ These calculated coefficients can directly parameterize continuum-scale models, 
 ## Table of Contents
 
 * [Features](#features)
-* [Getting Started (Recommended: Singularity)](#getting-started-recommended-singularity)
-    * [Singularity Container](#singularity-container)
-    * [Building with Singularity](#building-with-singularity)
-    * [Running Tests with Singularity](#running-tests-with-singularity)
-    * [Running the Application with Singularity](#running-the-application-with-singularity)
+* [Continuous Integration and Delivery](#continuous-integration-and-delivery)
+* [Getting Started (Recommended: Apptainer/Singularity)](#getting-started-recommended-apptainersingularity)
+    * [1. Download the Container](#1-download-the-container)
+    * [2. Run the Application](#2-run-the-application)
+* [Building from Source (for Developers)](#building-from-source-for-developers)
 * [Native Installation (Advanced)](#native-installation-advanced)
     * [Dependencies](#dependencies)
     * [Building from Source (CMake)](#building-from-source-cmake)
@@ -32,7 +32,6 @@ These calculated coefficients can directly parameterize continuum-scale models, 
 * [Output](#output)
 * [Visualisation](#visualisation)
 * [Applications & Related Publications](#applications--related-publications)
-* [Continuous Integration](#continuous-integration)
 * [Contributing](#contributing)
 * [Citation](#citation)
 * [License](#license)
@@ -52,86 +51,67 @@ These calculated coefficients can directly parameterize continuum-scale models, 
 
 ---
 
-## Getting Started (Recommended: Singularity)
+## Continuous Integration and Delivery
 
-The easiest way to get started is by using the provided Singularity container, which includes all necessary dependencies and a pre-built environment.
+This project uses **GitHub Actions** for automated building, testing, and releasing.
 
-### Singularity Container
+* **Build & Test CI (`build-test.yml`):** On every push and pull request, this workflow automatically builds the code and runs the full test suite inside a containerized environment to ensure correctness. Build and test logs are available as artifacts for debugging.
 
-A containerised build environment providing all dependencies is available on Sylabs Cloud. *(Note: Verify Sylabs link/availability if using the badge above)*.
+* **Build & Release (`release.yml`):** When a new version is tagged for release, this workflow automatically builds the final Apptainer/Singularity container (`.sif`) and attaches it to a new **GitHub Release**. This is the official, recommended way to get the software.
 
-The container includes: Centos 7, OpenMPI, Hypre, LibTiff, AMReX, HDF5, h5cpp, InfiniBand support, and a pre-built OpenImpala.
+---
 
-1.  **Install Singularity:** Ensure you have Singularity (version 3.x recommended) installed on your Linux system or HPC. See [Singularity documentation](https://sylabs.io/docs/).
+## Getting Started (Recommended: Apptainer/Singularity)
 
-2.  **Pull the Image:**
+The easiest way to use OpenImpala is by downloading the pre-built container from the official GitHub Releases.
+
+### 1. Download the Container
+
+1.  Go to the [**GitHub Releases Page**](https://github.com/kramergroup/openImpala/releases).
+2.  Find the latest release and download the `.sif` file (e.g., `openimpala-vX.Y.Z.sif`) from the "Assets" section.
+3.  Ensure you have **Apptainer** or **Singularity** (version 3.x or later) installed on your system. See the [Apptainer documentation](https://apptainer.org/docs/user/main/installation.html).
+
+### 2. Run the Application
+
+The main application is `Diffusion`, configured via an `inputs` file. Use the `-B` (`--bind`) flag to mount your current working directory (containing your `inputs` file and data) into the container.
+
+```bash
+# Define the SIF file you downloaded
+SIF_FILE="openimpala-vX.Y.Z.sif"
+
+# --- Run Sequentially ---
+# Mounts the current directory into /data inside the container
+apptainer exec -B "$(pwd):/data" ${SIF_FILE} /usr/local/bin/Diffusion /data/inputs
+
+# --- Run in Parallel with MPI ---
+# Ensure OMP_NUM_THREADS=1 if using multiple MPI ranks
+export OMP_NUM_THREADS=1
+mpirun -np 4 apptainer exec -B "$(pwd):/data" ${SIF_FILE} /usr/local/bin/Diffusion /data/inputs
+```
+
+---
+
+## Building from Source (for Developers)
+
+If you are developing OpenImpala and need to compile your changes, you can replicate the CI build process locally. This workflow uses a two-stage container build.
+
+1.  **Build the Dependency Container:** First, build the container that holds all the compilers and libraries (MPI, Hypre, AMReX, etc.). This is based on the `Singularity.deps.def` recipe.
     ```bash
-    singularity pull library://jameslehoux/default/openimpala:latest
+    # This command needs root privileges to install packages inside the container
+    sudo apptainer build dependency_image.sif containers/Singularity.deps.def
     ```
-    This downloads the `openimpala_latest.sif` image file to your current directory.
 
-### Building with Singularity
-
-While the container includes a pre-built version, you can also compile your local source code using the container's environment:
-
-1.  **Start an interactive shell** within the container, mounting your local source code directory (replace `/path/to/local/openImpala` with the actual path).
+2.  **Compile OpenImpala:** Now, execute the `make` command *inside* the dependency container you just built. This will compile your local source code using the tools from the container.
     ```bash
-    # Mount current directory (.) containing source code to /src inside container
-    singularity shell --bind "$(pwd):/src" openimpala_latest.sif
+    # Mount your local project directory to /src inside the container and run make
+    apptainer exec --bind "$(pwd):/src" dependency_image.sif bash -c "cd /src && make all -j"
     ```
+    The compiled executables will appear in the `build/` directory on your local filesystem.
 
-2.  **Navigate and Build:** Inside the Singularity shell, go to your source directory and use `make`.
+3.  **Run Tests:** To run the test suite, use the same container.
     ```bash
-    Singularity> cd /src
-    Singularity> make
+    apptainer exec --bind "$(pwd):/src" dependency_image.sif bash -c "cd /src && make test"
     ```
-    This will create a `build/` directory (relative to `/src`) containing object files and executables compiled using the container's tools.
-
-### Running Tests with Singularity
-
-After building (or using the pre-built version), you can run the tests.
-
-* **Option 1: Inside Singularity Shell:** If you are already inside the shell (`singularity shell ...`):
-    ```bash
-    Singularity> cd /path/to/openImpala/build/tests # Use path to built tests
-    Singularity> ./tTiffReader
-    Singularity> ./tVolumeFraction
-    Singularity> ./tTortuosity
-    ```
-
-* **Option 2: Using `singularity exec`:** Run directly from your host shell:
-    ```bash
-    singularity exec openimpala_latest.sif /openImpala/build/tests/tTiffReader
-    singularity exec openimpala_latest.sif /openImpala/build/apps/Diffusion
-    singularity exec openimpala_latest.sif /openImpala/build/tests/tVolumeFraction
-    singularity exec openimpala_latest.sif /openImpala/build/tests/tTortuosity
-    ```
-    *(Note: Ensure paths like `/openImpala/build/...` correctly point to the executables *inside* the container image).*
-
-### Running the Application with Singularity
-
-The main application is `Diffusion`, configured via an `inputs` file.
-
-1.  **Prepare `inputs` file:** Create or copy an `inputs` file (see [Example `inputs` File](#example-inputs-file) section below) on your *host* machine. Adjust parameters like `filename`, `data_path`, `results_dir` to point to locations accessible *from within the container* (often achieved by mounting host directories).
-
-2.  **Run using `singularity exec`:** Use the `-B` flag (or `--bind`) to mount necessary host directories into the container.
-    ```bash
-    # Example: Mount current host directory to /host_pwd inside container
-    # Assumes 'inputs' file and 'data/' directory are in the current host directory
-    # Assumes results will be written relative to the mounted directory
-
-    # Run sequentially
-    singularity exec -B "$(pwd):/host_pwd" openimpala_latest.sif \
-        /openImpala/build/apps/Diffusion /host_pwd/inputs
-
-    # Run in parallel using MPI (requires MPI inside container + host setup)
-    # Ensure OMP_NUM_THREADS=1 if using multiple MPI ranks
-    export OMP_NUM_THREADS=1
-    mpirun -np 4 singularity exec -B "$(pwd):/host_pwd" openimpala_latest.sif \
-        /openImpala/build/apps/Diffusion /host_pwd/inputs
-    ```
-    *Modify the `-B` mount points (`host_path:container_path`) according to where your data/input/output directories reside on the host.*
-    *Ensure paths used *inside* the `inputs` file (like `data_path`, `results_dir`) correspond to paths *within the container* (e.g., `/host_pwd/data/`, `/host_pwd/results/`).*
 
 ---
 
@@ -150,27 +130,22 @@ Building natively requires manually installing all dependencies.
 * **LibTIFF Library:** Required for reading TIFF input files (development package needed, e.g., `libtiff-dev`, `libtiff-devel`).
 * **HDF5 Library:** Required for reading HDF5 input datasets (C and C++ bindings, development package needed). Needed if building with HDF5 support.
 * *(Optional)* **Boost Filesystem:** May be required depending on internal path handling.
-* *(Optional)* Other libraries depending on enabled features.
 
 ### Building from Source (CMake)
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/kramergroup/openImpala.git](https://github.com/kramergroup/openImpala.git) # <-- VERIFY/REPLACE URL
+    git clone [https://github.com/kramergroup/openImpala.git](https://github.com/kramergroup/openImpala.git)
     cd openImpala
     ```
 
 2.  **Configure using CMake:** Create a build directory.
     ```bash
     mkdir build && cd build
-    # Basic configuration (installs to ../install relative to source):
+    # Basic configuration:
     cmake .. -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=Release
     # Or add paths to dependencies if not found automatically:
-    # cmake .. -DCMAKE_INSTALL_PREFIX=../install -DCMAKE_BUILD_TYPE=Release \
-    #       -DAMReX_DIR=/path/to/amrex/lib/cmake/AMReX \
-    #       -DHYPRE_DIR=/path/to/hypre/lib/cmake/hypre \
-    #       -DHDF5_DIR=/path/to/hdf5/share/cmake \
-    #       -DLibTIFF_DIR=/path/to/libtiff/lib/cmake/tiff-X.Y
+    # cmake .. -DAMReX_DIR=/path/to/amrex/lib/cmake/AMReX -DHYPRE_DIR=/path/to/hypre/lib/cmake/hypre
     ```
     * Use `ccmake ..` or `cmake-gui ..` for interactive configuration.
     * Set `CMAKE_CXX_COMPILER`/`CMAKE_Fortran_COMPILER` (e.g., to `mpicxx`, `mpif90`).
@@ -182,46 +157,46 @@ Building natively requires manually installing all dependencies.
 
 4.  **Run Tests (Optional):**
     ```bash
-    make test # Or ctest
-    # Or run individually: ./tests/tTiffReader etc.
+    make test
     ```
 
 5.  **Install (Optional):**
     ```bash
     make install
     ```
-    The executable (e.g., `Diffusion`) will be in `build/apps/` or `../install/bin`. Ensure the location is in your `PATH`.
+    The executable (e.g., `Diffusion`) will be in `build/apps/`.
+
+---
 
 ## Batch Processing (HPC)
 
-The `Diffusion` application runs non-interactively, making it suitable for HPC batch jobs. An example SLURM script snippet using Singularity:
+The `Diffusion` application runs non-interactively, making it suitable for HPC batch jobs. An example SLURM script:
 
 ```bash
 #!/bin/bash
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=20 # Request 20 cores on one node
+#SBATCH --ntasks-per-node=20
 #SBATCH --time=01:00:00
 #SBATCH --job-name=openimpala_diffusion
 
-module load singularity/3.2.1 # Load required singularity module on HPC
+module load apptainer # Or singularity, depending on your HPC
+export OMP_NUM_THREADS=1
 
-export OMP_NUM_THREADS=1 # Ensure OpenMP threading is disabled if using pure MPI
-
-# Navigate to directory containing the 'inputs' file
+# Navigate to your simulation directory
 cd /path/to/your/simulation/directory/
 
-# Define path to singularity image (e.g., absolute path)
-SIF_IMAGE=/path/on/hpc/to/openimpala_latest.sif
+# Define path to the downloaded SIF image
+SIF_IMAGE=/path/on/hpc/to/openimpala-vX.Y.Z.sif
 
-# Define path to executable inside the container
-APP=/openImpala/build/apps/Diffusion
+# Define path to the executable *inside* the container
+APP=/usr/local/bin/Diffusion
 
-# Define path to inputs file (e.g., absolute path or relative to working dir)
+# Define path to your inputs file
 INPUT_FILE=./inputs
 
-# Run the calculation using mpirun and singularity exec
-# Mount necessary directories (e.g., current directory for inputs/outputs)
-mpirun -np <span class="math-inline">SLURM\_NTASKS singularity exec \-B "</span>(pwd)":"$(pwd)" $SIF_IMAGE $APP $INPUT_FILE
+# Run the calculation, binding the current directory for I/O
+mpirun -np $SLURM_NTASKS apptainer exec \
+    -B "$(pwd):$(pwd)" $SIF_IMAGE $APP $INPUT_FILE
 
 echo "Job Finished"
 ```

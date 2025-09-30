@@ -5,7 +5,9 @@ name: Build and Release Singularity Container
 on:
   push:
     branches:
-      - 'build'  # <-- Trigger ONLY on pushes to the 'build' branch
+      - 'master'  # <-- Trigger ONLY on pushes to the 'build' branch
+    tags:
+      - 'v*'
   workflow_dispatch: # Allows manual trigger via Actions tab
 
 jobs:
@@ -58,7 +60,7 @@ jobs:
       # Uses the softprops/action-gh-release action which conveniently
       # creates a release based on the tag and uploads specified files.
       - name: Create GitHub Release and Upload SIF
-        if: false # <-- Temporarily disable this step during testing on 'build' branch
+        if: true # <-- Temporarily disable this step during testing on 'build' branch
         uses: softprops/action-gh-release@v2 # Use v2 or later
         with:
           # The files glob pattern to upload as release assets.
