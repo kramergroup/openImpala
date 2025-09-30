@@ -1,295 +1,73 @@
 # Singularity Definition File for OpenImpala Application
-# Builds all dependencies and OpenImpala itself.
-# Aligned with Singularity.deps.def for dependency versions and build methods.
+# This is a MULTI-STAGE build file.
+# It uses the pre-built dependency container to build the final application.
 
 Bootstrap: docker
-From: quay.io/rockylinux/rockylinux:8 # Consistent base image
+From: quay.io/rockylinux/rockylinux:8
+Stage: build
 
-%help
-    Container with environment for building and running OpenImpala.
-    Builds OpenImpala from the 'master' branch by default (can be changed).
-
-    Includes:
-      * Rocky Linux 8 Base
-      * GCC Toolset 11
-      * OpenMPI 4.1.6 (with IB support)
-      * CMake 3 (from EPEL)
-      * HDF5 1.12.3 (Parallel, Fortran, C++)
-      * LibTIFF 4.6.0
-      * AMReX 25.03 (MPI, OMP, EB)
-      * HYPRE v2.32.0 (MPI, OMP)
-      * Other standard build tools.
-
-    Usage:
-      sudo apptainer build openimpala_app.sif Singularity.def
-      singularity exec -B $PWD:/data openimpala_app.sif Diffusion /data/inputs
-      mpirun -np 4 singularity exec -B $PWD:/data openimpala_app.sif Diffusion /data/inputs
-
-%labels
-    Maintainer "James Le Houx <your-email@example.com>" # <-- UPDATE EMAIL
-    Version 3.0-app-amrex2503-hypre2320-gcc11 # <-- UPDATE AS NEEDED
+# In this first stage, we just copy your local source code into a temporary location.
+%files
+    # Copy the entire local project directory (from the CI runner)
+    # into /src inside this temporary build stage.
+    . /src
 
 %post
-    set -e # Ensure commands exit on error early
+    # No build steps are needed here yet.
 
-    # Define versions (consistent with Singularity.deps.def)
-    export OPENMPI_VERSION=4.1.6
-    export AMREX_VERSION=25.03
-    export HYPRE_VERSION=v2.32.0
-    export HDF5_VERSION=1.12.3
-    export LIBTIFF_VERSION=4.6.0
-    export ZLIB_VERSION=system # Use system zlib
+# --- Final Stage ---
+# This is the actual container that will be saved.
+Bootstrap: docker
+From: quay.io/rockylinux/rockylinux:8
+Stage: final
 
-    # --- Define Install Prefixes (consistent with Singularity.deps.def) ---
-    export OPENMPI_INSTALL_PREFIX=/usr/local
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
-    export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
-    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
-    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
-    export ZLIB_ROOT=/usr # For HDF5 build
+%help
+    Container with the OpenImpala application and all its runtime dependencies.
+    Built using a multi-stage process for efficiency and correctness.
 
-    # Add ldconfig paths (consistent with Singularity.deps.def)
-    echo "${OPENMPI_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/openmpi.conf
-    echo "${HDF5_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hdf5.conf
-    echo "${LIBTIFF_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/custom-libtiff.conf
-    echo "${AMREX_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/amrex.conf
-    echo "${HYPRE_INSTALL_PREFIX}/lib" > /etc/ld.so.conf.d/hypre.conf
+%labels
+    Maintainer "James Le Houx <james.lehoux@gre.ac.uk>"
+    Version 3.0-app-amrex2503-hypre2320-gcc11
 
-    # --- Install Repositories and Packages ---
-    echo "--- Updating system and installing EPEL ---"
-    dnf update -y
-    dnf install -y dnf-utils epel-release
+%files from build
+    # Copy the source code from the 'build' stage into this final container.
+    /src /opt/openImpala
 
-    echo "--- Enabling PowerTools repository ---"
-    dnf config-manager --set-enabled powertools
+# This post section copies all the pre-compiled libraries from your
+# dependency container into this final container.
+# It assumes 'dependency_image.sif' is in the build directory.
+%post
+    set -e
+    echo "--- Copying libraries from dependency container ---"
+    apptainer-cp -s dependency_image.sif /opt /
+    apptainer-cp -s dependency_image.sif /usr/local /usr
 
-    echo "--- Installing Development Tools and Core Packages ---"
-    dnf install -y \
-        '@Development Tools' \
-        gcc-gfortran \
-        gcc-toolset-11 \
-        cmake3 \
-        wget \
-        git \
-        patch \
-        python3 \
-        python3-pip \
-        hostname \
-        infiniband-diags \
-        libibverbs-devel \
-        libjpeg-turbo-devel \
-        boost-devel \
-        hwloc-devel \
-        libevent-devel \
-        flex \
-        bison \
-        flex-devel \
-        which \
-        ca-certificates \
-        zlib-devel && \
-    dnf clean all -y
-
-    mkdir /tmp/build_src && cd /tmp/build_src
-
-    # --- Activate SCL for GCC Toolset 11 ---
-    echo "=== Sourcing GCC Toolset 11 enable script ==="
-    source /opt/rh/gcc-toolset-11/enable
-    export CC=$(which gcc); export CXX=$(which g++); export FC=$(which gfortran)
-
-    # --- Verify Compilers ---
-    echo "--- Verifying CMake (from dnf) ---"
-    which cmake3 && cmake3 --version || { echo "CMake (cmake3) verification failed!"; exit 1; }
-    which gcc && gcc --version | grep "(GCC) 11." || { echo "GCC 11 verification failed!"; exit 1; }
-
-    # --- Install OpenMPI (consistent with Singularity.deps.def) ---
-    echo "--- Building OpenMPI ${OPENMPI_VERSION} ---"
-    wget https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION%.*}/openmpi-${OPENMPI_VERSION}.tar.gz --no-check-certificate
-    tar -xzf openmpi-${OPENMPI_VERSION}.tar.gz && cd openmpi-${OPENMPI_VERSION}
-    ./configure --prefix=${OPENMPI_INSTALL_PREFIX} \
-        --enable-orterun-prefix-by-default --enable-mpirun-prefix-by-default \
-        --with-verbs --enable-shared --enable-static=no \
-        CC="$CC" CXX="$CXX" FC="$FC"
-    make -j$(nproc) LDFLAGS="-lfl" # Keep LDFLAGS for make if needed
-    make install # Serial, No LDFLAGS here usually
-    cd .. && rm -rf openmpi-${OPENMPI_VERSION}*
-    export PATH=${OPENMPI_INSTALL_PREFIX}/bin:${PATH} 
-    ldconfig 
-    echo "--- Verifying OpenMPI install (mpicc) ---"
-    which mpicc && mpicc --version || { echo "*** ERROR: mpicc not found after OpenMPI install!"; exit 1; }
-
-    # --- Install HDF5 from Source (consistent with Singularity.deps.def) ---
-    echo "--- Building HDF5 ${HDF5_VERSION} from Source ---"
-    cd /tmp/build_src
-    wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-${HDF5_VERSION%.*}/hdf5-${HDF5_VERSION}/src/hdf5-${HDF5_VERSION}.tar.gz --no-check-certificate
-    tar -xzf hdf5-${HDF5_VERSION}.tar.gz && cd hdf5-${HDF5_VERSION}
-    # Use MPI wrappers for HDF5 build
-    CC=mpicc CXX=mpicxx FC=mpifort ./configure \
-        --prefix=${HDF5_INSTALL_PREFIX} \
-        --enable-parallel \
-        --enable-shared \
-        --enable-hl \
-        --enable-cxx \
-        --enable-fortran --enable-fortran2003 \
-        --enable-unsupported \
-        --with-zlib=${ZLIB_ROOT} \
-        --enable-threadsafe \
-        CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native" FCFLAGS="-O3 -march=native"
-    make -j$(nproc)
-    make install 
-    cd .. && rm -rf hdf5-${HDF5_VERSION}*
-    export PATH=${HDF5_INSTALL_PREFIX}/bin:${PATH} 
-    ldconfig 
-    echo "--- Verifying HDF5 install (h5pcc) ---"
-    which h5pcc && h5pcc -showconfig || { echo "*** ERROR: h5pcc not found or failed after HDF5 source install!"; exit 1; }
-
-    # --- Install libtiff from Source (consistent with Singularity.deps.def) ---
-    echo "--- Building libtiff ${LIBTIFF_VERSION} from Source ---"
-    cd /tmp/build_src
-    wget https://download.osgeo.org/libtiff/tiff-${LIBTIFF_VERSION}.tar.gz --no-check-certificate
-    tar -xzf tiff-${LIBTIFF_VERSION}.tar.gz
-    cd tiff-${LIBTIFF_VERSION}
-    ./configure --prefix=${LIBTIFF_INSTALL_PREFIX} --with-zlib=yes --with-jpeg=yes \
-        CC="$CC" CXX="$CXX" CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native"
-    make -j$(nproc)
-    make install
-    cd ..
-    rm -rf tiff-${LIBTIFF_VERSION}*
-    ldconfig 
-
-    # --- Install AMReX (consistent with Singularity.deps.def) ---
-    echo "--- Building AMReX ${AMREX_VERSION} ---"
-    cd /tmp/build_src
-    git clone --depth 1 --branch ${AMREX_VERSION} https://github.com/AMReX-Codes/amrex.git
-    cd amrex
-    mkdir build && cd build
-    echo "--- Configuring AMReX ---"
-    cmake3 .. \
-        -DCMAKE_INSTALL_PREFIX=${AMREX_INSTALL_PREFIX} \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DAMReX_MPI=ON \
-        -DAMReX_OMP=ON \
-        -DAMReX_EB=ON \
-        -DAMReX_FORTRAN=ON \
-        -DCMAKE_C_COMPILER=$(which mpicc) \
-        -DCMAKE_CXX_COMPILER=$(which mpicxx) \
-        -DCMAKE_Fortran_COMPILER=$(which mpif90) \
-        -DBUILD_SHARED_LIBS=ON \
-        -DCMAKE_CXX_FLAGS="-O3 -march=native" \
-        -DCMAKE_C_FLAGS="-O3 -march=native" \
-        -DCMAKE_Fortran_FLAGS="-O3 -march=native" \
-        -DCMAKE_PREFIX_PATH="${HDF5_INSTALL_PREFIX};${LIBTIFF_INSTALL_PREFIX}" \
-    || { echo "*** AMReX Configure Failed!"; exit 1; }
-    echo "--- Building AMReX (make) ---"
-    make -j$(nproc) || { echo "*** AMReX Make Failed!"; exit 1; }
-    echo "--- Installing AMReX (make install) ---"
-    make install || { echo "*** AMReX Make Install Failed!"; exit 1; }
-    cd ../..
-    rm -rf amrex
-
-    # --- Install HYPRE (consistent with Singularity.deps.def) ---
-    echo "--- Building HYPRE ${HYPRE_VERSION} ---"
-    cd /tmp/build_src
-    git clone --depth 1 --branch ${HYPRE_VERSION} https://github.com/hypre-space/hypre.git
-    cd hypre/src 
-    LDFLAGS="-fopenmp" ./configure --prefix=${HYPRE_INSTALL_PREFIX} \
-        --with-MPI \
-        --with-openmp \
-        --enable-shared \
-        CC=$(which mpicc) CXX=$(which mpicxx) FC=$(which mpif90) \
-        CFLAGS="-O3 -march=native" CXXFLAGS="-O3 -march=native" FFLAGS="-O3 -march=native"
-
-    echo "--- Making HYPRE library ---"
-    make -j$(nproc)
-    echo "--- Running HYPRE internal tests (make check) ---"
-    make check > /hypre_make_check.log 2>&1 || echo "WARNING: hypre 'make check' failed. Log at /hypre_make_check.log. Continuing install..."
-    echo "--- Installing HYPRE ---"
-    make install
-    cd ../..
-    rm -rf hypre
-    ldconfig 
-
-    # --- Build OpenImpala ---
-    export AMREX_HOME=${AMREX_INSTALL_PREFIX}
-    export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
-    export HDF5_HOME=${HDF5_INSTALL_PREFIX}
-    export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX} # Ensure TIFF_HOME is set for Makefile
-    
-    # Set CMAKE_PREFIX_PATH again for OpenImpala's potential CMake usage, or if Makefile uses it
-    export CMAKE_PREFIX_PATH="${AMREX_HOME};${HYPRE_HOME};${TIFF_HOME};${HDF5_HOME};${OPENMPI_INSTALL_PREFIX};${CMAKE_PREFIX_PATH}"
-
-
-    cd / # Go to a standard location like /opt or /usr/local for cloning app
-    export OPENIMPALA_INSTALL_DIR=/opt/openImpala 
-    echo "Cloning OpenImpala 'master' branch into ${OPENIMPALA_INSTALL_DIR}..."
-    git clone --depth 1 --branch master https://github.com/kramergroup/openImpala.git ${OPENIMPALA_INSTALL_DIR}
-    cd ${OPENIMPALA_INSTALL_DIR}
-    echo "Building OpenImpala using Makefile..."
-    # Ensure Makefile uses environment variables like AMREX_HOME, HYPRE_HOME, etc.
-    # or that mpicxx/mpif90 can find them via compiler wrappers / CMAKE_PREFIX_PATH implicitly.
-    make -j$(nproc)
-    # No 'make install' for OpenImpala typically, executables are in build/apps, build/tests
-
-    # --- Final Cleanup ---
-    echo "=== Final PATH: $PATH ==="
-    cd / && rm -rf /tmp/build_src
+    echo "--- Setting up runtime environment ---"
+    # Update the dynamic linker cache to find all the newly copied libraries.
+    ldconfig
+    # Clean dnf cache to save space.
     dnf clean all
 
-    echo "--- %post section completed successfully ---"
+%install
+    # This section runs inside the final container after all files are copied.
+    # It builds your OpenImpala application using the pre-compiled dependencies.
+    echo "--- Building OpenImpala ---"
+    source /opt/rh/gcc-toolset-11/enable
+    cd /opt/openImpala
+    make -j$(nproc) all
 
 %environment
-    # Activate GCC Toolset 11
+    # This sets up the environment when a user runs the container.
+    # It's copied and adapted from your Singularity.deps.def.
     source /opt/rh/gcc-toolset-11/enable
     export LC_ALL=C; export LANG=C
 
-    # Define versions (must match %post)
-    export OPENMPI_VERSION=4.1.6
     export AMREX_VERSION=25.03
     export HYPRE_VERSION=v2.32.0
-    export HDF5_VERSION=1.12.3
-    export LIBTIFF_VERSION=4.6.0
-    
-    # Installation prefixes (must match %post)
-    export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
-    export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
-    export OPENMPI_INSTALL_PREFIX=/usr/local
-    export HDF5_INSTALL_PREFIX=/opt/hdf5/${HDF5_VERSION}
-    export LIBTIFF_INSTALL_PREFIX=/opt/libtiff/${LIBTIFF_VERSION}
-    export OPENIMPALA_INSTALL_DIR=/opt/openImpala # Where OpenImpala was cloned and built
-
-    # Set HOME variables used by Makefiles/CMake
-    export AMREX_HOME=${AMREX_INSTALL_PREFIX}
-    export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
-    export HDF5_HOME=${HDF5_INSTALL_PREFIX}
-    # H5CPP_HOME might be needed if your CMake finds HDF5 C++ that way
-    # export H5CPP_HOME=${HDF5_HOME} 
-    export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX}
-
-    # Add binaries to PATH
-    export PATH=${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${LIBTIFF_INSTALL_PREFIX}/bin:${HDF5_HOME}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
-    # Add OpenImpala executables (adjust if your Makefile puts them elsewhere)
-    export PATH=${OPENIMPALA_INSTALL_DIR}/build/apps:${OPENIMPALA_INSTALL_DIR}/build/tests:${PATH}
-
-    # Add libraries to LD_LIBRARY_PATH
-    export LD_LIBRARY_PATH=${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${LIBTIFF_INSTALL_PREFIX}/lib:${HDF5_HOME}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
-    
-    # Set CMAKE_PREFIX_PATH to help CMake-based projects find these dependencies
-    # Useful if OpenImpala's Makefile invokes CMake or for other tools.
-    export CMAKE_PREFIX_PATH="${AMREX_HOME};${HYPRE_HOME};${LIBTIFF_INSTALL_PREFIX};${HDF5_HOME};${OPENMPI_INSTALL_PREFIX};${CMAKE_PREFIX_PATH}"
-
-    # Ensure OpenMPI runs correctly within Singularity
-    export OMPI_MCA_btl_vader_single_copy_mechanism=none
-    export OMPI_MCA_rmaps_base_oversubscribe=1 
-
-%test
-    set -e
-    source /opt/rh/gcc-toolset-11/enable # Ensure GCC 11 is active for tests
-
-    # Re-export paths and homes just in case for %test scope
     export OPENMPI_VERSION=4.1.6
-    export AMREX_VERSION=25.03
-    export HYPRE_VERSION=v2.32.0
     export HDF5_VERSION=1.12.3
     export LIBTIFF_VERSION=4.6.0
+
     export AMREX_INSTALL_PREFIX=/opt/amrex/${AMREX_VERSION}
     export HYPRE_INSTALL_PREFIX=/opt/hypre/${HYPRE_VERSION}
     export OPENMPI_INSTALL_PREFIX=/usr/local
@@ -301,48 +79,15 @@ From: quay.io/rockylinux/rockylinux:8 # Consistent base image
     export HYPRE_HOME=${HYPRE_INSTALL_PREFIX}
     export HDF5_HOME=${HDF5_INSTALL_PREFIX}
     export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX}
-    
-    export PATH=${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${LIBTIFF_INSTALL_PREFIX}/bin:${HDF5_HOME}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${OPENIMPALA_INSTALL_DIR}/build/apps:${OPENIMPALA_INSTALL_DIR}/build/tests:${PATH}
-    export LD_LIBRARY_PATH=${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${LIBTIFF_INSTALL_PREFIX}/lib:${HDF5_HOME}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
 
-    echo "--- Verifying Tool Versions ---";
-    echo "Checking mpicc..."; which mpicc && mpicc --version || exit 1
-    echo "Checking mpic++..."; which mpic++ && mpic++ --version || exit 1
-    echo "Checking cmake3..."; which cmake3 && cmake3 --version || exit 1
-    echo "Checking h5pcc..."; which h5pcc && h5pcc -showconfig || exit 1
-    echo "Checking gcc version..."; which gcc && gcc --version | grep "(GCC) 11." || exit 1
-    echo "Checking tiffinfo version..."
-    if ${LIBTIFF_INSTALL_PREFIX}/bin/tiffinfo --version 2>&1 | grep -q "LIBTIFF, Version ${LIBTIFF_VERSION}"; then
-        echo "  tiffinfo version ${LIBTIFF_VERSION} confirmed."
-    else
-        echo "*** ERROR: Could not confirm tiffinfo version ${LIBTIFF_VERSION}!"
-        ${LIBTIFF_INSTALL_PREFIX}/bin/tiffinfo --version # Print actual output for debugging
-        exit 1
-    fi
-    
-    echo "--- Verifying Library Linking ---"
-    LIBTIFF_LIB="${TIFF_HOME}/lib/libtiff.so"
-    if [ ! -f "$LIBTIFF_LIB" ]; then echo "*** ERROR: Custom libtiff library not found at $LIBTIFF_LIB!"; exit 1; fi
-    echo "Checking libtiff lib ($LIBTIFF_LIB)..."; ldd "$LIBTIFF_LIB" || true # Allow ldd to fail gracefully if a sub-dependency is weirdly linked but tiffinfo works
-    
-    echo "--- Verifying OpenImpala Build ---"
-    ls ${OPENIMPALA_INSTALL_DIR}/build/apps/Diffusion || { echo "*** ERROR: Diffusion executable not found!"; exit 1; }
-    ls ${OPENIMPALA_INSTALL_DIR}/build/tests/tTiffReader || { echo "*** ERROR: tTiffReader executable not found!"; exit 1; }
+    # Add OpenImpala executables to the PATH
+    export PATH=${OPENIMPALA_INSTALL_DIR}/build/apps:${OPENIMPALA_INSTALL_DIR}/build/tests:${PATH}
+    export PATH=${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${HDF5_HOME}/bin:${LIBTIFF_INSTALL_PREFIX}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
+    export LD_LIBRARY_PATH=${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${HDF5_HOME}/lib:${LIBTIFF_INSTALL_PREFIX}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
 
-    # Optional: Run a very quick, self-contained OpenImpala test if one exists
-    # echo "Running quick internal test..."
-    # cd ${OPENIMPALA_INSTALL_DIR}/build/tests && ./tTiffReader || { echo "*** ERROR: tTiffReader execution failed!"; exit 1; }
-
-    echo "--- Application container tests passed. ---"
+    export OMPI_MCA_btl_vader_single_copy_mechanism=none
+    export OMPI_MCA_rmaps_base_oversubscribe=1
 
 %runscript
-    # Environment is already set by %environment and sourcing SCL in %post
-    echo "Container with OpenImpala (built from 'working' branch) and all dependencies."
-    echo "Using GCC Toolset 11, AMReX ${AMREX_VERSION}, HYPRE ${HYPRE_VERSION}, OpenMPI ${OPENMPI_VERSION}, HDF5 ${HDF5_VERSION}, LibTIFF ${LIBTIFF_VERSION}."
-    echo "Executables are in PATH, e.g., 'Diffusion', 'tTiffReader'."
-    echo "Usage examples:"
-    echo "  singularity exec <image.sif> Diffusion inputs_file"
-    echo "  mpirun -np N singularity exec <image.sif> Diffusion inputs_file"
-    echo ""
-    echo "Executing command: $@"
+    echo "OpenImpala application container. Use 'apptainer exec <image> Diffusion <inputs>'."
     exec "$@"
