@@ -1,19 +1,14 @@
 # Singularity Definition File for OpenImpala Application
-# This is a MULTI-STAGE build file.
-# It uses the pre-built dependency container to build the final application.
+# MULTI-STAGE build compatible with older Apptainer/Singularity versions.
 
 Bootstrap: docker
 From: quay.io/rockylinux/rockylinux:8
 Stage: build
 
-# In this first stage, we just copy your local source code into a temporary location.
+# Stage 1: Copy your local source code into the build context.
 %files
-    # Copy the entire local project directory (from the CI runner)
-    # into /src inside this temporary build stage.
+    # Copy the entire local project directory into /src inside this stage.
     . /src
-
-%post
-    # No build steps are needed here yet.
 
 # --- Final Stage ---
 # This is the actual container that will be saved.
@@ -30,35 +25,40 @@ Stage: final
     Version 3.0-app-amrex2503-hypre2320-gcc11
 
 %files from build
-    # Copy the source code from the 'build' stage into this final container.
+    # Copy the source code from the 'build' stage into the final container.
     /src /opt/openImpala
 
-# This post section copies all the pre-compiled libraries from your
-# dependency container into this final container.
-# It assumes 'dependency_image.sif' is in the build directory.
+# This post section handles everything: installing build tools, copying dependencies,
+# building the application, and cleaning up. This is compatible with older versions.
 %post
     set -e
-    echo "--- Copying libraries from dependency container ---"
+    echo "--- Installing temporary build dependencies ---"
+    dnf update -y
+    dnf install -y '@Development Tools' gcc-toolset-11
+    
+    echo "--- Copying pre-compiled libraries from dependency container ---"
+    # This assumes 'dependency_image.sif' is in the build directory.
     apptainer-cp -s dependency_image.sif /opt /
     apptainer-cp -s dependency_image.sif /usr/local /usr
-
-    echo "--- Setting up runtime environment ---"
-    # Update the dynamic linker cache to find all the newly copied libraries.
+    
+    echo "--- Updating library cache ---"
+    # Update the dynamic linker cache to find the newly copied libraries.
     ldconfig
-    # Clean dnf cache to save space.
-    dnf clean all
-
-%install
-    # This section runs inside the final container after all files are copied.
-    # It builds your OpenImpala application using the pre-compiled dependencies.
-    echo "--- Building OpenImpala ---"
+    
+    echo "--- Building OpenImpala application ---"
     source /opt/rh/gcc-toolset-11/enable
     cd /opt/openImpala
     make -j$(nproc) all
+    
+    echo "--- Cleaning up build dependencies ---"
+    # Remove the build tools to keep the final container small.
+    dnf remove -y '@Development Tools' gcc-toolset-11
+    dnf clean all -y
+    
+    echo "--- Build process complete ---"
 
 %environment
-    # This sets up the environment when a user runs the container.
-    # It's copied and adapted from your Singularity.deps.def.
+    # This sets up the runtime environment when a user runs the container.
     source /opt/rh/gcc-toolset-11/enable
     export LC_ALL=C; export LANG=C
 
@@ -80,9 +80,8 @@ Stage: final
     export HDF5_HOME=${HDF5_INSTALL_PREFIX}
     export TIFF_HOME=${LIBTIFF_INSTALL_PREFIX}
 
-    # Add OpenImpala executables to the PATH
-    export PATH=${OPENIMPALA_INSTALL_DIR}/build/apps:${OPENIMPALA_INSTALL_DIR}/build/tests:${PATH}
-    export PATH=${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${HDF5_HOME}/bin:${LIBTIFF_INSTALL_PREFIX}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
+    # Add OpenImpala executables and dependency bins to the PATH
+    export PATH=${OPENIMPALA_INSTALL_DIR}/build/apps:${OPENIMPALA_INSTALL_DIR}/build/tests:${AMREX_HOME}/bin:${HYPRE_HOME}/bin:${HDF5_HOME}/bin:${LIBTIFF_INSTALL_PREFIX}/bin:${OPENMPI_INSTALL_PREFIX}/bin:${PATH}
     export LD_LIBRARY_PATH=${AMREX_HOME}/lib:${HYPRE_HOME}/lib:${HDF5_HOME}/lib:${LIBTIFF_INSTALL_PREFIX}/lib:${OPENMPI_INSTALL_PREFIX}/lib:${LD_LIBRARY_PATH}
 
     export OMPI_MCA_btl_vader_single_copy_mechanism=none
