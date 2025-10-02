@@ -115,7 +115,6 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
       m_phase(phase),
       m_vf(vf), // Store original total VF
       m_dir(dir), m_solvertype(st),
-      m_eps(1e-6), m_maxiter(1000),
       m_vlo(vlo), m_vhi(vhi),
       m_resultspath(resultspath), m_verbose(verbose),
       m_write_plotfile(write_plotfile),
@@ -139,7 +138,12 @@ OpenImpala::TortuosityHypre::TortuosityHypre(const amrex::Geometry& geom,
         amrex::Print() << "  Original Total VF (Phase " << m_phase << "): " << m_vf << std::endl;
     }
 
-    // ParmParse and Assertions remain the same...
+    // Set hardcoded default solver parameters.
+    m_eps = 1e-9;
+    m_maxiter = 200;
+
+    // Allow advanced users to override these defaults from the inputs file
+    // by providing a [hypre] block, e.g., hypre.eps = 1e-12
     amrex::ParmParse pp("hypre");
     pp.query("eps", m_eps);
     pp.query("maxiter", m_maxiter);
