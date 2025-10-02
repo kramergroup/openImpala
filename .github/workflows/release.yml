@@ -24,15 +24,25 @@ jobs:
 
       - name: Build Apptainer containers
         run: |
-          # Step 1: Build the dependency container.
+          # Step 1: Build the dependency container as before.
           echo "Building dependency container..."
           sudo apptainer build dependency_image.sif containers/Singularity.deps.def
 
-          # Step 2: Build the final application container.
+          # Step 2: Extract the compiled libraries to a temporary host directory.
+          echo "Extracting libraries from dependency container..."
+          mkdir -p ./tmp_deps/opt
+          mkdir -p ./tmp_deps/usr/local
+          sudo apptainer exec dependency_image.sif cp -a /opt/. ./tmp_deps/opt/
+          sudo apptainer exec dependency_image.sif cp -a /usr/local/. ./tmp_deps/usr/local/
+          
+          # Step 3: Build the final application, bind-mounting the extracted libraries.
           echo "Building application container..."
-          # github.ref_name will be the tag name, e.g., "v1.1.0"
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
-          sudo apptainer build "$SIF_FILENAME" containers/Singularity.def
+          # The --bind flag makes the host's ./tmp_deps folder available inside the build at /deps
+          sudo apptainer build --bind ./tmp_deps:/deps "$SIF_FILENAME" containers/Singularity.def
+
+          # Step 4: Clean up the temporary directory.
+          rm -rf ./tmp_deps
 
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
 
