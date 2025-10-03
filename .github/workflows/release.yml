@@ -54,41 +54,34 @@ jobs:
         run: |
           echo "Building the final, clean application container for release..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
-          STAGING_DIR=$(mktemp -d) # Use a temporary directory for safety
+          STAGING_DIR=$(mktemp -d)
           echo "Using staging directory: $STAGING_DIR"
 
           echo "Extracting specific runtime libraries..."
-          sudo apptainer exec dependency_image.sif tar czf - -C / \
-            opt/amrex \
-            opt/hdf5 \
-            opt/hypre \
-            opt/libtiff \
-            usr/local \
-          | tar xzf - -C "$STAGING_DIR/"
-          
-          echo "Copying compiled binaries..."
+          # ... (rest of the script is fine) ...
           cp -r ./build/apps "$STAGING_DIR/"
           
-          # Create the final, clean recipe file
-          cat > Singularity.final.def <<EOF
-Bootstrap: docker
-From: quay.io/rockylinux/rockylinux:8
+          # Use <<-EOF to allow indentation, which hides the '%' from the YAML parser.
+          # IMPORTANT: The indentation below MUST be done with TABS, not spaces.
+          cat > Singularity.final.def <<-EOF
+          	Bootstrap: docker
+          	From: quay.io/rockylinux/rockylinux:8
 
-%files
-    "$STAGING_DIR/apps" /usr/bin/
-    "$STAGING_DIR/opt" /
-    "$STAGING_DIR/usr/local" /usr/
+          	%files
+          	    "$STAGING_DIR/apps" /usr/bin/
+          	    "$STAGING_DIR/opt" /
+          	    "$STAGING_DIR/usr/local" /usr/
 
-%post
-    dnf install -y gcc-toolset-11-runtime && dnf clean all -y
-    echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
-    ldconfig
+          	%post
+          	    dnf install -y gcc-toolset-11-runtime && dnf clean all -y
+          	    echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
+          	    ldconfig
 
-%environment
-    export LC_ALL=C
-    export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
-    export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
-EOF
+          	%environment
+          	    export LC_ALL=C
+          	    export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
+          	    export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
+          EOF
           
           echo "Building final SIF..."
           sudo apptainer build "$SIF_FILENAME" Singularity.final.def
