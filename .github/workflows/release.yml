@@ -2,10 +2,9 @@ name: Build and Release Singularity Container
 
 on:
   push:
-    # This is the important part: only trigger on tags that look like versions.
     tags:
       - 'v*'
-  workflow_dispatch: # Allows manual trigger via Actions tab
+  workflow_dispatch:
 
 jobs:
   build-and-release:
@@ -22,35 +21,86 @@ jobs:
         with:
           apptainer-version: 1.2.5
 
-      - name: Build Apptainer containers
-        run: |
-          # Step 1: Build the dependency container.
-          echo "Building dependency container..."
-          sudo apptainer build dependency_image.sif containers/Singularity.deps.def
+      - name: Restore Dependency SIF Cache
+        id: cache-restore-sif
+        uses: actions/cache/restore@v4
+        with:
+          path: dependency_image.sif
+          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
 
-          # Step 2: Build the final application container.
-          echo "Building application container..."
-          # github.ref_name will be the tag name, e.g., "v1.1.0"
+      - name: Build Dependency SIF (if cache miss)
+        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache miss. Building dependency_image.sif..."
+          sudo apptainer build --force dependency_image.sif containers/Singularity.deps.def
+
+      - name: Save Dependency SIF to Cache
+        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dependency_image.sif
+          key: ${{ steps.cache-restore-sif.outputs.cache-primary-key || format('{0}-apptainer-sif-{1}', runner.os, hashFiles('containers/Singularity.deps.def')) }}
+
+      - name: Compile Application Binaries
+        run: |
+          echo "Compiling application executables inside the dependency container..."
+          sudo apptainer exec \
+            --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)'
+          echo "Compilation complete."
+
+      - name: Build Final Release SIF
+        run: |
+          echo "Building the final, clean application container for release..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
-          sudo apptainer build "$SIF_FILENAME" containers/Singularity.def
+          STAGING_DIR=$(mktemp -d) # Use a temporary directory for safety
+          echo "Using staging directory: $STAGING_DIR"
+
+          echo "Extracting specific runtime libraries..."
+          sudo apptainer exec dependency_image.sif tar czf - -C / \
+            opt/amrex \
+            opt/hdf5 \
+            opt/hypre \
+            opt/libtiff \
+            usr/local \
+          | tar xzf - -C "$STAGING_DIR/"
+          
+          echo "Copying compiled binaries..."
+          cp -r ./build/apps "$STAGING_DIR/"
+          
+          # Create the final, clean recipe file
+          cat > Singularity.final.def <<EOF
+Bootstrap: docker
+From: quay.io/rockylinux/rockylinux:8
+
+%files
+    "$STAGING_DIR/apps" /usr/bin/
+    "$STAGING_DIR/opt" /
+    "$STAGING_DIR/usr/local" /usr/
+
+%post
+    dnf install -y gcc-toolset-11-runtime && dnf clean all -y
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
+    ldconfig
+
+%environment
+    # MODIFICATION 1: Fix the runtime error by replacing 'source'
+    export LC_ALL=C
+    export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
+    export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
+EOF
+
+          # MODIFICATION 2: The 'EOF' above must have no leading spaces.
+          # The rest of the script continues with normal indentation.
+          echo "Building final SIF..."
+          sudo apptainer build "$SIF_FILENAME" Singularity.final.def
 
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
 
-      - name: Create GitHub Release and Upload SIF Asset
-        # This condition ensures the release step ONLY runs when a tag is pushed.
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create GitHub Release and Upload SIF
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.SIF_FILENAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify Build Output
-        run: |
-          echo "Checking existence and size of ${{ env.SIF_FILENAME }}"
-          ls -lh "${{ env.SIF_FILENAME }}"
-          if [ ! -s "${{ env.SIF_FILENAME }}" ]; then
-            echo "Error: Built SIF file is missing or empty."
-            exit 1
-          fi
-          echo "Build verification step passed."
