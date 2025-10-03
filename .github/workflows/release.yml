@@ -72,7 +72,7 @@ jobs:
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'cp -r /opt/. /staging/opt/ && cp -r /usr/local/. /staging/usr/local/'
+            bash -c 'cp -a /opt/. /staging/opt/ && cp -a /usr/local/. /staging/usr/local/'
           
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
