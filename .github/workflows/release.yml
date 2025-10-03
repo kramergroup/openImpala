@@ -85,17 +85,13 @@ From: quay.io/rockylinux/rockylinux:8
     ldconfig
 
 %environment
-    # MODIFICATION 1: Fix the runtime error by replacing 'source'
     export LC_ALL=C
     export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
     export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
 EOF
-
-          # MODIFICATION 2: The 'EOF' above must have no leading spaces.
-          # The rest of the script continues with normal indentation.
+          
           echo "Building final SIF..."
           sudo apptainer build "$SIF_FILENAME" Singularity.final.def
-
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
 
       - name: Create GitHub Release and Upload SIF
