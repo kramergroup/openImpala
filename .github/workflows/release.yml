@@ -77,7 +77,7 @@ jobs:
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
           Bootstrap: docker
-          From: quay.io/rockylinux/rockylinx:8
+          From: quay.io/rockylinux/rockylinux:8
 
           %files
               "$STAGING_DIR/apps" /usr/bin/
