@@ -57,13 +57,18 @@ jobs:
           STAGING_DIR=$(mktemp -d) # Use a temporary directory for safety
           echo "Using staging directory: $STAGING_DIR"
 
-          # Use the 'tar pipe' pattern (based on your working template) to extract runtime libraries
-          echo "Extracting runtime libraries..."
-          sudo apptainer exec dependency_image.sif tar czf - -C / opt usr/local | tar xzf - -C "$STAGING_DIR/"
+          echo "Extracting specific runtime libraries..."
+          sudo apptainer exec dependency_image.sif tar czf - -C / \
+            opt/amrex \
+            opt/hdf5 \
+            opt/hypre \
+            opt/libtiff \
+            usr/local \
+          | tar xzf - -C "$STAGING_DIR/"
           
-          # Copy the compiled application binaries into the staging area
           echo "Copying compiled binaries..."
           cp -r ./build/apps "$STAGING_DIR/"
+          
 
           # Create the final, clean recipe file
           cat > Singularity.final.def <<EOF
