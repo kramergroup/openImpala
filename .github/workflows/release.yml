@@ -57,51 +57,48 @@ jobs:
           STAGING_DIR=$(mktemp -d)
           echo "Using staging directory: $STAGING_DIR"
 
-          echo "Copying compiled application binaries..."
+          echo "Copying compiled application binaries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
 
-          # --- FIX STARTS HERE ---
-          # 1. Create the target directories in the staging area.
+          # 1. Create the target library directories in the staging area.
           echo "Creating library directories in staging area..."
           mkdir -p "$STAGING_DIR/opt"
           mkdir -p "$STAGING_DIR/usr/local"
 
           # 2. Extract required runtime libraries from the dependency container.
-          # We execute 'cp' inside the dependency SIF to copy its internal /opt folders
+          # We execute 'cp' inside the dependency SIF to copy its internal folders
           # to the mounted staging directory on the host.
           echo "Extracting runtime libraries from dependency_image.sif..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'cp -r /opt/* /staging/opt/ && cp -r /usr/local/* /staging/usr/local/'
-          # --- FIX ENDS HERE ---
-
-          echo "Creating final Singularity definition file..."
-          # The rest of your script can remain the same. Note the indentation here must be tabs.
-          cat > Singularity.final.def <<-EOF
-            Bootstrap: docker
-            From: quay.io/rockylinux/rockylinux:8
-
-            %files
-                "$STAGING_DIR/apps" /usr/bin/
-                "$STAGING_DIR/opt" /
-                "$STAGING_DIR/usr/local" /usr/
-
-            %post
-                dnf install -y gcc-toolset-11-runtime libgfortran && dnf clean all -y
-                echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
-                ldconfig
-
-            %environment
-                export LC_ALL=C
-                export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
-                export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
-          EOF
+            bash -c 'cp -r /opt/. /staging/opt/ && cp -r /usr/local/. /staging/usr/local/'
           
+          echo "Creating final Singularity definition file..."
+          cat > Singularity.final.def <<-EOF
+          Bootstrap: docker
+          From: quay.io/rockylinux/rockylinx:8
+
+          %files
+              "$STAGING_DIR/apps" /usr/bin/
+              "$STAGING_DIR/opt" /
+              "$STAGING_DIR/usr/local" /usr/
+
+          %post
+              dnf install -y gcc-toolset-11-runtime libgfortran && dnf clean all -y
+              echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
+              ldconfig
+
+          %environment
+              export LC_ALL=C
+              export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
+              export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
+          EOF
+
           echo "Building final SIF..."
           sudo apptainer build "$SIF_FILENAME" Singularity.final.def
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
-
+          
       - name: Create GitHub Release and Upload SIF
         uses: softprops/action-gh-release@v2
         with:
