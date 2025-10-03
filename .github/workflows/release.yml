@@ -28,22 +28,25 @@ jobs:
           echo "Building dependency container..."
           sudo apptainer build dependency_image.sif containers/Singularity.deps.def
 
-          # Step 2: Extract the compiled libraries to a temporary directory OUTSIDE the project folder.
+          # Step 2: Define an ABSOLUTE path for the temp directory and extract the libraries.
           echo "Extracting libraries from dependency container..."
-          # Use ../tmp_deps to create the directory one level up.
-          mkdir -p ../tmp_deps/opt
-          mkdir -p ../tmp_deps/usr/local
-          sudo apptainer exec dependency_image.sif cp -a /opt/. ../tmp_deps/opt/
-          sudo apptainer exec dependency_image.sif cp -a /usr/local/. ../tmp_deps/usr/local/
+          # This creates an absolute path like '/home/runner/work/tmp_deps'
+          DEPS_DIR=$(cd .. && pwd)/tmp_deps
+          echo "Using temporary directory: $DEPS_DIR"
           
-          # Step 3: Build the final application, bind-mounting the new path.
+          mkdir -p "$DEPS_DIR/opt"
+          mkdir -p "$DEPS_DIR/usr/local"
+          sudo apptainer exec dependency_image.sif cp -a /opt/. "$DEPS_DIR/opt/"
+          sudo apptainer exec dependency_image.sif cp -a /usr/local/. "$DEPS_DIR/usr/local/"
+          
+          # Step 3: Build the final application, binding the absolute path.
           echo "Building application container..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
-          # The --bind flag now points to the path outside the current directory.
-          sudo apptainer build --bind ../tmp_deps:/deps "$SIF_FILENAME" containers/Singularity.def
+          # The --bind flag now uses the absolute path variable.
+          sudo apptainer build --bind "$DEPS_DIR:/deps" "$SIF_FILENAME" containers/Singularity.def
 
-          # Step 4: Clean up the temporary directory.
-          rm -rf ../tmp_deps
+          # Step 4: Clean up using the absolute path.
+          rm -rf "$DEPS_DIR"
 
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
 
