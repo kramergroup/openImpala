@@ -69,28 +69,28 @@ jobs:
           echo "Copying compiled binaries..."
           cp -r ./build/apps "$STAGING_DIR/"
           
-
           # Create the final, clean recipe file
           cat > Singularity.final.def <<EOF
-          Bootstrap: docker
-          From: quay.io/rockylinux/rockylinux:8
+Bootstrap: docker
+From: quay.io/rockylinux/rockylinux:8
 
-          %files
-              "$STAGING_DIR/apps" /usr/bin/
-              "$STAGING_DIR/opt" /
-              "$STAGING_DIR/usr/local" /usr/
+%files
+    "$STAGING_DIR/apps" /usr/bin/
+    "$STAGING_DIR/opt" /
+    "$STAGING_DIR/usr/local" /usr/
 
-          %post
-              dnf install -y gcc-toolset-11-runtime && dnf clean all -y
-              echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
-              ldconfig
+%post
+    dnf install -y gcc-toolset-11-runtime && dnf clean all -y
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
+    ldconfig
 
-          %environment
-              source /opt/rh/gcc-toolset-11/enable
-              export LC_ALL=C
-              export PATH=/usr/bin:\$PATH
-              export LD_LIBRARY_PATH=/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
-          EOF
+%environment
+    export LC_ALL=C
+    # MODIFIED: Explicitly add the GCC toolset bin directory to the PATH
+    export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
+    # MODIFIED: Explicitly add the GCC toolset library path for robustness
+    export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
+EOF
 
           # Build the final SIF from the simple recipe and staged files
           echo "Building final SIF..."
