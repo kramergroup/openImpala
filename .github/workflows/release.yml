@@ -69,7 +69,9 @@ jobs:
           echo "Copying compiled binaries..."
           cp -r ./build/apps "$STAGING_DIR/"
           
-          # Create the final, clean recipe file
+          # Create the final, clean recipe file.
+          # The content between <<EOF and the final EOF must not have any 
+          # leading spaces to be parsed correctly by the shell.
           cat > Singularity.final.def <<EOF
 Bootstrap: docker
 From: quay.io/rockylinux/rockylinux:8
@@ -86,9 +88,7 @@ From: quay.io/rockylinux/rockylinux:8
 
 %environment
     export LC_ALL=C
-    # MODIFIED: Explicitly add the GCC toolset bin directory to the PATH
     export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
-    # MODIFIED: Explicitly add the GCC toolset library path for robustness
     export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
 EOF
 
