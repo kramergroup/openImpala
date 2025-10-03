@@ -50,7 +50,7 @@ jobs:
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)'
           echo "Compilation complete."
 
-      - name: Build Final Release SIF
+     - name: Build Final Release SIF
         run: |
           echo "Building the final, clean application container for release..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
@@ -60,19 +60,22 @@ jobs:
           echo "Copying compiled application binaries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
 
-          # 1. Create the target library directories in the staging area.
-          echo "Creating library directories in staging area..."
-          mkdir -p "$STAGING_DIR/opt"
-          mkdir -p "$STAGING_DIR/usr/local"
+          # --- NEW DEBUGGING STEP 1 ---
+          # List the contents of /opt inside the source container to prove they exist.
+          echo "--- Listing contents of /opt inside dependency_image.sif ---"
+          sudo apptainer exec ./dependency_image.sif ls -lR /opt/rh
 
-          # 2. Extract required runtime libraries from the dependency container.
-          # We execute 'cp' inside the dependency SIF to copy its internal folders
-          # to the mounted staging directory on the host.
-          echo "Extracting runtime libraries from dependency_image.sif..."
+          # --- NEW EXTRACTION METHOD ---
+          echo "Extracting runtime libraries using tar pipe..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'cp -a /opt/. /staging/opt/ && cp -a /usr/local/. /staging/usr/local/'
+            bash -c 'set -e; cd / && tar cf - opt usr/local | (cd /staging && tar xf -)'
+
+          # --- NEW DEBUGGING STEP 2 ---
+          # List the contents of the staged /opt directory to verify the copy.
+          echo "--- Listing contents of staged /opt directory on host ---"
+          ls -lR "$STAGING_DIR/opt/rh"
           
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
