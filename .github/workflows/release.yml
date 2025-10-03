@@ -73,7 +73,7 @@ jobs:
           	    "$STAGING_DIR/usr/local" /usr/
 
           	%post
-          	    dnf install -y gcc-toolset-11-runtime && dnf clean all -y
+          	    dnf install -y gcc-toolset-11-runtime gcc-toolset-11-libgfortran && dnf clean all -y
           	    echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
           	    ldconfig
 
