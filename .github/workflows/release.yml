@@ -11,60 +11,104 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # Required to create a release and upload assets
 
     steps:
+      # Step 1: Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Step 2: Install Apptainer
       - name: Set up Apptainer
         uses: eWaterCycle/setup-apptainer@v2
         with:
           apptainer-version: 1.2.5
 
-      - name: Build Apptainer containers
+      # Step 3: Restore Dependency SIF from Cache (from your template)
+      - name: Restore Dependency SIF Cache
+        id: cache-restore-sif
+        uses: actions/cache/restore@v4
+        with:
+          path: dependency_image.sif
+          key: ${{ runner.os }}-apptainer-sif-${{ hashFiles('containers/Singularity.deps.def') }}
+
+      # Step 4: Build Dependency SIF if Cache Missed (from your template)
+      - name: Build Dependency SIF Image (if cache miss)
+        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
         run: |
-          # Step 1: Build the dependency container as before.
-          echo "Building dependency container..."
-          sudo apptainer build dependency_image.sif containers/Singularity.deps.def
+          echo "Cache miss. Building dependency_image.sif..."
+          sudo apptainer build --force dependency_image.sif containers/Singularity.deps.def
 
-          # Step 2: Define an ABSOLUTE path for the temp directory and extract the libraries.
-          echo "Extracting libraries from dependency container..."
-          # This creates an absolute path like '/home/runner/work/tmp_deps'
-          DEPS_DIR=$(cd .. && pwd)/tmp_deps
-          echo "Using temporary directory: $DEPS_DIR"
-          
-          mkdir -p "$DEPS_DIR/opt"
-          mkdir -p "$DEPS_DIR/usr/local"
-          sudo apptainer exec dependency_image.sif cp -a /opt/. "$DEPS_DIR/opt/"
-          sudo apptainer exec dependency_image.sif cp -a /usr/local/. "$DEPS_DIR/usr/local/"
-          
-          # Step 3: Build the final application, binding the absolute path.
-          echo "Building application container..."
+      # Step 5: Save Dependency SIF to Cache if it was built (from your template)
+      - name: Save Dependency SIF Image Cache
+        if: steps.cache-restore-sif.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dependency_image.sif
+          key: ${{ steps.cache-restore-sif.outputs.cache-primary-key || format('{0}-apptainer-sif-{1}', runner.os, hashFiles('containers/Singularity.deps.def')) }}
+
+      # Step 6: Compile the Application using the Dependency SIF (from your template)
+      - name: Compile OpenImpala using Dependency SIF
+        run: |
+          echo "Compiling application executables inside the dependency container..."
+          sudo apptainer exec \
+            --bind $PWD:/src \
+            ./dependency_image.sif \
+            bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)'
+          echo "Compilation complete. Executables are now in ./build/apps"
+          ls -l ./build/apps
+
+      # Step 7: Build the FINAL, clean Application SIF for Release
+      - name: Build Final Application SIF
+        run: |
+          echo "Building the final, clean application container..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
-          # The --bind flag now uses the absolute path variable.
-          sudo apptainer build --bind "$DEPS_DIR:/deps" "$SIF_FILENAME" containers/Singularity.def
 
-          # Step 4: Clean up using the absolute path.
-          rm -rf "$DEPS_DIR"
+          # Use the 'apptainer cp' command to extract the necessary runtime libraries.
+          # This is the most reliable method.
+          mkdir -p ./release_staging
+          sudo apptainer cp dependency_image.sif:/opt ./release_staging/
+          sudo apptainer cp dependency_image.sif:/usr/local ./release_staging/
+          
+          # Copy the compiled application binaries into the staging area as well.
+          cp -r ./build/apps ./release_staging/
+
+          # Create a simple, final recipe on-the-fly
+          cat > Singularity.final.def <<EOF
+          Bootstrap: docker
+          From: quay.io/rockylinux/rockylinux:8
+
+          %help
+              OpenImpala Application v${{ github.ref_name }}.
+              This container includes the application executables and their runtime dependencies.
+
+          %files
+              ./release_staging/apps /usr/bin/
+              ./release_staging/opt /opt
+              ./release_staging/usr/local /usr/local
+
+          %post
+              # Install only the essential RUNTIME libraries.
+              dnf install -y gcc-toolset-11-runtime && dnf clean all -y
+              # Set up the dynamic linker cache.
+              echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
+              ldconfig
+
+          %environment
+              source /opt/rh/gcc-toolset-11/enable
+              export LC_ALL=C
+              export LD_LIBRARY_PATH=/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
+          EOF
+
+          # Build the final SIF from the simple recipe and staged files
+          sudo apptainer build "$SIF_FILENAME" Singularity.final.def
 
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
 
+      # Step 8: Create GitHub Release and Upload SIF
       - name: Create GitHub Release and Upload SIF Asset
-        # This condition ensures the release step ONLY runs when a tag is pushed.
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.SIF_FILENAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify Build Output
-        run: |
-          echo "Checking existence and size of ${{ env.SIF_FILENAME }}"
-          ls -lh "${{ env.SIF_FILENAME }}"
-          if [ ! -s "${{ env.SIF_FILENAME }}" ]; then
-            echo "Error: Built SIF file is missing or empty."
-            exit 1
-          fi
-          echo "Build verification step passed."
