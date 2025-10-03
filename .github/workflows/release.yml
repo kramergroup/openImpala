@@ -49,8 +49,8 @@ jobs:
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)'
           echo "Compilation complete."
-
-     - name: Build Final Release SIF
+      
+      - name: Build Final Release SIF
         run: |
           echo "Building the final, clean application container for release..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
@@ -60,20 +60,15 @@ jobs:
           echo "Copying compiled application binaries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
 
-          # --- NEW DEBUGGING STEP 1 ---
-          # List the contents of /opt inside the source container to prove they exist.
           echo "--- Listing contents of /opt inside dependency_image.sif ---"
           sudo apptainer exec ./dependency_image.sif ls -lR /opt/rh
 
-          # --- NEW EXTRACTION METHOD ---
           echo "Extracting runtime libraries using tar pipe..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
             bash -c 'set -e; cd / && tar cf - opt usr/local | (cd /staging && tar xf -)'
 
-          # --- NEW DEBUGGING STEP 2 ---
-          # List the contents of the staged /opt directory to verify the copy.
           echo "--- Listing contents of staged /opt directory on host ---"
           ls -lR "$STAGING_DIR/opt/rh"
           
@@ -101,7 +96,7 @@ jobs:
           echo "Building final SIF..."
           sudo apptainer build "$SIF_FILENAME" Singularity.final.def
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
-          
+
       - name: Create GitHub Release and Upload SIF
         uses: softprops/action-gh-release@v2
         with:
