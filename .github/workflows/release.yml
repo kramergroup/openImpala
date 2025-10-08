@@ -77,17 +77,26 @@ jobs:
               "$STAGING_DIR/usr/local" /usr/
 
           %post
-              # Install the essential RUNTIME dependencies for our custom libraries
-              dnf install -y \
-                  gcc-toolset-11-runtime \
-                  hwloc-libs \
-                  libevent \
-                  libjpeg-turbo \
-                  coreutils && \
-              dnf clean all -y
-              
-              # Update the system linker cache to find all libraries
-              ldconfig
+          # Install the essential RUNTIME dependencies for our custom libraries
+          dnf install -y \
+              gcc-toolset-11-runtime \
+              gcc-toolset-11-libgfortran \
+              hwloc-libs \
+              libevent \
+              libjpeg-turbo \
+              libibverbs \
+              coreutils && \
+          dnf clean all -y
+          
+          # Create linker cache config files for custom library locations
+          echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
+          echo "/opt/amrex/25.03/lib" > /etc/ld.so.conf.d/amrex.conf
+          echo "/opt/hypre/v2.32.0/lib" > /etc/ld.so.conf.d/hypre.conf
+          echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/hdf5.conf
+          echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/libtiff.conf
+
+          # Update the system linker cache to find all libraries
+          ldconfig
 
           %environment
               # This environment sources the SCL script and PREPENDS custom paths.
