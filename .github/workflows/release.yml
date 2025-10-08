@@ -102,24 +102,20 @@ jobs:
               "$STAGING_DIR/usr/local" /usr/
 
           %post
-              # Configure the dynamic linker to find all necessary libraries.
-              # This ensures the system loader can find everything without relying on environment variables.
-              echo "/usr/local/lib" > /etc/ld.so.conf.d/01-openmpi.conf
-              echo "/opt/rh/gcc-toolset-11/root/usr/lib64" > /etc/ld.so.conf.d/02-gcc-toolset-11.conf
-              echo "/opt/amrex/25.03/lib" > /etc/ld.so.conf.d/03-amrex.conf
-              echo "/opt/hypre/v2.32.0/lib" > /etc/ld.so.conf.d/04-hypre.conf
-              echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/05-hdf5.conf
-              echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/06-libtiff.conf
+              # Install the official GCC Toolset 11 runtime package.
+              # This correctly places all necessary libraries (like libgfortran.so.5)
+              # and provides the SCL environment script. This is the robust solution.
+              dnf install -y gcc-toolset-11-runtime && dnf clean all -y
+              # Run ldconfig to update the linker cache for libraries in standard paths
               ldconfig
 
           %environment
+              # This environment is derived from the dependency container's ground truth.
+              # It sources the official SCL script and then prepends custom library paths,
+              # making the container fully self-sufficient for HPC environments.
+              source /opt/rh/gcc-toolset-11/enable
               export LC_ALL=C
-              # Explicitly set the PATH to include the GCC Toolset compilers and custom binaries
-              export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/local/bin:${PATH}
-              
-              # Explicitly set LD_LIBRARY_PATH to include all custom and toolset libraries.
-              # This provides a self-contained environment.
-              export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/rh/gcc-toolset-11/root/usr/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:${LD_LIBRARY_PATH}
+              export LD_LIBRARY_PATH="/usr/local/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:${LD_LIBRARY_PATH}"
           EOF
 
           echo "Building final SIF..."
