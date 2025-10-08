@@ -49,7 +49,7 @@ jobs:
             ./dependency_image.sif \
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)'
           echo "Compilation complete."
-      
+
       - name: Build Final Release SIF
         run: |
           echo "Building the final, clean application container for release..."
@@ -57,10 +57,9 @@ jobs:
           STAGING_DIR=$(mktemp -d)
           echo "Using staging directory: $STAGING_DIR"
 
-          echo "Copying compiled application binaries to staging area..."
+          echo "Copying compiled application binaries and custom libraries to staging area..."
+          # Copy only what we built from source: the app and the contents of /opt and /usr/local
           cp -r ./build/apps "$STAGING_DIR/"
-
-          echo "Extracting runtime libraries..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
@@ -72,27 +71,30 @@ jobs:
           From: quay.io/rockylinux/rockylinux:8
 
           %files
+              # Copy our custom-built application and libraries from the staging area
               "$STAGING_DIR/apps" /usr/bin/
               "$STAGING_DIR/opt" /
               "$STAGING_DIR/usr/local" /usr/
 
           %post
-              # Install only the essential runtime packages from the SCL.
-              dnf install -y gcc-toolset-11-runtime && dnf clean all -y
-              # Update the system linker cache for libraries in standard paths.
+              # Install the essential RUNTIME dependencies for our custom libraries
+              dnf install -y \
+                  gcc-toolset-11-runtime \
+                  hwloc-libs \
+                  libevent \
+                  libjpeg-turbo \
+                  coreutils && \
+              dnf clean all -y
+              
+              # Update the system linker cache to find all libraries
               ldconfig
 
           %environment
-              # This is the definitive, robust environment setup.
-              # It explicitly defines the complete PATH and LD_LIBRARY_PATH from scratch,
-              # making the container self-sufficient and independent of the host environment.
+              # This environment sources the SCL script and PREPENDS custom paths.
+              # This ensures the GCC environment is set up correctly, and our libraries are found first.
+              source /opt/rh/gcc-toolset-11/enable
               export LC_ALL=C
-              
-              SCL_PATHS_LIB="/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/rh/gcc-toolset-11/root/usr/lib"
-              CUSTOM_LIBS="/usr/local/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib"
-              
-              export PATH="/opt/rh/gcc-toolset-11/root/usr/bin:/usr/local/bin:/usr/bin:/bin"
-              export LD_LIBRARY_PATH="\${SCL_PATHS_LIB}:\${CUSTOM_LIBS}"
+              export LD_LIBRARY_PATH="/usr/local/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:${LD_LIBRARY_PATH}"
           EOF
 
           echo "Building final SIF..."
