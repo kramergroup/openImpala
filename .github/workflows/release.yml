@@ -50,7 +50,7 @@ jobs:
             bash -c 'source /opt/rh/gcc-toolset-11/enable && cd /src && make all -j$(nproc)'
           echo "Compilation complete."
 
-     - name: Build Final Release SIF
+      - name: Build Final Release SIF
         run: |
           echo "Building the final, clean application container for release..."
           SIF_FILENAME="openimpala-${{ github.ref_name }}.sif"
@@ -109,7 +109,7 @@ jobs:
           echo "Building final SIF..."
           sudo apptainer build "$SIF_FILENAME" Singularity.final.def
           echo "SIF_FILENAME=$SIF_FILENAME" >> $GITHUB_ENV
-
+          
       - name: Create GitHub Release and Upload SIF
         uses: softprops/action-gh-release@v2
         with:
