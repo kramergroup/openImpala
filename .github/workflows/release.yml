@@ -102,14 +102,24 @@ jobs:
               "$STAGING_DIR/usr/local" /usr/
 
           %post
-              dnf install -y gcc-toolset-11-runtime libgfortran && dnf clean all -y
-              echo "/usr/local/lib" > /etc/ld.so.conf.d/openmpi.conf
+              # Configure the dynamic linker to find all necessary libraries.
+              # This ensures the system loader can find everything without relying on environment variables.
+              echo "/usr/local/lib" > /etc/ld.so.conf.d/01-openmpi.conf
+              echo "/opt/rh/gcc-toolset-11/root/usr/lib64" > /etc/ld.so.conf.d/02-gcc-toolset-11.conf
+              echo "/opt/amrex/25.03/lib" > /etc/ld.so.conf.d/03-amrex.conf
+              echo "/opt/hypre/v2.32.0/lib" > /etc/ld.so.conf.d/04-hypre.conf
+              echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/05-hdf5.conf
+              echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/06-libtiff.conf
               ldconfig
 
           %environment
               export LC_ALL=C
-              export PATH=/usr/bin:/opt/rh/gcc-toolset-11/root/usr/bin:\$PATH
-              export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:\$LD_LIBRARY_PATH
+              # Explicitly set the PATH to include the GCC Toolset compilers and custom binaries
+              export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/local/bin:${PATH}
+              
+              # Explicitly set LD_LIBRARY_PATH to include all custom and toolset libraries.
+              # This provides a self-contained environment.
+              export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/rh/gcc-toolset-11/root/usr/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:/usr/local/lib:${LD_LIBRARY_PATH}
           EOF
 
           echo "Building final SIF..."
