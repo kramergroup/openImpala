@@ -60,18 +60,36 @@ jobs:
           echo "Copying compiled application binaries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
 
-          echo "--- Listing contents of /opt inside dependency_image.sif ---"
-          sudo apptainer exec ./dependency_image.sif ls -lR /opt/rh
-
-          echo "Extracting runtime libraries using tar pipe..."
+          echo "Extracting runtime libraries with existence check..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'set -e; cd / && tar cf - opt usr/local | (cd /staging && tar xf -)'
-
-          echo "--- Listing contents of staged /opt directory on host ---"
-          ls -lR "$STAGING_DIR/opt/rh"
-          
+            bash -c '
+              set -e
+              
+              paths_to_copy=("opt" "usr/local")
+              valid_paths=""
+              
+              cd /
+              
+              for path in "${paths_to_copy[@]}"; do
+                if [ -e "$path" ]; then
+                  echo "Found path: /$path"
+                  valid_paths="$valid_paths $path"
+                else
+                  echo "WARNING: Path /$path not found in container, skipping."
+                fi
+              done
+              
+              if [ -n "$valid_paths" ]; then
+                echo "Archiving paths:$valid_paths"
+                tar cf - $valid_paths | (cd /staging && tar xf -)
+                echo "Extraction complete."
+              else
+                echo "No valid paths found to extract. Nothing to do."
+              fi
+            '
+            
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
           Bootstrap: docker
