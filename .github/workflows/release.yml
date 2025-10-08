@@ -60,36 +60,11 @@ jobs:
           echo "Copying compiled application binaries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
 
-          echo "Extracting runtime libraries with existence check and dereferencing symlinks..."
+          echo "Extracting runtime libraries..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c '
-              set -e
-              
-              paths_to_copy=("opt" "usr/local")
-              valid_paths=""
-              
-              cd /
-              
-              for path in "${paths_to_copy[@]}"; do
-                if [ -e "$path" ]; then
-                  echo "Found path: /$path"
-                  valid_paths="$valid_paths $path"
-                else
-                  echo "WARNING: Path /$path not found in container, skipping."
-                fi
-              done
-              
-              if [ -n "$valid_paths" ]; then
-                # Use "h" flag to dereference symlinks and copy the files they point to
-                echo "Archiving paths:$valid_paths"
-                tar chf - $valid_paths | (cd /staging && tar xf -)
-                echo "Extraction complete."
-              else
-                echo "No valid paths found to extract. Nothing to do."
-              fi
-            '
+            bash -c 'tar chf - /opt /usr/local | (cd /staging && tar xf -)'
             
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
@@ -102,20 +77,22 @@ jobs:
               "$STAGING_DIR/usr/local" /usr/
 
           %post
-              # Install the official GCC Toolset 11 runtime package.
-              # This correctly places all necessary libraries (like libgfortran.so.5)
-              # and provides the SCL environment script. This is the robust solution.
+              # Install only the essential runtime packages from the SCL.
               dnf install -y gcc-toolset-11-runtime && dnf clean all -y
-              # Run ldconfig to update the linker cache for libraries in standard paths
+              # Update the system linker cache for libraries in standard paths.
               ldconfig
 
           %environment
-              # This environment is derived from the dependency container's ground truth.
-              # It sources the official SCL script and then prepends custom library paths,
-              # making the container fully self-sufficient for HPC environments.
-              source /opt/rh/gcc-toolset-11/enable
+              # This is the definitive, robust environment setup.
+              # It explicitly defines the complete PATH and LD_LIBRARY_PATH from scratch,
+              # making the container self-sufficient and independent of the host environment.
               export LC_ALL=C
-              export LD_LIBRARY_PATH="/usr/local/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:${LD_LIBRARY_PATH}"
+              
+              SCL_PATHS_LIB="/opt/rh/gcc-toolset-11/root/usr/lib64:/opt/rh/gcc-toolset-11/root/usr/lib"
+              CUSTOM_LIBS="/usr/local/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib"
+              
+              export PATH="/opt/rh/gcc-toolset-11/root/usr/bin:/usr/local/bin:/usr/bin:/bin"
+              export LD_LIBRARY_PATH="\${SCL_PATHS_LIB}:\${CUSTOM_LIBS}"
           EOF
 
           echo "Building final SIF..."
