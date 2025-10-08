@@ -60,7 +60,7 @@ jobs:
           echo "Copying compiled application binaries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
 
-          echo "Extracting runtime libraries with existence check..."
+          echo "Extracting runtime libraries with existence check and dereferencing symlinks..."
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
@@ -82,8 +82,9 @@ jobs:
               done
               
               if [ -n "$valid_paths" ]; then
+                # Use "h" flag to dereference symlinks and copy the files they point to
                 echo "Archiving paths:$valid_paths"
-                tar cf - $valid_paths | (cd /staging && tar xf -)
+                tar chf - $valid_paths | (cd /staging && tar xf -)
                 echo "Extraction complete."
               else
                 echo "No valid paths found to extract. Nothing to do."
@@ -119,5 +120,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.SIF_FILENAME }}
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
