@@ -60,12 +60,13 @@ jobs:
           echo "Copying compiled application binaries and custom libraries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
           
-          # FIX: Corrected the tar command syntax.
-          # The clustered short options '-chf' must have a dash, separate from the long option '--ignore-failed-read'.
+          # FIX: Be specific about what to copy from the build container.
+          # We only want our custom-compiled libraries (amrex, hypre, etc.), NOT the entire
+          # gcc-toolset-11 from the builder. The runtime toolset will be installed by dnf.
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'tar -chf - --ignore-failed-read /opt /usr/local | (cd /staging && tar xf -)'
+            bash -c 'tar -chf - /usr/local /opt/amrex /opt/hypre /opt/hdf5 /opt/libtiff | (cd /staging && tar xf -)'
             
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
