@@ -63,6 +63,9 @@ jobs:
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
             bash -c 'tar chf - /opt /usr/local | (cd /staging && tar xf -)'
+
+          sudo chown -R $(whoami):$(whoami) "$STAGING_DIR"
+
           
           # --------------------------------------------------------------------
           # ▼▼▼ THIS IS THE NEW, CRITICAL PART THAT WAS NEVER TRIED BEFORE ▼▼▼
