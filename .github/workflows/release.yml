@@ -16,6 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ... (setup-apptainer, cache steps are unchanged) ...
       - name: Set up Apptainer
         uses: eWaterCycle/setup-apptainer@v2
         with:
@@ -59,10 +60,6 @@ jobs:
 
           echo "Copying compiled application binaries and custom libraries to staging area..."
           cp -r ./build/apps "$STAGING_DIR/"
-          
-          # FIX: Be specific about what to copy from the build container.
-          # We only want our custom-compiled libraries (amrex, hypre, etc.), NOT the entire
-          # gcc-toolset-11 from the builder. The runtime toolset will be installed by dnf.
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
@@ -74,34 +71,24 @@ jobs:
           From: quay.io/rockylinux/rockylinux:8
 
           %files
-              # Copy our custom-built application and libraries from the staging area
               "$STAGING_DIR/apps" /usr/bin/
               "$STAGING_DIR/opt" /
               "$STAGING_DIR/usr/local" /usr/
 
           %post
-              # Install the essential RUNTIME dependencies for our custom libraries
+              # --- THIS IS THE FINAL FIX BASED ON OFFICIAL DOCUMENTATION ---
+              # We now install the CORRECT package that provides the gfortran
+              # compiler and, crucially, its runtime libraries like libgfortran.so.5.
               dnf install -y \
-                  gcc-toolset-11-runtime \
+                  gcc-toolset-11-gcc-gfortran \
                   hwloc-libs \
                   libevent \
                   libjpeg-turbo \
                   libibverbs && \
               dnf clean all -y
-              
-              # Create linker cache config files for custom library locations
-              echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
-              echo "/opt/amrex/25.03/lib" > /etc/ld.so.conf.d/amrex.conf
-              echo "/opt/hypre/v2.32.0/lib" > /etc/ld.so.conf.d/hypre.conf
-              echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/hdf5.conf
-              echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/libtiff.conf
-
-              echo "/opt/rh/gcc-toolset-11/root/usr/lib64" > /etc/ld.so.conf.d/gcc-toolset-11.conf
-
-              # Update the system linker cache
-              ldconfig
 
           %environment
+              # The environment script is needed to put the libraries on the PATH
               source /opt/rh/gcc-toolset-11/enable
               export LC_ALL=C
           EOF
