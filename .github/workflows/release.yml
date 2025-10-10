@@ -96,6 +96,8 @@ jobs:
               echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/hdf5.conf
               echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/libtiff.conf
 
+              echo "/opt/rh/gcc-toolset-11/root/usr/lib64" > /etc/ld.so.conf.d/gcc-toolset-11.conf
+
               # Update the system linker cache
               ldconfig
 
