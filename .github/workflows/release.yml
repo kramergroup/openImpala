@@ -60,10 +60,12 @@ jobs:
           echo "Copying compiled application binaries and custom libraries to staging area..."
           # Copy only what we built from source: the app and the contents of /opt and /usr/local
           cp -r ./build/apps "$STAGING_DIR/"
+          # FIX #1: Added --ignore-failed-read to the tar command.
+          # This prevents the workflow from failing if temporary or build-cache files are removed while tar is reading them.
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'tar chf - /opt /usr/local | (cd /staging && tar xf -)'
+            bash -c 'tar --ignore-failed-read chf - /opt /usr/local | (cd /staging && tar xf -)'
             
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
@@ -78,13 +80,15 @@ jobs:
 
           %post
               # Install the essential RUNTIME dependencies for our custom libraries
+              # FIX #2: Removed 'coreutils' from this list.
+              # The minimal base image includes 'coreutils-single', which conflicts with the full 'coreutils' package.
+              # The minimal version is sufficient for the container's runtime needs.
               dnf install -y \
                   gcc-toolset-11-runtime \
                   hwloc-libs \
                   libevent \
                   libjpeg-turbo \
-                  libibverbs \
-                  coreutils && \
+                  libibverbs && \
               dnf clean all -y
               
               # Create linker cache config files for custom library locations
@@ -95,6 +99,8 @@ jobs:
               echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/libtiff.conf
 
               # Update the system linker cache to find all libraries (system and custom)
+              # Note: The "is not a symbolic link" warnings from ldconfig are informational and harmless.
+              # The linker will still find and use the libraries correctly.
               ldconfig
 
           %environment
@@ -116,4 +122,3 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
