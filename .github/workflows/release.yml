@@ -58,14 +58,14 @@ jobs:
           echo "Using staging directory: $STAGING_DIR"
 
           echo "Copying compiled application binaries and custom libraries to staging area..."
-          # Copy only what we built from source: the app and the contents of /opt and /usr/local
           cp -r ./build/apps "$STAGING_DIR/"
-          # FIX #1: Added --ignore-failed-read to the tar command.
-          # This prevents the workflow from failing if temporary or build-cache files are removed while tar is reading them.
+          
+          # FIX: Corrected the tar command syntax.
+          # The clustered short options '-chf' must have a dash, separate from the long option '--ignore-failed-read'.
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
-            bash -c 'tar --ignore-failed-read chf - /opt /usr/local | (cd /staging && tar xf -)'
+            bash -c 'tar -chf - --ignore-failed-read /opt /usr/local | (cd /staging && tar xf -)'
             
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
@@ -80,9 +80,6 @@ jobs:
 
           %post
               # Install the essential RUNTIME dependencies for our custom libraries
-              # FIX #2: Removed 'coreutils' from this list.
-              # The minimal base image includes 'coreutils-single', which conflicts with the full 'coreutils' package.
-              # The minimal version is sufficient for the container's runtime needs.
               dnf install -y \
                   gcc-toolset-11-runtime \
                   hwloc-libs \
@@ -98,17 +95,12 @@ jobs:
               echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/hdf5.conf
               echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/libtiff.conf
 
-              # Update the system linker cache to find all libraries (system and custom)
-              # Note: The "is not a symbolic link" warnings from ldconfig are informational and harmless.
-              # The linker will still find and use the libraries correctly.
+              # Update the system linker cache
               ldconfig
 
           %environment
-              # This environment sources the SCL script.
-              # This is the official way to make the GCC runtime available.
               source /opt/rh/gcc-toolset-11/enable
               export LC_ALL=C
-              # LD_LIBRARY_PATH is no longer needed because ldconfig handles everything.
           EOF
 
           echo "Building final SIF..."
