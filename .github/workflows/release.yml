@@ -57,56 +57,52 @@ jobs:
           STAGING_DIR=$(mktemp -d)
           echo "Using staging directory: $STAGING_DIR"
 
-          echo "Copying compiled application binaries and custom libraries..."
+          echo "Copying compiled application binaries and custom libraries to staging area..."
+          # Copy only what we built from source: the app and the contents of /opt and /usr/local
           cp -r ./build/apps "$STAGING_DIR/"
           sudo apptainer exec \
             --bind "$STAGING_DIR:/staging" \
             ./dependency_image.sif \
             bash -c 'tar chf - /opt /usr/local | (cd /staging && tar xf -)'
-
-          sudo chown -R $(whoami):$(whoami) "$STAGING_DIR"
-
-          
-          # --------------------------------------------------------------------
-          # ▼▼▼ THIS IS THE NEW, CRITICAL PART THAT WAS NEVER TRIED BEFORE ▼▼▼
-          # --------------------------------------------------------------------
-          echo "--- Manually Copying Critical Runtime Libraries ---"
-          mkdir -p "$STAGING_DIR/usr/lib64"
-          # We physically copy the exact files we need from the build container.
-          # This bypasses the failing package manager.
-          sudo apptainer exec ./dependency_image.sif \
-            cp /opt/rh/gcc-toolset-11/root/usr/lib64/libgfortran.so.5 "$STAGING_DIR/usr/lib64/"
-          sudo apptainer exec ./dependency_image.sif \
-            cp /opt/rh/gcc-toolset-11/root/usr/lib64/libgomp.so.1 "$STAGING_DIR/usr/lib64/"
-          # --------------------------------------------------------------------
-          # ▲▲▲ THIS IS THE NEW, CRITICAL PART THAT WAS NEVER TRIED BEFORE ▲▲▲
-          # --------------------------------------------------------------------
-
+            
           echo "Creating final Singularity definition file..."
           cat > Singularity.final.def <<-EOF
           Bootstrap: docker
           From: quay.io/rockylinux/rockylinux:8
 
           %files
-              # Copy everything from the staging area into the final container
+              # Copy our custom-built application and libraries from the staging area
               "$STAGING_DIR/apps" /usr/bin/
               "$STAGING_DIR/opt" /
               "$STAGING_DIR/usr/local" /usr/
-              # This copies our manually extracted libraries into a standard system path
-              "$STAGING_DIR/usr/lib64" /usr/
 
           %post
-              # Install only the absolute bare-minimum system dependencies
+              # Install the essential RUNTIME dependencies for our custom libraries
               dnf install -y \
-                  hwloc-libs libevent libjpeg-turbo libibverbs coreutils && \
+                  gcc-toolset-11-runtime \
+                  hwloc-libs \
+                  libevent \
+                  libjpeg-turbo \
+                  libibverbs \
+                  coreutils && \
               dnf clean all -y
-              # Update the linker cache to find ALL libraries
+              
+              # Create linker cache config files for custom library locations
+              echo "/usr/local/lib" > /etc/ld.so.conf.d/usrlocal.conf
+              echo "/opt/amrex/25.03/lib" > /etc/ld.so.conf.d/amrex.conf
+              echo "/opt/hypre/v2.32.0/lib" > /etc/ld.so.conf.d/hypre.conf
+              echo "/opt/hdf5/1.12.3/lib" > /etc/ld.so.conf.d/hdf5.conf
+              echo "/opt/libtiff/4.6.0/lib" > /etc/ld.so.conf.d/libtiff.conf
+
+              # Update the system linker cache to find all libraries (system and custom)
               ldconfig
 
           %environment
-              # LD_LIBRARY_PATH is still good practice for our custom /opt and /usr/local libs
+              # This environment sources the SCL script.
+              # This is the official way to make the GCC runtime available.
+              source /opt/rh/gcc-toolset-11/enable
               export LC_ALL=C
-              export LD_LIBRARY_PATH="/usr/local/lib:/opt/amrex/25.03/lib:/opt/hypre/v2.32.0/lib:/opt/hdf5/1.12.3/lib:/opt/libtiff/4.6.0/lib:\${LD_LIBRARY_PATH}"
+              # LD_LIBRARY_PATH is no longer needed because ldconfig handles everything.
           EOF
 
           echo "Building final SIF..."
