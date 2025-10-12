@@ -583,7 +583,124 @@ int main (int argc, char* argv[])
                 }
 
             } else if (main_calculation_method == "flow_through") {
-                amrex::Print() << "Full domain flow-through calculation (placeholder/not implemented here)." << std::endl;
+                } else if (main_calculation_method == "flow_through") {
+    // ===================================================================================
+    // --- Tortuosity via Flow-Through (Laplacian Solve) - Implemented Logic ---
+    // This block calculates tortuosity by solving a potential equation (Laplace's)
+    // with Dirichlet boundary conditions on inlet/outlet faces and Neumann (no-flux)
+    // conditions on the side walls. It uses the TortuosityHypre class.
+    // ===================================================================================
+
+    if (main_verbose >= 1 && amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "\n--- Full Domain Calculation: Tortuosity via Flow-Through ---\n";
+    }
+
+    // --- Get Tortuosity-Specific Parameters ---
+    // Set default boundary condition values for the potential field
+    amrex::Real vlo = -1.0;
+    amrex::Real vhi = 1.0;
+
+    // Allow users to override these defaults from a [tortuosity] block in the inputs file
+    // for better organization, e.g., tortuosity.vlo = 0.0
+    amrex::ParmParse pp_tort("tortuosity");
+    pp_tort.query("vlo", vlo);
+    pp_tort.query("vhi", vhi);
+
+    // --- Calculate Volume Fraction (Prerequisite for Tortuosity) ---
+    if (main_verbose > 0) amrex::Print() << "Calculating Volume Fraction for Phase ID: " << main_phase_id_analysis << "\n";
+    OpenImpala::VolumeFraction vf_calc(mf_phase_full, main_phase_id_analysis);
+    amrex::Real volume_fraction = vf_calc.value();
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        amrex::Print() << "  Volume Fraction = " << std::fixed << std::setprecision(8) << volume_fraction << "\n";
+    }
+
+    // --- Parse Directions to Run ---
+    // This logic handles "All", "X", "Y", "Z", or space-separated lists like "X Z"
+    std::map<std::string, amrex::Real> tortuosity_results;
+    std::string direction_str;
+    amrex::ParmParse pp; // Top-level ParmParse to get "direction"
+    pp.get("direction", direction_str);
+    std::string upper_direction_str = direction_str;
+    std::transform(upper_direction_str.begin(), upper_direction_str.end(), upper_direction_str.begin(), ::toupper);
+
+    std::vector<OpenImpala::Direction> directions_to_run;
+    if (upper_direction_str.find("ALL") != std::string::npos) {
+        directions_to_run = {OpenImpala::Direction::X, OpenImpala::Direction::Y, OpenImpala::Direction::Z};
+    } else {
+        std::stringstream ss(upper_direction_str);
+        std::string single_dir;
+        while (ss >> single_dir) {
+            if (single_dir == "X") directions_to_run.push_back(OpenImpala::Direction::X);
+            else if (single_dir == "Y") directions_to_run.push_back(OpenImpala::Direction::Y);
+            else if (single_dir == "Z") directions_to_run.push_back(OpenImpala::Direction::Z);
+        }
+    }
+
+    if (directions_to_run.empty()) {
+        amrex::Warning("No valid directions specified in 'direction' input. Skipping tortuosity calculation.");
+    }
+
+    // --- Main Calculation Loop for Each Direction ---
+    for (const auto& dir : directions_to_run) {
+        std::string dir_char = (dir == OpenImpala::Direction::X) ? "X" : (dir == OpenImpala::Direction::Y) ? "Y" : "Z";
+        if (main_verbose >= 1 && amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "\n--- Solving for Tortuosity in Direction: " << dir_char << " ---\n";
+        }
+
+        // Convert the solver string from the inputs file to the required enum type
+        auto solver_type_enum = stringToSolverType(main_solver_str);
+
+        // Create the main solver object for tortuosity
+        OpenImpala::TortuosityHypre tort_solver(
+            geom_full,
+            ba_full,
+            dm_full,
+            mf_phase_full,
+            volume_fraction,           // Pass the calculated VF
+            main_phase_id_analysis,    // The phase to solve within
+            dir,                       // The current direction to solve for
+            solver_type_enum,          // The HYPRE solver to use
+            main_results_path_str,     // The directory for plotfiles
+            vlo,                       // Low potential boundary value
+            vhi,                       // High potential boundary value
+            main_verbose,
+            (main_write_plotfile_full != 0)
+        );
+
+        // This call triggers the matrix setup, HYPRE solve, and flux calculation
+        amrex::Real tau = tort_solver.value();
+
+        // Store the result in a map to be written to file later
+        tortuosity_results["Tortuosity_" + dir_char] = tau;
+
+        if (amrex::ParallelDescriptor::IOProcessor()) {
+            amrex::Print() << "  >>> Calculated Tortuosity (" << dir_char << "): " << std::fixed << std::setprecision(8) << tau << " <<<\n";
+        }
+    }
+
+    // --- Write Final Summary Results to File ---
+    if (amrex::ParallelDescriptor::IOProcessor()) {
+        std::filesystem::path output_filepath = std::filesystem::path(main_results_path_str) / output_filename;
+        amrex::Print() << "\nWriting final results to: " << output_filepath << "\n";
+
+        std::ofstream outfile(output_filepath);
+        if (outfile.is_open()) {
+            outfile << "# Tortuosity Calculation Results (Flow-Through Method)\n";
+            outfile << "# Input File: " << main_filename << "\n";
+            outfile << "# Analysis Phase ID: " << main_phase_id_analysis << "\n";
+            outfile << "# -----------------------------\n";
+            outfile << "VolumeFraction: " << std::fixed << std::setprecision(9) << volume_fraction << "\n";
+            for (const auto& pair : tortuosity_results) {
+                // pair.first is the string (e.g., "Tortuosity_X")
+                // pair.second is the value (the calculated tau)
+                outfile << pair.first << ": " << std::fixed << std::setprecision(9) << pair.second << "\n";
+            }
+            outfile.close();
+        } else {
+            amrex::Warning("Could not open output file for writing: " + output_filepath.string());
+        }
+    }
+}
             }
         }
 
@@ -598,3 +715,4 @@ int main (int argc, char* argv[])
     HYPRE_Finalize(); 
     return 0;
 }
+
