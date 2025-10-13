@@ -186,6 +186,8 @@ int main (int argc, char* argv[])
         int main_verbose = 1;
         int main_write_plotfile_full = 0; 
         std::string main_calculation_method = "homogenization"; 
+        std::string output_filename = "results.txt"; // Added this line
+
 
         bool rev_do_study = false;
         int rev_num_samples = 3;
@@ -208,6 +210,7 @@ int main (int argc, char* argv[])
             pp.query("verbose", main_verbose);
             pp.query("write_plotfile", main_write_plotfile_full);
             pp.query("calculation_method", main_calculation_method);
+            pp.query("output_filename", output_filename); // Added this line
 
             amrex::ParmParse ppr("rev"); 
             ppr.query("do_study", rev_do_study);
@@ -582,8 +585,7 @@ int main (int argc, char* argv[])
                     if (amrex::ParallelDescriptor::IOProcessor()) amrex::Print() << "Full domain D_eff calculation skipped due to chi_k non-convergence.\n";
                 }
 
-            } else if (main_calculation_method == "flow_through") {
-                } else if (main_calculation_method == "flow_through") {
+           } else if (main_calculation_method == "flow_through") {
     // ===================================================================================
     // --- Tortuosity via Flow-Through (Laplacian Solve) - Implemented Logic ---
     // This block calculates tortuosity by solving a potential equation (Laplace's)
@@ -601,7 +603,6 @@ int main (int argc, char* argv[])
     amrex::Real vhi = 1.0;
 
     // Allow users to override these defaults from a [tortuosity] block in the inputs file
-    // for better organization, e.g., tortuosity.vlo = 0.0
     amrex::ParmParse pp_tort("tortuosity");
     pp_tort.query("vlo", vlo);
     pp_tort.query("vhi", vhi);
@@ -609,13 +610,20 @@ int main (int argc, char* argv[])
     // --- Calculate Volume Fraction (Prerequisite for Tortuosity) ---
     if (main_verbose > 0) amrex::Print() << "Calculating Volume Fraction for Phase ID: " << main_phase_id_analysis << "\n";
     OpenImpala::VolumeFraction vf_calc(mf_phase_full, main_phase_id_analysis);
-    amrex::Real volume_fraction = vf_calc.value();
+
+    // FIX 1: The 'value()' method was called without arguments.
+    // The correct function signature is 'void value(long long&, long long&, bool)',
+    // which requires variables to be passed by reference to store the results.
+    long long phase_voxels = 0;
+    long long total_voxels = 0;
+    vf_calc.value(phase_voxels, total_voxels, false); // Call with the required arguments
+    amrex::Real volume_fraction = (total_voxels > 0) ? (static_cast<amrex::Real>(phase_voxels) / static_cast<amrex::Real>(total_voxels)) : 0.0;
+
     if (amrex::ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "  Volume Fraction = " << std::fixed << std::setprecision(8) << volume_fraction << "\n";
     }
 
     // --- Parse Directions to Run ---
-    // This logic handles "All", "X", "Y", "Z", or space-separated lists like "X Z"
     std::map<std::string, amrex::Real> tortuosity_results;
     std::string direction_str;
     amrex::ParmParse pp; // Top-level ParmParse to get "direction"
@@ -647,8 +655,11 @@ int main (int argc, char* argv[])
             amrex::Print() << "\n--- Solving for Tortuosity in Direction: " << dir_char << " ---\n";
         }
 
-        // Convert the solver string from the inputs file to the required enum type
-        auto solver_type_enum = stringToSolverType(main_solver_str);
+        // FIX 2: The 'stringToSolverType' function returns an 'EffectiveDiffusivityHypre::SolverType',
+        // but the TortuosityHypre constructor requires a 'TortuosityHypre::SolverType'.
+        // We must cast the enum to the correct type.
+        auto solver_type_enum_effdiff = stringToSolverType(main_solver_str);
+        auto solver_type_enum = static_cast<OpenImpala::TortuosityHypre::SolverType>(solver_type_enum_effdiff);
 
         // Create the main solver object for tortuosity
         OpenImpala::TortuosityHypre tort_solver(
@@ -656,21 +667,19 @@ int main (int argc, char* argv[])
             ba_full,
             dm_full,
             mf_phase_full,
-            volume_fraction,           // Pass the calculated VF
-            main_phase_id_analysis,    // The phase to solve within
-            dir,                       // The current direction to solve for
-            solver_type_enum,          // The HYPRE solver to use
-            main_results_path_str,     // The directory for plotfiles
-            vlo,                       // Low potential boundary value
-            vhi,                       // High potential boundary value
+            volume_fraction,
+            main_phase_id_analysis,
+            dir,
+            solver_type_enum, // Pass the correctly typed enum
+            main_results_path_str,
+            vlo,
+            vhi,
             main_verbose,
             (main_write_plotfile_full != 0)
         );
 
-        // This call triggers the matrix setup, HYPRE solve, and flux calculation
         amrex::Real tau = tort_solver.value();
 
-        // Store the result in a map to be written to file later
         tortuosity_results["Tortuosity_" + dir_char] = tau;
 
         if (amrex::ParallelDescriptor::IOProcessor()) {
@@ -680,6 +689,11 @@ int main (int argc, char* argv[])
 
     // --- Write Final Summary Results to File ---
     if (amrex::ParallelDescriptor::IOProcessor()) {
+        // FIX 3: 'output_filename' was not declared. I added its declaration
+        // and ParmParse query at the top of the main() function.
+        std::string output_filename = "results.txt"; // Default value
+        pp.query("output_filename", output_filename); // Read from inputs
+
         std::filesystem::path output_filepath = std::filesystem::path(main_results_path_str) / output_filename;
         amrex::Print() << "\nWriting final results to: " << output_filepath << "\n";
 
@@ -691,8 +705,6 @@ int main (int argc, char* argv[])
             outfile << "# -----------------------------\n";
             outfile << "VolumeFraction: " << std::fixed << std::setprecision(9) << volume_fraction << "\n";
             for (const auto& pair : tortuosity_results) {
-                // pair.first is the string (e.g., "Tortuosity_X")
-                // pair.second is the value (the calculated tau)
                 outfile << pair.first << ": " << std::fixed << std::setprecision(9) << pair.second << "\n";
             }
             outfile.close();
@@ -715,4 +727,5 @@ int main (int argc, char* argv[])
     HYPRE_Finalize(); 
     return 0;
 }
+
 
