@@ -253,8 +253,11 @@ int main (int argc, char* argv[])
                  throw std::runtime_error("File has no extension: " + full_input_path.string());
             }
             
-            int reader_phase_active = main_phase_id_analysis;
-            int reader_phase_inactive = (main_phase_id_analysis == 0 ? 1 : 0);
+            // Always map voxels > threshold to 1 and <= threshold to 0.
+            // This creates a consistent binary map. The phase_id variable will be
+            // used later to tell the solver which number (0 or 1) to analyze.
+            const int reader_phase_active = 1;
+            const int reader_phase_inactive = 0;
 
             if (ext == ".tif" || ext == ".tiff") {
                 OpenImpala::TiffReader reader(full_input_path.string());
@@ -726,6 +729,7 @@ int main (int argc, char* argv[])
     HYPRE_Finalize(); 
     return 0;
 }
+
 
 
 
