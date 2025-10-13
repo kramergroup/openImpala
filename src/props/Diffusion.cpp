@@ -713,8 +713,7 @@ int main (int argc, char* argv[])
         }
     }
 }
-            }
-        }
+
 
 
         amrex::Real master_stop_time = amrex::second() - master_strt_time;
@@ -727,5 +726,6 @@ int main (int argc, char* argv[])
     HYPRE_Finalize(); 
     return 0;
 }
+
 
 
