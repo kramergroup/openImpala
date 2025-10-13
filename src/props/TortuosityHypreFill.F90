@@ -13,10 +13,7 @@ module tortuosity_poisson_3d_module
   integer, parameter :: direction_y = 1
   integer, parameter :: direction_z = 2
 
-  ! Component index for phase data in MultiFab 'p' (Fortran 1-based)
-  ! NOTE: Phase array 'p' might become optional if mask fully determines activity
   integer, parameter :: comp_phase = 1
-  ! Component index for mask data (assuming 1 component in mask FAB)
   integer, parameter :: comp_mask = 1
 
   ! Stencil indices (0-based, matching C++ HYPRE_StructStencilSetElement order)
@@ -39,39 +36,32 @@ module tortuosity_poisson_3d_module
 contains
 
   ! ::: -----------------------------------------------------------
-  ! ::: Fills HYPRE matrix coefficients for a Poisson equation within a box.
-  ! ::: Uses an activity_mask (1=active, 0=inactive) derived from
-  ! ::: geometric analysis (e.g., percolation check) to determine
-  ! ::: which cells participate in the solve.
-  ! ::: Inactive cells are decoupled (Aii=1, Aij=0, bi=0, xinit=0).
-  ! ::: Active cells have the Laplacian assembled only considering
-  ! ::: connections to other active cells (Neumann at boundary with inactive).
-  ! ::: Dirichlet BCs overwrite at domain boundaries perp. to flow.
-  ! ::: Includes detailed debugging output if debug_print_level >= 3.
+  ! ::: Fills HYPRE matrix coefficients for a Poisson equation.
+  ! ::: Constructs the matrix for cells that belong to the specified 'phase'
+  ! ::: AND are marked as active in the 'active_mask' (i.e., part of a
+  ! ::: percolating path).
   ! ::: -----------------------------------------------------------
   subroutine tortuosity_fillmtx(a, rhs, xinit, nval, &
-                                p, p_lo, p_hi, &                ! Phase (Optional if mask is sufficient)
-                                active_mask, mask_lo, mask_hi, & ! Activity Mask
-                                bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase_unused, dir, &
-                                debug_print_level) bind(c)       ! <<< NEW Debug Level Argument
-                                ! Renamed 'phase' arg to 'phase_unused' as mask should control activity
+                                p, p_lo, p_hi, &
+                                active_mask, mask_lo, mask_hi, &
+                                bxlo, bxhi, domlo, domhi, dxinv, vlo, vhi, phase, dir, &
+                                debug_print_level) bind(c)
 
     ! Argument declarations
     integer,            intent(in)  :: nval
     real(amrex_real),   intent(out) :: a(0:nval*nstencil-1), rhs(nval), xinit(nval)
     integer,            intent(in)  :: p_lo(3), p_hi(3)
     integer,            intent(in)  :: p(p_lo(1):p_hi(1), p_lo(2):p_hi(2), p_lo(3):p_hi(3), *)
-    integer,            intent(in)  :: mask_lo(3), mask_hi(3)        ! <<< NEW
-    integer,            intent(in)  :: active_mask(mask_lo(1):mask_hi(1), & ! <<< NEW
+    integer,            intent(in)  :: mask_lo(3), mask_hi(3)
+    integer,            intent(in)  :: active_mask(mask_lo(1):mask_hi(1), &
                                                      mask_lo(2):mask_hi(2), &
-                                                     mask_lo(3):mask_hi(3)) !, *) ! Assume 1 component
+                                                     mask_lo(3):mask_hi(3))
     integer,            intent(in)  :: bxlo(3), bxhi(3)
     integer,            intent(in)  :: domlo(3), domhi(3)
     real(amrex_real),   intent(in)  :: dxinv(3) ! [1/dx^2, 1/dy^2, 1/dz^2]
     real(amrex_real),   intent(in)  :: vlo, vhi
-    integer,            intent(in)  :: phase_unused, dir ! phase_id is no longer directly used for matrix construction
-                                                       ! Mask determines activity
-    integer,            intent(in)  :: debug_print_level          ! <<< NEW
+    integer,            intent(in)  :: phase, dir ! The phase ID to solve for
+    integer,            intent(in)  :: debug_print_level
 
     ! Local variables
     integer :: i, j, k, m_idx, stencil_idx_start, s_idx
@@ -79,9 +69,9 @@ contains
     real(amrex_real) :: diag_val, coeff_x, coeff_y, coeff_z
     real(amrex_real) :: domain_extent, factor
     logical :: on_dirichlet_boundary
-    integer :: neighbor_mask_val ! To store neighbor mask value
+    logical :: has_inactive_neighbor
     ! Debugging variables
-    logical :: print_this_cell, near_boundary, has_inactive_neighbor
+    logical :: print_this_cell, near_boundary
     real(amrex_real) :: off_diag_sum, diag_ratio
     character(len=200) :: fmt_str ! Format string for printing
 
@@ -116,8 +106,9 @@ contains
           near_boundary = .false.
           has_inactive_neighbor = .false.
 
-          ! --- Check Activity Mask ---
-          if ( active_mask(i,j,k) == cell_inactive ) then
+          ! --- Check if the cell is part of the simulation ---
+          ! It must both be in the correct phase AND part of the percolating mask.
+          if ( p(i,j,k,comp_phase) /= phase .or. active_mask(i,j,k) == cell_inactive ) then
               ! --- Apply Explicit Decoupling for INACTIVE cells ---
               a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real
               a(stencil_idx_start + istn_c) = 1.0_amrex_real
@@ -126,54 +117,48 @@ contains
               cycle ! Skip to next (i,j,k)
           end if
 
-          ! --- If we reach here, cell (i,j,k) is ACTIVE ---
-          ! --- Assemble stencil based on ACTIVE neighbors ---
+          ! --- If we reach here, cell (i,j,k) is ACTIVE and in the correct PHASE ---
           diag_val = 0.0_amrex_real
           a(stencil_idx_start : stencil_idx_start + nstencil - 1) = 0.0_amrex_real ! Initialize stencil row to zero
 
+          ! --- Assemble stencil based on ACTIVE neighbors in the same PHASE ---
           ! -X face
-          neighbor_mask_val = active_mask(i-1, j, k) ! Assumes mask has ghost cells filled
-          if ( neighbor_mask_val == cell_active ) then
+          if ( p(i-1,j,k,comp_phase) == phase .and. active_mask(i-1,j,k) == cell_active ) then
              a(stencil_idx_start + istn_mx) = -coeff_x
              diag_val = diag_val + coeff_x
           else
-             has_inactive_neighbor = .true. ! Active cell next to inactive cell
+             has_inactive_neighbor = .true.
           end if
           ! +X face
-          neighbor_mask_val = active_mask(i+1, j, k)
-          if ( neighbor_mask_val == cell_active ) then
+          if ( p(i+1,j,k,comp_phase) == phase .and. active_mask(i+1,j,k) == cell_active ) then
              a(stencil_idx_start + istn_px) = -coeff_x
              diag_val = diag_val + coeff_x
           else
              has_inactive_neighbor = .true.
           end if
           ! -Y face
-          neighbor_mask_val = active_mask(i, j-1, k)
-          if ( neighbor_mask_val == cell_active ) then
+          if ( p(i,j-1,k,comp_phase) == phase .and. active_mask(i,j-1,k) == cell_active ) then
              a(stencil_idx_start + istn_my) = -coeff_y
              diag_val = diag_val + coeff_y
           else
              has_inactive_neighbor = .true.
           end if
           ! +Y face
-          neighbor_mask_val = active_mask(i, j+1, k)
-          if ( neighbor_mask_val == cell_active ) then
+          if ( p(i,j+1,k,comp_phase) == phase .and. active_mask(i,j+1,k) == cell_active ) then
              a(stencil_idx_start + istn_py) = -coeff_y
              diag_val = diag_val + coeff_y
           else
              has_inactive_neighbor = .true.
           end if
           ! -Z face
-          neighbor_mask_val = active_mask(i, j, k-1)
-          if ( neighbor_mask_val == cell_active ) then
+          if ( p(i,j,k-1,comp_phase) == phase .and. active_mask(i,j,k-1) == cell_active ) then
              a(stencil_idx_start + istn_mz) = -coeff_z
              diag_val = diag_val + coeff_z
           else
              has_inactive_neighbor = .true.
           end if
            ! +Z face
-          neighbor_mask_val = active_mask(i, j, k+1)
-          if ( neighbor_mask_val == cell_active ) then
+          if ( p(i,j,k+1,comp_phase) == phase .and. active_mask(i,j,k+1) == cell_active ) then
              a(stencil_idx_start + istn_pz) = -coeff_z
              diag_val = diag_val + coeff_z
           else
