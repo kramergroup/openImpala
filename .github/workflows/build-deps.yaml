@@ -1,0 +1,40 @@
+# .github/workflows/build-deps.yml
+name: Build and Release Dependency SIF
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag for this dependency release (e.g., deps-v1.0)'
+        required: true
+        default: 'deps-v1.0'
+
+jobs:
+  build-and-release-deps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create a release
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Apptainer
+        uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: 1.2.5
+
+      - name: Build Dependency SIF
+        run: |
+          echo "Building dependency_image.sif from containers/Singularity.deps.def..."
+          sudo apptainer build dependency_image.sif containers/Singularity.deps.def
+
+      - name: Create GitHub Release and Upload Dependency SIF
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          name: Dependency Container ${{ github.event.inputs.release_tag }}
+          body: "This release contains the pre-built dependency container (dependency_image.sif) for developer use. It is NOT the application binary."
+          files: dependency_image.sif
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
