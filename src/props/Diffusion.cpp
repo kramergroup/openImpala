@@ -664,16 +664,31 @@ int main (int argc, char* argv[])
         auto solver_type_enum_effdiff = stringToSolverType(main_solver_str);
         auto solver_type_enum = static_cast<OpenImpala::TortuosityHypre::SolverType>(solver_type_enum_effdiff);
 
+       // ======================= NEW CODE TO ADD =======================
+        // The main geom_full is periodic, but Tortuosity requires a
+        // non-periodic geometry to have distinct inlet/outlet faces.
+        // We must create a new geometry object for this specific calculation.
+        amrex::Geometry geom_tortuosity;
+        {
+            amrex::RealBox rb_nonperiodic = geom_full.ProbDomain();
+            amrex::Box domain_box_nonperiodic = geom_full.Domain();
+            amrex::Array<int,AMREX_SPACEDIM> is_periodic_nonperiodic = {AMREX_D_DECL(0,0,0)}; // 0 = Not Periodic
+            geom_tortuosity.define(domain_box_nonperiodic, &rb_nonperiodic, 0, is_periodic_nonperiodic.data());
+        }
+        // ===================== END OF NEW CODE =======================
+
+
         // Create the main solver object for tortuosity
+        // *** NOTE: Pass the NEW geom_tortuosity object here ***
         OpenImpala::TortuosityHypre tort_solver(
-            geom_full,
+            geom_tortuosity, // <<< USE THE CORRECT GEOMETRY
             ba_full,
             dm_full,
             mf_phase_full,
             volume_fraction,
             main_phase_id_analysis,
             dir,
-            solver_type_enum, // Pass the correctly typed enum
+            solver_type_enum,
             main_results_path_str,
             vlo,
             vhi,
@@ -729,6 +744,7 @@ int main (int argc, char* argv[])
     HYPRE_Finalize(); 
     return 0;
 }
+
 
 
 
