@@ -1,8 +1,16 @@
-# OpenImpala
+# OpenImpala (Archived)
+
+> **⚠️ ARCHIVAL NOTICE: ACTIVE DEVELOPMENT HAS MOVED ⚠️**
+>
+> This repository (`kramergroup/openimpala`) serves as a static, historical archive. It contains the OpenImpala codebase exactly as it was at the conclusion of its original PhD development phase. 
+> 
+> **For the modern v3.0 codebase, active development, and current maintenance, please visit our new primary repository: [BASE-Laboratory/OpenImpala](https://github.com/BASE-Laboratory/OpenImpala)**
+>
+> The code and instructions below remain frozen in time to ensure the strict reproducibility of the original PhD thesis and the associated SoftX publication.
 
 <img src="https://user-images.githubusercontent.com/37665786/93309082-002ca800-f7fb-11ea-9ce7-d57b3e80c6ec.jpg" width="800" />
 
-### OPEN source IMage based PArallelisable Linear Algebra solver
+### OPEN source IMage based PArallelisable Linear Algebra solver (Archived)
 
 [![https://img.shields.io/badge/hosted-sylabs-blue](https://img.shields.io/badge/hosted-sylabs-blue)](https://cloud.sylabs.io/library/_container/60868eb84ad4aa1fdea0c62b) [![Pipeline Status](https://gitlab.com/JleHoux/openImpala/badges/master/pipeline.svg)](https://gitlab.com/JleHoux/openImpala/commits/master) [![https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2021.100729-blue](https://img.shields.io/badge/DOI-10.1016%2Fj.softx.2021.100729-blue)](https://doi.org/10.1016/j.softx.2021.100729)
 
